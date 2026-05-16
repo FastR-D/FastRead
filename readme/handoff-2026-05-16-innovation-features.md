@@ -133,6 +133,46 @@ npm run build
 - `lottie-web` 仍有既有 eval 警告。
 - 这些警告没有阻塞构建，不是本轮新增错误。
 
+### Docker 启动验证补充
+
+当前也可直接用 Docker 启动：
+
+```powershell
+docker compose up -d --build
+```
+
+默认入口：
+
+```text
+http://127.0.0.1:3015/
+```
+
+后端健康检查走 Nginx：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
+Invoke-RestMethod http://127.0.0.1:3015/api/sys_health
+```
+
+容器内检查：
+
+```powershell
+docker compose exec -T backend curl -sS http://127.0.0.1:8483/api/sys_check
+docker compose exec -T backend curl -sS http://127.0.0.1:8483/api/sys_health
+```
+
+预期返回：
+
+```json
+{"code":0,"msg":"success","data":null}
+```
+
+只重建后端：
+
+```powershell
+docker compose up -d --build backend
+```
+
 ## 当前工作树注意事项
 
 本轮功能改动未提交。

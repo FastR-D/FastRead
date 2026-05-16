@@ -232,15 +232,24 @@ async def sys_check():
 @router.get("/deploy_status")
 async def deploy_status():
     """返回部署监控所需的所有状态信息"""
-    import torch
     import os
-    
+
     # CUDA 状态
-    cuda_available = torch.cuda.is_available()
+    try:
+        import torch
+        cuda_available = torch.cuda.is_available()
+        cuda_version = torch.version.cuda if cuda_available else None
+        gpu_name = torch.cuda.get_device_name(0) if cuda_available else None
+    except Exception as e:
+        logger.warning(f"CUDA 状态检查跳过: {e}")
+        cuda_available = False
+        cuda_version = None
+        gpu_name = None
+
     cuda_info = {
         "available": cuda_available,
-        "version": torch.version.cuda if cuda_available else None,
-        "gpu_name": torch.cuda.get_device_name(0) if cuda_available else None,
+        "version": cuda_version,
+        "gpu_name": gpu_name,
     }
     
     # Whisper 模型状态（从配置文件读取，与前端设置同步）

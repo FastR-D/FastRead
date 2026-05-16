@@ -6,8 +6,8 @@
 .DS_Store
 
 # Tauri 构建产物（非常大）
-BillNote_frontend/src-tauri/target
-BillNote_frontend/src-tauri/bin
+reel-mind-frontend/src-tauri/target
+reel-mind-frontend/src-tauri/bin
 
 # 运行时数据
 backend/data
@@ -21,9 +21,11 @@ backend/bin/
 
 # 依赖和构建缓存
 node_modules/
+**/node_modules/
 __pycache__/
 *.py[cod]
 dist/
+**/dist/
 build/
 *.tar
 *.egg-info/

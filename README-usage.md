@@ -1,10 +1,10 @@
-# ReelMind 使用说明
+# Reel Mind 使用说明
 
 更新时间：2026-05-15
 
 ## 当前 demo 能做什么
 
-这个仓库已经收口成 ReelMind 的 demo 版本，当前优先面向抖音精选知识视频。
+这个仓库已经收口成 Reel Mind 的 demo 版本，当前优先面向抖音精选知识视频。
 
 当前可跑通的主流程：
 
@@ -30,12 +30,89 @@
 
 ## 启动方式
 
-推荐使用 demo 端口，避免和旧进程冲突：
+推荐优先使用 Docker 启动整套 demo；如果要调试源码，再使用源码端口。
+
+### 方式一：Docker 启动整套服务
+
+在仓库根目录执行：
+
+```powershell
+docker compose up -d --build
+```
+
+默认访问地址：
+
+```text
+http://127.0.0.1:3015/
+```
+
+Docker 模式下，后端容器内部监听 `8483`，宿主机通过 Nginx 的 `3015` 端口访问 API：
+
+```text
+http://127.0.0.1:3015/api/sys_check
+http://127.0.0.1:3015/api/sys_health
+```
+
+正常返回：
+
+```json
+{"code":0,"msg":"success","data":null}
+```
+
+查看服务状态：
+
+```powershell
+docker compose ps
+```
+
+只看后端日志：
+
+```powershell
+docker compose logs --tail=80 backend
+```
+
+只重建后端：
+
+```powershell
+docker compose up -d --build backend
+```
+
+容器内后端健康检查：
+
+```powershell
+docker compose exec -T backend curl -sS http://127.0.0.1:8483/api/sys_check
+docker compose exec -T backend curl -sS http://127.0.0.1:8483/api/sys_health
+```
+
+停止服务：
+
+```powershell
+docker compose down
+```
+
+如果机器上之前跑过旧容器名，执行一次完整重建会切到当前命名：
+
+```powershell
+docker compose down
+docker compose up -d --build
+```
+
+当前容器名应为：
+
+```text
+reel-mind-backend
+reel-mind-frontend
+reel-mind-nginx
+```
+
+### 方式二：源码开发启动
+
+源码开发推荐使用 demo 端口，避免和 Docker 或旧进程冲突：
 
 - 后端：`http://127.0.0.1:8493`
 - 前端：`http://127.0.0.1:3016`
 
-### 启动后端
+#### 启动后端
 
 在仓库根目录执行：
 
@@ -57,12 +134,12 @@ http://127.0.0.1:8493/api/sys_check
 {"code":0,"msg":"success","data":null}
 ```
 
-### 启动前端
+#### 启动前端
 
 另开一个终端，在仓库根目录执行：
 
 ```powershell
-cd BillNote_frontend
+cd reel-mind-frontend
 $env:VITE_API_BASE_URL="http://127.0.0.1:8493/api"
 npm run dev -- --host 127.0.0.1 --port 3016 --strictPort
 ```
@@ -74,6 +151,13 @@ http://127.0.0.1:3016
 ```
 
 不要直接打开 `http://127.0.0.1:8493`，那是后端 API 根路径，会返回 `{"detail":"Not Found"}`，这是正常现象。
+
+Docker 模式不要访问 `8493`，应访问：
+
+```text
+http://127.0.0.1:3015
+http://127.0.0.1:3015/api/sys_check
+```
 
 ## 使用流程
 
@@ -145,6 +229,12 @@ http://127.0.0.1:8493/api/get_downloader_cookie/douyin
 http://127.0.0.1:8493/api/downloader_cookie_status/douyin
 ```
 
+如果使用 Docker 启动，对应地址是：
+
+```text
+http://127.0.0.1:3015/api/downloader_cookie_status/douyin
+```
+
 正常情况下应看到：
 
 ```json
@@ -160,7 +250,7 @@ http://127.0.0.1:8493/api/downloader_cookie_status/douyin
 ### 推荐同步方式
 
 1. 在浏览器中打开抖音精选并登录。
-2. 打开 ReelMind 浏览器扩展 popup。
+2. 打开 Reel Mind 浏览器扩展 popup。
 3. 点击顶部 Cookie 状态块里的“同步 Cookie”。
 4. 返回 Web 前端设置页，点击“刷新状态”确认已配置。
 
@@ -191,10 +281,22 @@ backend/note_results/
 http://127.0.0.1:8493/api/task_status/{task_id}
 ```
 
+Docker 模式：
+
+```text
+http://127.0.0.1:3015/api/task_status/{task_id}
+```
+
 查看已生成知识卡片列表：
 
 ```text
 http://127.0.0.1:8493/api/tasks
+```
+
+Docker 模式：
+
+```text
+http://127.0.0.1:3015/api/tasks
 ```
 
 `/api/tasks` 当前优先从数据库读取任务记录和收藏元数据，并兼容读取旧的 `note_results` 文件。
@@ -228,6 +330,18 @@ http://127.0.0.1:3016
 ```
 
 后端只通过 `/api/...` 提供接口。
+
+Docker 模式下建议直接打开：
+
+```text
+http://127.0.0.1:3015
+```
+
+并用下面接口验证后端：
+
+```text
+http://127.0.0.1:3015/api/sys_check
+```
 
 ### 生成失败：第三方服务异常
 

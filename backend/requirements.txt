@@ -124,4 +124,5 @@ weasyprint==65.1
 webencodings==0.5.1
 websockets==15.0.1
 yarl==1.19.0
+yt-dlp==2025.1.26
 zopfli==0.2.3.post1

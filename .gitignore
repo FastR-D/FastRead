@@ -313,12 +313,12 @@ cython_debug/
 /backend/data/*
 /backend/static/*
 /backend/note_tasks.db
+/backend/*.db
 /backend/bin/
 /backend/logs/
 /backend/note_results
 /backend/models
 /backend/.idea/*
-/backend/bili_note.db
 /backend/uploads/*
 /backend/.idea/*
 /backend/config/*

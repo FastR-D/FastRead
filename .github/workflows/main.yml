@@ -59,7 +59,7 @@ jobs:
           node-version: '20'
 
       - name: Install frontend dependencies
-        working-directory: BillNote_frontend
+        working-directory: reel-mind-frontend
         run: pnpm install
 
       # 设置 Rust 环境
@@ -75,13 +75,13 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            BillNote_frontend/src-tauri/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('BillNote_frontend/src-tauri/Cargo.lock') }}
+            reel-mind-frontend/src-tauri/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('reel-mind-frontend/src-tauri/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       # 打包 Tauri 应用
       - name: Build Tauri App
-        working-directory: BillNote_frontend
+        working-directory: reel-mind-frontend
         run: pnpm tauri build
 
       # 收集产物到统一目录
@@ -89,7 +89,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-artifacts
-          BUNDLE_DIR="BillNote_frontend/src-tauri/target/release/bundle"
+          BUNDLE_DIR="reel-mind-frontend/src-tauri/target/release/bundle"
 
           # macOS: .dmg
           find "$BUNDLE_DIR" -name "*.dmg" -exec cp {} release-artifacts/ \; 2>/dev/null || true
@@ -143,7 +143,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: BiliNote ${{ github.ref_name }}
+          name: Reel Mind ${{ github.ref_name }}
           draft: false
           prerelease: false
           generate_release_notes: true

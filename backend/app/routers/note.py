@@ -6,7 +6,7 @@ from typing import Optional
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from dataclasses import asdict
 
 from app.enmus.exception import NoteErrorEnum
@@ -17,7 +17,7 @@ from app.services.insight_extractor import build_insights
 from app.services.task_serial_executor import task_serial_executor
 from app.utils.response import ResponseWrapper as R
 from app.utils.url_parser import extract_video_id
-from app.validators.video_url_validator import is_supported_video_url
+from app.validators.video_url_validator import SUPPORTED_PLATFORMS, is_supported_video_url
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 import httpx
@@ -55,6 +55,8 @@ class CollectionUpdateRequest(BaseModel):
 class OnlineVerificationRequest(BaseModel):
     task_id: str
     max_claims: int = 5
+    model_name: Optional[str] = None
+    provider_id: Optional[str] = None
 
 
 class VideoRequest(BaseModel):
@@ -82,18 +84,17 @@ class VideoRequest(BaseModel):
 
     @field_validator("platform")
     def validate_platform(cls, v):
-        if v != "douyin":
+        if v not in SUPPORTED_PLATFORMS:
             raise NoteError(code=NoteErrorEnum.PLATFORM_NOT_SUPPORTED.code,
-                            message="当前仅支持抖音精选视频")
+                            message="当前仅支持抖音精选、B站、快手视频")
         return v
 
-    @field_validator("video_url")
-    def validate_supported_url(cls, v):
-        url = str(v)
-        if not is_supported_video_url(url):
+    @model_validator(mode="after")
+    def validate_supported_url(self):
+        if not is_supported_video_url(str(self.video_url), self.platform):
             raise NoteError(code=NoteErrorEnum.PLATFORM_NOT_SUPPORTED.code,
-                            message="请输入抖音精选视频链接")
-        return v
+                            message="请输入所选平台的视频链接")
+        return self
 
 
 NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
@@ -172,6 +173,21 @@ def _get_note_insights(result: dict) -> Optional[dict]:
     except Exception as e:
         logger.warning(f"生成历史笔记洞察失败: {e}")
         return None
+
+
+def _build_verification_context(result: dict) -> str:
+    audio_meta = result.get("audio_meta") or {}
+    transcript = result.get("transcript") or {}
+    raw_info = audio_meta.get("raw_info") or {}
+    parts = [
+        f"标题：{audio_meta.get('title') or raw_info.get('title') or ''}",
+        f"平台：{audio_meta.get('platform') or ''}",
+        f"标签：{raw_info.get('tags') or raw_info.get('hashtags') or ''}",
+        f"视频简介：{raw_info.get('desc') or raw_info.get('caption') or ''}",
+        f"笔记内容：{result.get('markdown') or ''}",
+        f"转录全文：{transcript.get('full_text') or ''}",
+    ]
+    return "\n\n".join(str(part) for part in parts if str(part).strip())
 
 
 def _attach_note_insights(result: dict) -> dict:
@@ -349,7 +365,13 @@ def verify_task_online(data: OnlineVerificationRequest):
             return R.error(msg="当前任务没有可核验的主张", code=400)
 
         max_claims = max(1, min(int(data.max_claims or 5), 8))
-        insights["verification"] = verify_claims_online(verification, max_claims=max_claims)
+        insights["verification"] = verify_claims_online(
+            verification,
+            max_claims=max_claims,
+            model_name=data.model_name,
+            provider_id=data.provider_id,
+            context=_build_verification_context(result),
+        )
         result["insights"] = insights
 
         with open(result_path, "w", encoding="utf-8") as f:

@@ -1,7 +1,7 @@
 
 services:
   backend:
-    container_name: bilinote-backend
+    container_name: reel-mind-backend
     build:
       context: .
       dockerfile: backend/Dockerfile.gpu
@@ -26,17 +26,17 @@ services:
               capabilities: ["gpu"]
 
   frontend:
-    container_name: bilinote-frontend
+    container_name: reel-mind-frontend
     build:
       context: .
-      dockerfile: BillNote_frontend/Dockerfile
+      dockerfile: reel-mind-frontend/Dockerfile
     env_file:
       - .env
     expose:
       - "80"  # 不暴露给宿主机，只供 nginx 访问
 
   nginx:
-    container_name: bilinote-nginx
+    container_name: reel-mind-nginx
     image: nginx:1.25-alpine
     ports:
       - "${APP_PORT}:80"

@@ -49,6 +49,10 @@ def replace_content_markers(markdown: str, video_id: str, platform: str = 'douyi
             url = f"https://www.douyin.com/video/{video_id}"
             url = f"https://www.douyin.com/video/{safe_video_id}"
             return f"[原片 @ {mm}:{ss}]({url})"
+        if platform == 'bilibili':
+            return f"[原片 @ {mm}:{ss}](https://www.bilibili.com/video/{safe_video_id}?t={total_seconds})"
+        if platform == 'kuaishou':
+            return f"[原片 @ {mm}:{ss}](https://www.kuaishou.com/short-video/{safe_video_id})"
 
         return f"({mm}:{ss})"
 

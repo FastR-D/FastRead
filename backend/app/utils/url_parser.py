@@ -10,6 +10,20 @@ def extract_video_id(url: str, platform: str) -> Optional[str]:
     :param platform: 平台名；当前仅支持 douyin
     :return: 提取到的视频 ID 或 None
     """
+    if platform == "bilibili":
+        match = re.search(r"/video/(BV[0-9A-Za-z]+|av\d+)", url)
+        if match:
+            return match.group(1)
+        match = re.search(r"(?:bvid|aid)=([^&\s]+)", url)
+        return match.group(1) if match else None
+
+    if platform == "kuaishou":
+        match = re.search(r"/(?:short-video|photo)/([0-9A-Za-z_-]+)", url)
+        if match:
+            return match.group(1)
+        match = re.search(r"(?:photoId|fid)=([^&\s]+)", url)
+        return match.group(1) if match else None
+
     if platform != "douyin":
         return None
 

@@ -1,7 +1,7 @@
 
 services:
   backend:
-    container_name: bilinote-backend
+    container_name: reel-mind-backend
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -28,10 +28,10 @@ services:
     mem_limit: 4g
 
   frontend:
-    container_name: bilinote-frontend
+    container_name: reel-mind-frontend
     build:
       context: .
-      dockerfile: BillNote_frontend/Dockerfile
+      dockerfile: reel-mind-frontend/Dockerfile
       args:
         NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-mirror.gcr.io/library/node:20-alpine}
         NGINX_BASE_IMAGE: ${NGINX_BASE_IMAGE:-mirror.gcr.io/library/nginx:1.25-alpine}
@@ -43,7 +43,7 @@ services:
     mem_limit: 512m
 
   nginx:
-    container_name: bilinote-nginx
+    container_name: reel-mind-nginx
     image: ${NGINX_RUNTIME_IMAGE:-mirror.gcr.io/library/nginx:1.25-alpine}
     ports:
       - "${APP_PORT}:80"

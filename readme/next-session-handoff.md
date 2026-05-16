@@ -6,6 +6,63 @@
 
 本次已在 MVP 主线上继续完成以下内容：
 
+### 0.0 2026-05-16 Docker 启动与后端验证补充
+
+当前推荐优先用 Docker 启动整套服务：
+
+```powershell
+docker compose up -d --build
+```
+
+默认访问入口：
+
+```text
+Web:      http://127.0.0.1:3015/
+API:      http://127.0.0.1:3015/api/...
+健康检查: http://127.0.0.1:3015/api/sys_check
+```
+
+只重建后端：
+
+```powershell
+docker compose up -d --build backend
+```
+
+查看状态和日志：
+
+```powershell
+docker compose ps
+docker compose logs --tail=80 backend
+```
+
+容器内验证：
+
+```powershell
+docker compose exec -T backend curl -sS http://127.0.0.1:8483/api/sys_check
+docker compose exec -T backend curl -sS http://127.0.0.1:8483/api/sys_health
+```
+
+已验证返回：
+
+```json
+{"code":0,"msg":"success","data":null}
+```
+
+当前 compose 命名应为：
+
+```text
+reel-mind-backend
+reel-mind-frontend
+reel-mind-nginx
+```
+
+如果本机残留旧容器名，执行：
+
+```powershell
+docker compose down
+docker compose up -d --build
+```
+
 ### 0.1 收藏管理后端持久化
 
 已完成：
@@ -353,7 +410,9 @@ PRD 参考文件在：
 
 这些不能用全局替换硬改，必须按模块收缩。
 
-### 5.4 本地验证环境不完整
+### 5.4 本地验证环境不完整（历史记录）
+
+以下是 2026-05-15 当轮的历史状态；2026-05-16 已补充 Docker 验证，见本文档 0.0。
 
 本轮无法在当前 shell 中完成完整验证，原因是：
 

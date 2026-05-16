@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="./doc/icon.svg" alt="ReelMind Logo" width="72" height="72" />
+  <img src="./doc/icon.png" alt="Reel Mind Logo" width="72" height="72" />
 </p>
 
-<h1 align="center">ReelMind</h1>
+<h1 align="center">Reel Mind</h1>
 
 <p align="center">
   <strong>把知识视频变成可复习、可搜索、可追问的 AI 笔记</strong>
@@ -39,7 +39,7 @@
 
 ## 项目亮点
 
-ReelMind 当前版本已经收口为抖音精选知识视频演示版，重点验证从视频链接到知识资产的完整闭环。
+Reel Mind 当前版本已经收口为抖音精选知识视频演示版，重点验证从视频链接到知识资产的完整闭环。
 
 - **一键生成知识笔记**：输入抖音精选视频链接，自动解析视频信息、下载音频、转写内容并生成结构化 Markdown。
 - **思维导图视图**：从笔记中提取专用 `## 思维导图` 章节，使用 Markmap 渲染可视化知识结构。
@@ -52,15 +52,15 @@ ReelMind 当前版本已经收口为抖音精选知识视频演示版，重点�
 ## 界面预览
 
 <p align="center">
-  <img src="./doc/image1.png" alt="ReelMind Preview 1" width="860" />
+  <img src="./doc/image1.png" alt="Reel Mind Preview 1" width="860" />
 </p>
 
 <p align="center">
-  <img src="./doc/image3.png" alt="ReelMind Preview 2" width="860" />
+  <img src="./doc/image3.png" alt="Reel Mind Preview 2" width="860" />
 </p>
 
 <p align="center">
-  <img src="./doc/image4.png" alt="ReelMind Preview 3" width="860" />
+  <img src="./doc/image4.png" alt="Reel Mind Preview 3" width="860" />
 </p>
 
 ## 技术栈
@@ -96,13 +96,48 @@ http://127.0.0.1:3015/
 也可以在终端中手动启动：
 
 ```powershell
-docker compose up -d
+docker compose up -d --build
+```
+
+Docker 模式下，后端不直接暴露到宿主机；统一通过 Nginx 入口访问：
+
+```text
+Web:      http://127.0.0.1:3015/
+API:      http://127.0.0.1:3015/api/...
+健康检查: http://127.0.0.1:3015/api/sys_check
+```
+
+查看服务状态和日志：
+
+```powershell
+docker compose ps
+docker compose logs --tail=80 backend
+```
+
+只重建后端：
+
+```powershell
+docker compose up -d --build backend
+```
+
+容器内后端健康检查：
+
+```powershell
+docker compose exec -T backend curl -sS http://127.0.0.1:8483/api/sys_check
+docker compose exec -T backend curl -sS http://127.0.0.1:8483/api/sys_health
 ```
 
 停止服务：
 
 ```powershell
 docker compose down
+```
+
+如果本地还残留旧容器名，执行一次完整重建即可切换到 `reel-mind-backend`、`reel-mind-frontend`、`reel-mind-nginx`：
+
+```powershell
+docker compose down
+docker compose up -d --build
 ```
 
 ### 方式二：源码开发启动
@@ -138,7 +173,7 @@ http://127.0.0.1:8493/api/sys_check
 启动前端：
 
 ```powershell
-cd BillNote_frontend
+cd reel-mind-frontend
 npm install
 $env:VITE_API_BASE_URL="http://127.0.0.1:8493/api"
 npm run dev -- --host 127.0.0.1 --port 3016 --strictPort
@@ -215,12 +250,12 @@ backend/models/whisper/whisper-tiny
 
 ## 浏览器扩展
 
-扩展目录位于 `BillNote_extension/`，用于同步抖音 Cookie、提供 popup、设置页和视频页入口。
+扩展目录位于 `reel-mind-extension/`，用于同步抖音 Cookie、提供 popup、设置页和视频页入口。
 
 安装依赖：
 
 ```powershell
-cd BillNote_extension
+cd reel-mind-extension
 pnpm install
 ```
 
@@ -239,7 +274,7 @@ pnpm build
 构建产物会输出到：
 
 ```text
-BillNote_extension/extension/
+reel-mind-extension/extension/
 ```
 
 抖音详情接口依赖有效 Cookie。如果视频详情为空、提示需要登录或下载失败，优先检查：
@@ -251,7 +286,7 @@ http://127.0.0.1:8493/api/downloader_cookie_status/douyin
 推荐同步方式：
 
 1. 在浏览器中打开抖音精选并登录。
-2. 打开 ReelMind 浏览器扩展。
+2. 打开 Reel Mind 浏览器扩展。
 3. 点击 Cookie 状态块中的「同步 Cookie」。
 4. 回到 Web 设置页刷新状态。
 
@@ -289,13 +324,19 @@ docker compose ps
 docker compose logs --tail=80
 ```
 
+Docker 正常时，宿主机健康检查应返回 `{"code":0,"msg":"success","data":null}`：
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
+```
+
 ## 项目结构
 
 ```text
 .
 ├── backend/               # FastAPI 后端、下载器、转写、AI 总结、数据库
-├── BillNote_frontend/     # React Web 前端
-├── BillNote_extension/    # 浏览器扩展
+├── reel-mind-frontend/     # React Web 前端
+├── reel-mind-extension/    # 浏览器扩展
 ├── doc/                   # 文档图片和产品资料
 ├── nginx/                 # Docker 反向代理配置
 ├── readme/                # 阶段交接与补充文档
