@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
 import {
   type DownloaderCookieStatus,
@@ -37,10 +37,10 @@ const DownloaderForm = () => {
   const [loading, setLoading] = useState(true)
   const [status, setStatus] = useState<DownloaderCookieStatus | null>(null)
 
-  const refreshStatus = async (platformId?: string) => {
+  const refreshStatus = useCallback(async (platformId?: string) => {
     if (!platformId) return
     setStatus(await getDownloaderCookieStatus(platformId))
-  }
+  }, [])
 
   useEffect(() => {
     const loadCookie = async () => {
@@ -60,7 +60,7 @@ const DownloaderForm = () => {
     }
 
     if (id) loadCookie()
-  }, [id]) // 🔁 每当 id 变化时触发
+  }, [form, id, refreshStatus]) // 🔁 每当 id 变化时触发
 
   const onSubmit = async values => {
     try {
@@ -70,7 +70,7 @@ const DownloaderForm = () => {
       })
       await refreshStatus(id)
       toast.success('保存成功')
-    } catch (e) {
+    } catch {
       toast.error('保存失败')
     }
   }

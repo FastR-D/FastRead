@@ -1,24 +1,17 @@
-import { Switch } from '@/components/ui/switch.tsx'
-import { FC } from 'react'
+import { FC, type ComponentType } from 'react'
 import styles from './index.module.css'
 import { useNavigate, useParams } from 'react-router-dom'
-import AILogo from '@/components/Form/modelForm/Icons'
-import { useProviderStore } from '@/store/providerStore'
 export interface IProviderCardProps {
   id: string
   providerName: string
-  Icon: any
+  Icon: ComponentType
 }
 const ProviderCard: FC<IProviderCardProps> = ({ providerName, Icon, id }: IProviderCardProps) => {
   const navigate = useNavigate()
-  const updateProvider = useProviderStore(state => state.updateProvider)
   const handleClick = () => {
     navigate(`/settings/download/${id}`)
   }
 
-  const rawId = useParams()
-  console.log('rawId', rawId)
-  // @ts-ignore
   const { id: currentId } = useParams()
   const isActive = currentId === id
   return (

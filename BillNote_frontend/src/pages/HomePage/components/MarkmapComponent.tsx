@@ -23,7 +23,6 @@ export interface MarkmapEditorProps {
 
 export default function MarkmapEditor({
   value,
-  onChange,
   toolbarItems,
   customButtons = [],
   height = '600px',
@@ -233,7 +232,7 @@ export default function MarkmapEditor({
       const stripHtml = (html: string): string => {
         if (!html) return html;
         // 先解码HTML实体
-        let text = decodeHtmlEntities(html);
+        const text = decodeHtmlEntities(html);
         // 移除HTML标签
         const div = document.createElement('div');
         div.innerHTML = text;

@@ -30,8 +30,9 @@ export const useChatStore = create<ChatState>()(
 
       clearChat: (taskId) =>
         set(state => {
-          const { [taskId]: _, ...rest } = state.chatHistory
-          return { chatHistory: rest }
+          const nextHistory = { ...state.chatHistory }
+          delete nextHistory[taskId]
+          return { chatHistory: nextHistory }
         }),
 
       getMessages: (taskId) => get().chatHistory[taskId] || [],

@@ -7,7 +7,7 @@ const SettingPage = () => {
   const fetchProviderList = useProviderStore(state => state.fetchProviderList)
   useEffect(() => {
     fetchProviderList()
-  }, [])
+  }, [fetchProviderList])
   return (
     <div className="h-full w-full">
       <SettingLayout Menu={<Menu />} />

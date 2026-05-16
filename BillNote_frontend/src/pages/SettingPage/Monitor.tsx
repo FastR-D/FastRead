@@ -28,7 +28,7 @@ export default function Monitor() {
             const data = await getDeployStatus()
             setStatus(data)
             setLastUpdated(new Date())
-        } catch (err) {
+        } catch {
             setError('无法连接到后端服务')
             setStatus(null)
         } finally {

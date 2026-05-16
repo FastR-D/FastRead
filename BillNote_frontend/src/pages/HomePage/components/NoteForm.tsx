@@ -174,7 +174,7 @@ const NoteForm = () => {
     loadEnabledModels()
 
     return
-  }, [])
+  }, [loadEnabledModels])
   useEffect(() => {
     if (!currentTask) {
       form.reset(createEmptyFormValues(modelList[0]?.model_name || ''))
@@ -205,7 +205,9 @@ const NoteForm = () => {
     // modelList 用来兜底 model_name
     modelList.length,
     // 还要加上 formData 的各字段，或者直接 currentTask
-    currentTask?.formData,
+    currentTask,
+    form,
+    modelList,
   ])
 
   /* ---- 帮助函数 ---- */
@@ -438,7 +440,7 @@ const NoteForm = () => {
             <FormField
               control={form.control}
               name="video_understanding"
-              render={({ field }) => (
+              render={() => (
                 <FormItem>
                   <div className="flex items-center gap-2">
                     <FormLabel>启用</FormLabel>

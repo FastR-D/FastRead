@@ -10,6 +10,7 @@ import BackendHealthIndicator from '@/components/BackendHealth/BackendHealthIndi
 import Index from '@/pages/Index.tsx'
 import { HomePage } from './pages/HomePage/Home.tsx'
 import { useTaskStore } from '@/store/taskStore'
+import LibraryPage from '@/pages/LibraryPage'
 
 // 非首屏页面使用 React.lazy 按需加载
 const Onboarding = lazy(() => import('@/pages/Onboarding'))
@@ -65,7 +66,8 @@ function App() {
           <Routes>
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/" element={<OnboardingGuard><Index /></OnboardingGuard>}>
-              <Route index element={<HomePage />} />
+              <Route index element={<LibraryPage />} />
+              <Route path="workspace" element={<HomePage />} />
               <Route path="settings" element={<SettingPage />}>
                 <Route index element={<Navigate to="model" replace />} />
                 <Route path="model" element={<Model />}>

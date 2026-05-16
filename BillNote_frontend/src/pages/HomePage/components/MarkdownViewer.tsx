@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useMemo, memo, FC } from 'react'
+import { useState, useEffect, useMemo, memo, FC, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { Button } from '@/components/ui/button.tsx'
-import { Copy, Download, ArrowRight, Play, ExternalLink } from 'lucide-react'
+import { Copy, ArrowRight, Play, ExternalLink } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import Error from '@/components/Lottie/error.tsx'
 import Loading from '@/components/Lottie/Loading.tsx'
@@ -37,6 +37,13 @@ interface VersionNote {
 interface MarkdownViewerProps {
   content?: string | VersionNote[]
   status: 'idle' | 'loading' | 'success' | 'failed'
+}
+
+type WorkspaceCommand = {
+  viewMode?: 'map' | 'preview' | 'cards'
+  chat?: false | 'half' | 'full'
+  transcribe?: boolean | 'toggle'
+  action?: 'copy' | 'download'
 }
 
 const steps = [
@@ -133,7 +140,7 @@ function createMarkdownComponents(baseURL: string) {
         </a>
       )
     },
-    img: ({ node, ...props }: any) => {
+    img: ({ ...props }: any) => {
       let src = props.src
       if (src.startsWith('/')) {
         src = baseURL + src
@@ -269,7 +276,6 @@ function createMarkdownComponents(baseURL: string) {
 }
 
 const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
-  const [copied, setCopied] = useState(false)
   const [currentVerId, setCurrentVerId] = useState<string>('')
   const [selectedContent, setSelectedContent] = useState<string>('')
   const [modelName, setModelName] = useState<string>('')
@@ -277,7 +283,6 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [createTime, setCreateTime] = useState<string>('')
   // 确保baseURL没有尾部斜杠
   const baseURL = (String(import.meta.env.VITE_API_BASE_URL || '').replace('/api','') || '').replace(/\/$/, '')
-  const getCurrentTask = useTaskStore.getState().getCurrentTask
   const currentTask = useTaskStore(state => state.getCurrentTask())
   const taskStatus = currentTask?.status || 'PENDING'
   const retryTask = useTaskStore.getState().retryTask
@@ -285,7 +290,6 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [showTranscribe, setShowTranscribe] = useState(false)
   const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
   const [viewMode, setViewMode] = useState<'map' | 'preview' | 'cards'>('preview')
-  const svgRef = useRef<SVGSVGElement>(null)
 
   // 缓存 ReactMarkdown components，仅在 baseURL 变化时重建
   const markdownComponents = useMemo(() => createMarkdownComponents(baseURL), [baseURL])
@@ -309,7 +313,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         setCurrentVerId(latestVersion.ver_id)
       }
     }
-  }, [currentTask?.id, taskStatus])
+  }, [currentTask, isMultiVersion, taskStatus])
   useEffect(() => {
     if (!currentTask || !isMultiVersion) return
 
@@ -320,47 +324,17 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
       setCreateTime(currentVer.created_at || '')
       setSelectedContent(currentVer.content)
     }
-  }, [currentVerId, currentTask?.id])
-  const handleCopy = async () => {
+  }, [currentTask, currentVerId, isMultiVersion])
+  const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(selectedContent)
-      setCopied(true)
       toast.success('已复制到剪贴板')
-      setTimeout(() => setCopied(false), 2000)
-    } catch (e) {
+    } catch {
       toast.error('复制失败')
     }
-  }
-  const alertButton = {
-    id: 'alert',
-    title: '测试警告',
-    content: '⚠️',
-    onClick: () => alert('你点击了自定义按钮！'),
-  }
-  const exportButton = {
-    id: 'export',
-    title: '导出思维导图',
-    content: '⤓',
-    onClick: () => {
-      const svgEl = svgRef.current
-      if (!svgEl) return
-      // 同上面的序列化逻辑
-      const serializer = new XMLSerializer()
-      const source = serializer.serializeToString(svgEl)
-      const blob = new Blob(['<?xml version="1.0" encoding="UTF-8"?>', source], {
-        type: 'image/svg+xml;charset=utf-8',
-      })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = 'mindmap.svg'
-      a.click()
-      URL.revokeObjectURL(url)
-    },
-  }
-  const handleDownload = () => {
-    const task = getCurrentTask()
-    const name = task?.audioMeta.title || 'note'
+  }, [selectedContent])
+  const handleDownload = useCallback(() => {
+    const name = currentTask?.audioMeta.title || 'note'
     const blob = new Blob([selectedContent], { type: 'text/markdown;charset=utf-8' })
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
@@ -368,7 +342,39 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
-  }
+  }, [currentTask?.audioMeta.title, selectedContent])
+
+  useEffect(() => {
+    const handleWorkspaceCommand = (event: Event) => {
+      const command = (event as CustomEvent<WorkspaceCommand>).detail
+      if (!command) return
+
+      if (command.viewMode) {
+        setViewMode(command.viewMode)
+      }
+      if (command.chat !== undefined) {
+        setViewMode('preview')
+        setShowChat(command.chat)
+      }
+      if (command.transcribe !== undefined) {
+        setViewMode('preview')
+        setShowTranscribe(prev =>
+          command.transcribe === 'toggle' ? !prev : Boolean(command.transcribe)
+        )
+      }
+      if (command.action === 'copy') {
+        handleCopy()
+      }
+      if (command.action === 'download') {
+        handleDownload()
+      }
+    }
+
+    window.addEventListener('reelmind:workspace-command', handleWorkspaceCommand)
+    return () => {
+      window.removeEventListener('reelmind:workspace-command', handleWorkspaceCommand)
+    }
+  }, [handleCopy, handleDownload])
 
   if (status === 'loading') {
     return (

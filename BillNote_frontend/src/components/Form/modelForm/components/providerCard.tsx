@@ -33,7 +33,6 @@ const ProviderCard: FC<IProviderCardProps> = ({
     })
   }
 
-  // @ts-ignore
   const { id: currentId } = useParams()
   const isActive = currentId === id
 

@@ -60,5 +60,5 @@ export const useTaskPolling = (interval = 3000) => {
     }, interval)
 
     return () => clearInterval(timer)
-  }, [interval])
+  }, [interval, updateTaskContent])
 }

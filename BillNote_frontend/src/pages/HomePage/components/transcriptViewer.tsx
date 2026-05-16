@@ -2,7 +2,6 @@
 
 import { useTaskStore } from "@/store/taskStore"
 import { useEffect, useState, useRef } from "react"
-import { Play } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {ScrollArea} from "@/components/ui/scroll-area.tsx";
 
@@ -39,13 +38,6 @@ const TranscriptViewer = () => {
   const handleSegmentClick = (index: number) => {
     setActiveSegment(index)
     // Here you could add functionality to play the audio from this segment
-  }
-
-  const scrollToSegment = (index: number) => {
-    segmentRefs.current[index]?.scrollIntoView({
-      behavior: "smooth",
-      block: "center",
-    })
   }
 
   return (

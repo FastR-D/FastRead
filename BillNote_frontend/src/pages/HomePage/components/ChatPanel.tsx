@@ -57,7 +57,8 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
   const [scope, setScope] = useState<'task' | 'library'>('task')
   const chatKey = scope === 'library' ? 'library' : taskId
 
-  const messages = useChatStore(state => state.chatHistory[chatKey]) ?? []
+  const storedMessages = useChatStore(state => state.chatHistory[chatKey])
+  const messages = useMemo(() => storedMessages ?? [], [storedMessages])
   const addMessage = useChatStore(state => state.addMessage)
   const clearChat = useChatStore(state => state.clearChat)
 
