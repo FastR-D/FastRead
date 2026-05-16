@@ -22,8 +22,10 @@ from app.models.audio_model import AudioDownloadResult
 from app.models.gpt_model import GPTSource
 from app.models.model_config import ModelConfig
 from app.models.notes_model import AudioDownloadResult, NoteResult
+from app.services.insight_extractor import build_insights
 from app.models.transcriber_model import TranscriptResult, TranscriptSegment
 from app.services.constant import SUPPORT_PLATFORM_MAP
+from app.services.error_classifier import classify_generation_error
 from app.services.provider import ProviderService
 from app.transcriber.base import Transcriber
 from app.transcriber.transcriber_provider import get_transcriber, _transcribers
@@ -233,6 +235,7 @@ class NoteGenerator:
                 )
 
             markdown = prepend_source_link(markdown, str(video_url))
+            insights = build_insights(markdown, transcript, audio_meta)
 
             # 5. 保存记录到数据库
             self._update_status(task_id, TaskStatus.SAVING)
@@ -247,7 +250,7 @@ class NoteGenerator:
             # 6. 完成
             self._update_status(task_id, TaskStatus.SUCCESS)
             logger.info(f"笔记生成成功 (task_id={task_id})")
-            return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta)
+            return NoteResult(markdown=markdown, transcript=transcript, audio_meta=audio_meta, insights=insights)
 
         except Exception as exc:
             logger.error(f"生成笔记流程异常 (task_id={task_id})：{exc}", exc_info=True)
@@ -464,6 +467,8 @@ class NoteGenerator:
         data = {"status": status.value if isinstance(status, TaskStatus) else status}
         if message:
             data["message"] = message
+        if data["status"] == TaskStatus.FAILED.value:
+            data["error"] = classify_generation_error(message)
 
         try:
             # First create a temporary file

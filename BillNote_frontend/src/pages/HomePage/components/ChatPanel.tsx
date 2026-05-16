@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Trash2, ChevronDown, ChevronUp, BookOpen, UserRound, Bot, Maximize2, Minimize2 } from 'lucide-react'
+import { Loader2, Trash2, ChevronDown, ChevronUp, BookOpen, UserRound, Bot, Maximize2, Minimize2, Library } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useChatStore } from '@/store/chatStore'
 import { useTaskStore } from '@/store/taskStore'
@@ -37,7 +37,9 @@ function SourceBadges({ sources }: { sources: ChatSource[] }) {
         <div className="mt-1 flex flex-wrap gap-1">
           {sources.map((s, i) => (
             <Badge key={i} variant="outline" className="text-xs font-normal">
-              {s.source_type === 'markdown'
+              {s.title
+                ? `${s.title.slice(0, 16)} · ${s.source_type === 'markdown' ? '笔记' : s.source_type === 'meta' ? '信息' : '转录'}`
+                : s.source_type === 'markdown'
                 ? s.section_title || '笔记'
                 : `${(s.start_time ?? 0).toFixed(0)}s ~ ${(s.end_time ?? 0).toFixed(0)}s`}
             </Badge>
@@ -52,8 +54,10 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null)
+  const [scope, setScope] = useState<'task' | 'library'>('task')
+  const chatKey = scope === 'library' ? 'library' : taskId
 
-  const messages = useChatStore(state => state.chatHistory[taskId]) ?? []
+  const messages = useChatStore(state => state.chatHistory[chatKey]) ?? []
   const addMessage = useChatStore(state => state.addMessage)
   const clearChat = useChatStore(state => state.clearChat)
 
@@ -64,8 +68,17 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
     [tasks, currentTaskId],
   )
 
+  const modelTask = useMemo(
+    () => currentTask || tasks.find(t => t.formData?.provider_id && t.formData?.model_name) || null,
+    [currentTask, tasks],
+  )
+
   // 检查索引状态，未索引时自动触发，indexing 时轮询
   useEffect(() => {
+    if (scope === 'library') {
+      setIndexStatus('indexed')
+      return
+    }
     if (!taskId) return
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | null = null
@@ -96,34 +109,35 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [taskId])
+  }, [taskId, scope])
 
   const handleSend = useCallback(
     async (value: string) => {
       const question = value.trim()
       if (!question || loading) return
 
-      const providerId = currentTask?.formData?.provider_id
-      const modelName = currentTask?.formData?.model_name
+      const providerId = modelTask?.formData?.provider_id
+      const modelName = modelTask?.formData?.model_name
       if (!providerId || !modelName) {
         toast.error('无法获取模型配置，请确认任务已完成')
         return
       }
 
-      addMessage(taskId, { role: 'user', content: question })
+      addMessage(chatKey, { role: 'user', content: question })
       setInput('')
       setLoading(true)
 
       try {
         const history = messages.map(m => ({ role: m.role, content: m.content }))
         const res = await askQuestion({
-          task_id: taskId,
+          task_id: scope === 'task' ? taskId : undefined,
+          scope,
           question,
           history,
           provider_id: providerId,
           model_name: modelName,
         })
-        addMessage(taskId, {
+        addMessage(chatKey, {
           role: 'assistant',
           content: res.answer,
           sources: res.sources,
@@ -134,7 +148,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
         setLoading(false)
       }
     },
-    [loading, taskId, currentTask, messages, addMessage],
+    [loading, taskId, chatKey, scope, modelTask, messages, addMessage],
   )
 
   // 转换为 Bubble.List 的数据格式
@@ -236,6 +250,16 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
         <span className="text-sm font-medium">AI 问答</span>
         <div className="flex items-center gap-1">
           <Button
+            variant={scope === 'library' ? 'default' : 'ghost'}
+            size="sm"
+            className="h-7 px-2"
+            onClick={() => setScope(scope === 'task' ? 'library' : 'task')}
+            title={scope === 'task' ? '切换到知识库问答' : '切换到当前视频问答'}
+          >
+            {scope === 'task' ? <BookOpen className="h-3.5 w-3.5" /> : <Library className="h-3.5 w-3.5" />}
+            <span className="ml-1 text-xs">{scope === 'task' ? '当前' : '知识库'}</span>
+          </Button>
+          <Button
             variant="ghost"
             size="sm"
             className="h-7 px-2 text-neutral-400 hover:text-neutral-600"
@@ -253,7 +277,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
               variant="ghost"
               size="sm"
               className="h-7 px-2 text-neutral-400 hover:text-red-500"
-              onClick={() => clearChat(taskId)}
+              onClick={() => clearChat(chatKey)}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
@@ -267,7 +291,9 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
           <div className="flex h-full items-center justify-center text-center text-sm text-neutral-400">
             <div>
               <p>针对笔记内容提问</p>
-              <p className="mt-1 text-xs">例如：这个视频的核心观点是什么？</p>
+              <p className="mt-1 text-xs">
+                {scope === 'task' ? '例如：这个视频的核心观点是什么？' : '例如：这些视频共同提到的行动建议是什么？'}
+              </p>
             </div>
           </div>
         ) : (

@@ -5,7 +5,7 @@ from .routers import note, provider, model, config, chat
 
 
 def create_app(lifespan) -> FastAPI:
-    app = FastAPI(title="抖音精选知识管理助手",lifespan=lifespan)
+    app = FastAPI(title="ReelMind",lifespan=lifespan)
     app.include_router(note.router, prefix="/api")
     app.include_router(provider.router, prefix="/api")
     app.include_router(model.router,prefix="/api")

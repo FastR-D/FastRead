@@ -24,6 +24,7 @@ import TranscriptViewer from '@/pages/HomePage/components/transcriptViewer.tsx'
 import MarkmapEditor from '@/pages/HomePage/components/MarkmapComponent.tsx'
 import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
 import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
+import KnowledgeCardsView from '@/pages/HomePage/components/KnowledgeCardsView.tsx'
 
 interface VersionNote {
   ver_id: string
@@ -283,7 +284,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const isMultiVersion = Array.isArray(currentTask?.markdown)
   const [showTranscribe, setShowTranscribe] = useState(false)
   const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
-  const [viewMode, setViewMode] = useState<'map' | 'preview'>('preview')
+  const [viewMode, setViewMode] = useState<'map' | 'preview' | 'cards'>('preview')
   const svgRef = useRef<SVGSVGElement>(null)
 
   // 缓存 ReactMarkdown components，仅在 baseURL 变化时重建
@@ -395,14 +396,36 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   }
 
   if (status === 'failed' && !isMultiVersion) {
+    const failure = currentTask?.error
+    const failureTitle = failure?.title || '笔记生成失败'
+    const failureMessage = failure?.message || currentTask?.message || '请检查后台或稍后再试'
+    const retryHint = failure?.retry_hint
+    const rawMessage = failure?.raw_message
+
     return (
       <div className="flex h-screen w-full flex-col items-center justify-center gap-4 space-y-3">
         <Error />
-        <div className="text-center">
-          <p className="text-lg font-bold text-red-500">笔记生成失败</p>
-          <p className="mt-2 mb-2 text-xs text-red-400">请检查后台或稍后再试</p>
+        <div className="max-w-md px-6 text-center">
+          <p className="text-lg font-bold text-red-500">{failureTitle}</p>
+          <p className="mt-2 text-sm leading-6 text-neutral-600">{failureMessage}</p>
+          {retryHint && (
+            <p className="mt-2 text-xs leading-5 text-neutral-500">{retryHint}</p>
+          )}
+          {rawMessage && (
+            <details className="mt-3 text-left text-xs text-neutral-400">
+              <summary className="cursor-pointer text-center">错误详情</summary>
+              <pre className="mt-2 max-h-28 overflow-auto whitespace-pre-wrap rounded-md bg-neutral-50 p-2">
+                {rawMessage}
+              </pre>
+            </details>
+          )}
 
-          <Button onClick={() => retryTask(currentTask.id)} size="lg">
+          <Button
+            onClick={() => currentTask && retryTask(currentTask.id)}
+            size="lg"
+            className="mt-4"
+            disabled={!currentTask}
+          >
             重试
           </Button>
         </div>
@@ -441,6 +464,10 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
               title={currentTask?.audioMeta?.title || '思维导图'}
             />
           </div>
+        </div>
+      ) : viewMode === 'cards' ? (
+        <div className="flex flex-1 overflow-hidden bg-white">
+          <KnowledgeCardsView taskId={currentTask?.id} insights={currentTask?.insights} />
         </div>
       ) : (
         <div className="flex flex-1 overflow-hidden bg-white py-2">

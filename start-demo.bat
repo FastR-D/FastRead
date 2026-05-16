@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
 cd /d "%~dp0"
-title BiliNote Demo Starter
+title ReelMind Demo Starter
 
 set "APP_PORT=3015"
 set "HEALTH_PATH=/api/sys_health"
@@ -53,7 +53,7 @@ set "HEALTH_URL=http://127.0.0.1:%APP_PORT%%HEALTH_PATH%"
 
 echo.
 echo ========================================
-echo   BiliNote Demo Starter
+echo   ReelMind Demo Starter
 echo ========================================
 echo.
 echo Project dir: %CD%

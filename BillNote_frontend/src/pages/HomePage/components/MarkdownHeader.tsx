@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Copy, Download, BrainCircuit, MessageSquare } from 'lucide-react'
+import { Copy, Download, BrainCircuit, MessageSquare, SquareStack } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -31,8 +31,8 @@ interface NoteHeaderProps {
   setShowTranscribe: (show: boolean) => void
   showChat?: false | 'half' | 'full'
   setShowChat?: (mode: false | 'half' | 'full') => void
-  viewMode: 'map' | 'preview'
-  setViewMode: (mode: 'map' | 'preview') => void
+  viewMode: 'map' | 'preview' | 'cards'
+  setViewMode: (mode: 'map' | 'preview' | 'cards') => void
 }
 
 export function MarkdownHeader({
@@ -147,6 +147,22 @@ export function MarkdownHeader({
               </Button>
             </TooltipTrigger>
             <TooltipContent>思维导图</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                onClick={() => setViewMode(viewMode === 'cards' ? 'preview' : 'cards')}
+                variant={viewMode === 'cards' ? 'default' : 'ghost'}
+                size="sm"
+                className="h-8 px-2"
+              >
+                <SquareStack className="mr-1.5 h-4 w-4" />
+                <span className="text-sm">知识卡片</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>知识卡片</TooltipContent>
           </Tooltip>
         </TooltipProvider>
         <TooltipProvider>

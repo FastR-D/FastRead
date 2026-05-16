@@ -136,13 +136,13 @@ onMessage<{ url: string }, 'bilinote-start'>('bilinote-start', async ({ data, se
 // ---------- 安装时事件 ----------
 
 browser.runtime.onInstalled.addListener(() => {
-  console.log('精选知识助手 extension installed')
+  console.log('ReelMind extension installed')
 
   // 右键菜单：在视频页或视频链接上发起知识提取
   try {
     browser.contextMenus.create({
       id: 'bilinote-summarize-page',
-      title: '用精选知识助手提取抖音精选视频',
+      title: '用 ReelMind 提取抖音精选视频',
       contexts: ['page', 'link', 'video'],
       documentUrlPatterns: [
         '*://*.douyin.com/*',

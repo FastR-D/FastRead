@@ -199,7 +199,7 @@ onUnmounted(() => {
   <main class="w-[400px] p-3 text-sm text-gray-800 flex flex-col gap-3 bg-white">
     <header class="flex items-center justify-between">
       <div class="flex items-center gap-2">
-        <span class="font-semibold text-base">精选知识助手</span>
+        <span class="font-semibold text-base">ReelMind</span>
         <PlatformBadge :platform="platform" />
       </div>
       <button class="text-xs text-gray-500 hover:text-gray-800" @click="openOptions">设置</button>

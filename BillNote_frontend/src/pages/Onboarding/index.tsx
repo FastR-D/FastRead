@@ -139,7 +139,7 @@ const Onboarding = () => {
         <div className="flex items-center gap-3 mb-4">
           <img src={logo} alt="logo" className="h-10 w-10" />
           <div>
-            <h1 className="text-xl font-bold">欢迎使用抖音精选知识管理助手</h1>
+            <h1 className="text-xl font-bold">欢迎使用 ReelMind</h1>
             <p className="text-xs text-gray-500">先把运行环境接好，再开始整理抖音精选知识视频。</p>
           </div>
         </div>
@@ -249,7 +249,7 @@ const Onboarding = () => {
             <div className="flex gap-2 justify-between">
               <button className="text-sm text-gray-500 hover:text-gray-800" onClick={prev}>上一步</button>
               <button className="px-4 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700" onClick={finish}>
-                完成，进入精选知识助手
+                完成，进入 ReelMind
               </button>
             </div>
           </section>

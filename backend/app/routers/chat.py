@@ -1,5 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
+from typing import Literal, Optional
 
 from app.services.chat_service import chat as chat_service
 from app.services.vector_store import VectorStoreManager
@@ -24,7 +25,8 @@ class ChatMessage(BaseModel):
 
 
 class AskRequest(BaseModel):
-    task_id: str
+    task_id: Optional[str] = None
+    scope: Literal["task", "library"] = "task"
     question: str
     history: list[ChatMessage] = []
     provider_id: str
@@ -85,6 +87,8 @@ def chat_status(task_id: str):
 def ask_question(data: AskRequest):
     """基于笔记内容的 RAG 问答。"""
     try:
+        if data.scope == "task" and not data.task_id:
+            return R.error(msg="当前视频问答需要 task_id")
         history = [{"role": m.role, "content": m.content} for m in data.history]
         result = chat_service(
             task_id=data.task_id,
@@ -92,6 +96,7 @@ def ask_question(data: AskRequest):
             history=history,
             provider_id=data.provider_id,
             model_name=data.model_name,
+            scope=data.scope,
         )
         return R.success(data=result)
     except ValueError as e:

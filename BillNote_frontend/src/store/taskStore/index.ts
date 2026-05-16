@@ -11,6 +11,8 @@ export type TaskStatus =
   | 'DOWNLOADING'
   | 'TRANSCRIBING'
   | 'SUMMARIZING'
+  | 'FORMATTING'
+  | 'SAVING'
   | 'RUNNING'
   | 'SUCCESS'
   | 'FAILED'
@@ -52,6 +54,98 @@ export interface CollectionMeta {
   note: string
 }
 
+export interface InsightScore {
+  score: number
+  level: string
+  reason: string
+}
+
+export interface KnowledgeCard {
+  type: string
+  title: string
+  content: string
+  evidence?: string
+  priority?: number
+}
+
+export interface VerificationClaim {
+  claim: string
+  type: string
+  type_label: string
+  risk_level: 'low' | 'medium' | 'high'
+  risk_topics: string[]
+  verdict: string
+  confidence: number
+  reason: string
+  evidence_hint: string
+  online?: {
+    checked: boolean
+    query: string
+    verdict: string
+    reason: string
+    confidence: number
+    metrics: {
+      coverage: number
+      trusted_count: number
+      top_overlap: number
+    }
+    sources: Array<{
+      title: string
+      url: string
+      domain: string
+      snippet: string
+      trusted: boolean
+    }>
+  }
+  priority?: number
+}
+
+export interface ClaimVerification {
+  version: number
+  external_check: boolean
+  overall: {
+    status: string
+    score: number
+    summary: string
+    note: string
+  }
+  claim_counts: {
+    total: number
+    needs_review: number
+    high_risk: number
+    medium_risk: number
+    online_checked?: number
+    online_supported?: number
+  }
+  online_error?: string
+  claims: VerificationClaim[]
+}
+
+export interface NoteInsights {
+  version: number
+  summary?: {
+    title?: string
+    transcript_type?: string
+    transcript_chars?: number
+    markdown_chars?: number
+  }
+  scores: {
+    information_density: InsightScore
+    credibility: InsightScore
+    actionability: InsightScore
+  }
+  verification?: ClaimVerification
+  cards: KnowledgeCard[]
+}
+
+export interface TaskFailure {
+  category: 'cookie' | 'douyin_detail' | 'provider' | 'asr' | 'llm' | 'media' | 'unknown'
+  title: string
+  message: string
+  retry_hint: string
+  raw_message?: string
+}
+
 export interface Task {
   id: string
   markdown: string | Markdown[]
@@ -60,6 +154,9 @@ export interface Task {
   platform: string
   collection: CollectionMeta
   audioMeta: AudioMeta
+  insights?: NoteInsights
+  message?: string
+  error?: TaskFailure
   createdAt: string
   formData: {
     video_url: string
@@ -149,6 +246,9 @@ export const useTaskStore = create<TaskStore>()(
                 title: '',
                 video_id: '',
               },
+              insights: undefined,
+              message: undefined,
+              error: undefined,
             },
             ...state.tasks,
           ],
@@ -186,6 +286,9 @@ export const useTaskStore = create<TaskStore>()(
                 title: task.audioMeta?.title || '未命名知识卡片',
                 video_id: task.audioMeta?.video_id || '',
               },
+              insights: task.insights,
+              message: task.message || '',
+              error: task.error,
               formData: {
                 video_url: task.videoUrl || '',
                 link: false,
@@ -332,6 +435,8 @@ export const useTaskStore = create<TaskStore>()(
                   formData: newFormData,
                   collection: getCollectionFromForm(newFormData),
                   status: 'PENDING',
+                  message: undefined,
+                  error: undefined,
                 }
               : t
           ),

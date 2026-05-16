@@ -92,7 +92,7 @@ const DownloaderForm = () => {
 
           <div className="rounded border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-800">
             Web 页面无法直接读取抖音 Cookie。推荐在浏览器扩展的弹窗中点击“同步 Cookie”：
-            先登录抖音精选，然后打开“精选知识助手”扩展弹窗同步。这里保留手动粘贴入口作为兜底。
+            先登录抖音精选，然后打开 ReelMind 扩展弹窗同步。这里保留手动粘贴入口作为兜底。
           </div>
 
           {status && (

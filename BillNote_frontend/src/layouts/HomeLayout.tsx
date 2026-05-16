@@ -46,7 +46,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview, History }) => {
                 <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl">
                   <img src={logo} alt="logo" className="h-full w-full object-contain" />
                 </div>
-                <div className="text-2xl font-bold text-gray-800">精选知识助手</div>
+                <div className="text-2xl font-bold text-gray-800">ReelMind</div>
               </div>
               <div className="flex items-center gap-1">
                 <TooltipProvider>

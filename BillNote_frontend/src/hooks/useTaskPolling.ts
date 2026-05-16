@@ -30,17 +30,24 @@ export const useTaskPolling = (interval = 3000) => {
 
           if (status && status !== task.status) {
             if (status === 'SUCCESS') {
-              const { markdown, transcript, audio_meta } = res.result
+              const { markdown, transcript, audio_meta, insights } = res.result
               toast.success('笔记生成成功')
               updateTaskContent(task.id, {
                 status,
                 markdown,
                 transcript,
                 audioMeta: audio_meta,
+                insights,
+                message: undefined,
+                error: undefined,
               })
             } else if (status === 'FAILED') {
-              updateTaskContent(task.id, { status })
-              console.warn(`⚠️ 任务 ${task.id} 失败`)
+              updateTaskContent(task.id, {
+                status,
+                message: res.message,
+                error: res.error,
+              })
+              console.warn(`⚠️ 任务 ${task.id} 失败`, res.error || res.message)
             } else {
               updateTaskContent(task.id, { status })
             }

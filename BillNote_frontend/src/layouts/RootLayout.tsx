@@ -7,8 +7,8 @@ interface RootLayoutProps {
 }
 
 export const metadata = {
-  title: '抖音精选知识管理助手',
-  description: '面向抖音精选知识视频的收藏、提取、总结与思维导图生成',
+  title: 'ReelMind',
+  description: '把短视频变成可沉淀的知识',
 }
 
 const RootLayout: FC<RootLayoutProps> = ({ children }) => {

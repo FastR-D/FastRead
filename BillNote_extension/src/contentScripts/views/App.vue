@@ -8,7 +8,7 @@ const platform = detectPlatform(window.location.href)
 const busy = ref(false)
 const toast = ref<{ kind: 'ok' | 'err', text: string } | null>(null)
 
-const label = computed(() => platform ? '用精选知识助手提取这个抖音精选视频' : '')
+const label = computed(() => platform ? '用 ReelMind 提取这个抖音精选视频' : '')
 
 async function trigger() {
   if (!platform || busy.value)

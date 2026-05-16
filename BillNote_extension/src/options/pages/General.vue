@@ -95,7 +95,7 @@ onMounted(async () => {
         {{ status.text }}
       </div>
       <p class="text-xs text-gray-500">
-        默认 http://localhost:8483 — 需要在该地址先跑起精选知识助手后端
+        默认 http://localhost:8483 — 需要在该地址先跑起 ReelMind 后端
       </p>
     </section>
 

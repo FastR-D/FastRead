@@ -18,15 +18,15 @@ export default function AboutPage() {
           <div className="mb-4 flex items-center gap-4">
             <img
               src={logo}
-              alt="精选知识助手 Logo"
+              alt="ReelMind Logo"
               width={50}
               height={50}
               className="rounded-lg"
             />
-            <h1 className="text-4xl font-bold">抖音精选知识管理助手</h1>
+            <h1 className="text-4xl font-bold">ReelMind</h1>
           </div>
           <p className="text-muted-foreground mb-6 text-xl">
-            面向抖音精选知识视频的收藏、提取、总结与思维导图生成
+            把短视频变成可沉淀的知识
           </p>
 
           <div className="mb-8 flex flex-wrap justify-center gap-2">
@@ -105,7 +105,7 @@ export default function AboutPage() {
               <div key={num} className="overflow-hidden rounded-lg border shadow-sm">
                 <img
                   src={num}
-                  alt={`精选知识助手截图 ${num}`}
+                  alt={`ReelMind 截图 ${num}`}
                   width={600}
                   height={400}
                   className="w-full object-cover transition-transform hover:scale-105"

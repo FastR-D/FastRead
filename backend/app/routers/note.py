@@ -13,6 +13,7 @@ from app.enmus.exception import NoteErrorEnum
 from app.enmus.note_enums import DownloadQuality
 from app.exceptions.note import NoteError
 from app.services.note import NoteGenerator, logger
+from app.services.insight_extractor import build_insights
 from app.services.task_serial_executor import task_serial_executor
 from app.utils.response import ResponseWrapper as R
 from app.utils.url_parser import extract_video_id
@@ -24,10 +25,13 @@ from app.enmus.task_status_enums import TaskStatus
 from app.db.video_task_dao import (
     delete_task_by_task_id,
     delete_task_by_video,
+    list_task_ids_by_video,
     list_video_tasks,
     update_task_collection,
     upsert_video_task,
 )
+from app.services.error_classifier import classify_generation_error
+from app.services.online_verifier import verify_claims_online
 
 # from app.services.downloader import download_raw_audio
 # from app.services.whisperer import transcribe_audio
@@ -46,6 +50,11 @@ class CollectionUpdateRequest(BaseModel):
     collection_folder: Optional[str] = None
     collection_tags: Optional[list[str] | str] = None
     collection_note: Optional[str] = None
+
+
+class OnlineVerificationRequest(BaseModel):
+    task_id: str
+    max_claims: int = 5
 
 
 class VideoRequest(BaseModel):
@@ -92,14 +101,23 @@ UPLOAD_DIR = "uploads"
 
 
 def _read_task_status(task_id: str) -> str:
+    return _read_task_status_payload(task_id).get("status") or TaskStatus.SUCCESS.value
+
+
+def _read_task_status_payload(task_id: str) -> dict:
     status_path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.status.json")
     if not os.path.exists(status_path):
-        return TaskStatus.SUCCESS.value
+        return {"status": TaskStatus.SUCCESS.value}
     try:
         with open(status_path, "r", encoding="utf-8") as f:
-            return json.load(f).get("status") or TaskStatus.SUCCESS.value
+            data = json.load(f)
+        status = data.get("status") or TaskStatus.SUCCESS.value
+        data["status"] = status
+        if status == TaskStatus.FAILED.value and not data.get("error"):
+            data["error"] = classify_generation_error(data.get("message"))
+        return data
     except Exception:
-        return TaskStatus.SUCCESS.value
+        return {"status": TaskStatus.SUCCESS.value}
 
 
 def _extract_source_url(markdown: str) -> str:
@@ -141,10 +159,36 @@ def _is_note_result_file(path: Path) -> bool:
     return not any(name.endswith(suffix) for suffix in ignored_suffixes)
 
 
+def _get_note_insights(result: dict) -> Optional[dict]:
+    if result.get("insights") and result["insights"].get("verification"):
+        return result.get("insights")
+    markdown = result.get("markdown") or ""
+    transcript = result.get("transcript") or {}
+    audio_meta = result.get("audio_meta") or {}
+    if not markdown and not transcript and not audio_meta:
+        return None
+    try:
+        return build_insights(markdown, transcript, audio_meta)
+    except Exception as e:
+        logger.warning(f"生成历史笔记洞察失败: {e}")
+        return None
+
+
+def _attach_note_insights(result: dict) -> dict:
+    insights = _get_note_insights(result)
+    if insights:
+        result["insights"] = insights
+    return result
+
+
 def save_note_to_file(task_id: str, note):
     os.makedirs(NOTE_OUTPUT_DIR, exist_ok=True)
     with open(os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json"), "w", encoding="utf-8") as f:
         json.dump(asdict(note), f, ensure_ascii=False, indent=2)
+
+
+def _result_path(task_id: str) -> Path:
+    return Path(NOTE_OUTPUT_DIR) / f"{task_id}.json"
 
 
 def _delete_task_files(task_id: str) -> int:
@@ -251,7 +295,15 @@ def delete_task(data: RecordRequest):
             except Exception as e:
                 logger.warning(f"删除向量索引失败（不影响任务删除）: {e}")
         elif data.video_id:
+            task_ids = list_task_ids_by_video(data.video_id, data.platform)
             delete_task_by_video(data.video_id, data.platform)
+            for task_id in task_ids:
+                _delete_task_files(task_id)
+                try:
+                    from app.services.vector_store import VectorStoreManager
+                    VectorStoreManager().delete_index(task_id)
+                except Exception as e:
+                    logger.warning(f"删除向量索引失败（不影响任务删除）: {e}")
         return R.success(msg='删除成功')
     except Exception as e:
         return R.error(msg=e)
@@ -278,6 +330,38 @@ def update_collection(data: CollectionUpdateRequest):
         })
     except Exception as e:
         return R.error(msg=e)
+
+
+@router.post("/verify_task_online")
+def verify_task_online(data: OnlineVerificationRequest):
+    try:
+        result_path = _result_path(data.task_id)
+        if not result_path.exists():
+            return R.error(msg="任务结果不存在", code=404)
+
+        with open(result_path, "r", encoding="utf-8") as f:
+            result = json.load(f)
+
+        result = _attach_note_insights(result)
+        insights = result.get("insights") or {}
+        verification = insights.get("verification")
+        if not verification:
+            return R.error(msg="当前任务没有可核验的主张", code=400)
+
+        max_claims = max(1, min(int(data.max_claims or 5), 8))
+        insights["verification"] = verify_claims_online(verification, max_claims=max_claims)
+        result["insights"] = insights
+
+        with open(result_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+
+        return R.success(data={
+            "task_id": data.task_id,
+            "insights": insights,
+        })
+    except Exception as e:
+        logger.error(f"联网核验失败 (task_id={data.task_id}): {e}", exc_info=True)
+        return R.error(msg=f"联网核验失败: {e}")
 
 
 @router.post("/upload")
@@ -365,10 +449,14 @@ def list_generated_tasks():
 
         markdown = result.get("markdown") or ""
         audio_meta = result.get("audio_meta") or {}
+        status_payload = _read_task_status_payload(task_id)
         tasks.append({
             "id": task_id,
-            "status": _read_task_status(task_id),
+            "status": status_payload.get("status"),
+            "message": status_payload.get("message", ""),
+            "error": status_payload.get("error"),
             "markdown": markdown,
+            "insights": _get_note_insights(result),
             "audioMeta": audio_meta,
             "createdAt": _created_at_to_timestamp(db_task.get("created_at")),
             "videoUrl": db_task.get("video_url") or _extract_source_url(markdown),
@@ -401,10 +489,14 @@ def list_generated_tasks():
 
         markdown = result.get("markdown") or ""
         audio_meta = result.get("audio_meta") or {}
+        status_payload = _read_task_status_payload(task_id)
         tasks.append({
             "id": task_id,
-            "status": _read_task_status(task_id),
+            "status": status_payload.get("status"),
+            "message": status_payload.get("message", ""),
+            "error": status_payload.get("error"),
             "markdown": markdown,
+            "insights": _get_note_insights(result),
             "audioMeta": audio_meta,
             "createdAt": result_path.stat().st_mtime,
             "videoUrl": _extract_source_url(markdown),
@@ -432,6 +524,7 @@ def get_task_status(task_id: str):
             if os.path.exists(result_path):
                 with open(result_path, "r", encoding="utf-8") as rf:
                     result_content = json.load(rf)
+                result_content = _attach_note_insights(result_content)
                 return R.success({
                     "status": status,
                     "result": result_content,
@@ -447,7 +540,13 @@ def get_task_status(task_id: str):
                 })
 
         if status == TaskStatus.FAILED.value:
-            return R.error(message or "任务失败", code=500)
+            error = status_content.get("error") or classify_generation_error(message)
+            return R.success({
+                "status": status,
+                "message": message,
+                "error": error,
+                "task_id": task_id,
+            })
 
         # 处理中状态
         return R.success({
@@ -460,6 +559,7 @@ def get_task_status(task_id: str):
     if os.path.exists(result_path):
         with open(result_path, "r", encoding="utf-8") as f:
             result_content = json.load(f)
+        result_content = _attach_note_insights(result_content)
         return R.success({
             "status": TaskStatus.SUCCESS.value,
             "result": result_content,

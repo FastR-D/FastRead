@@ -80,6 +80,13 @@ export const update_task_collection = async (data: {
   return await request.post('/update_task_collection', data)
 }
 
+export const verify_task_online = async (data: {
+  task_id: string
+  max_claims?: number
+}) => {
+  return await request.post('/verify_task_online', data, { timeout: 120000 })
+}
+
 export const get_task_status = async (task_id: string) => {
   try {
     // 成功提示

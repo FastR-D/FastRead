@@ -7,7 +7,9 @@ export interface ChatMessage {
 
 export interface ChatSource {
   text: string
-  source_type: 'markdown' | 'transcript'
+  source_type: 'meta' | 'markdown' | 'transcript' | 'unknown'
+  task_id?: string
+  title?: string
   section_title?: string
   start_time?: number
   end_time?: number
@@ -30,7 +32,8 @@ export const indexTask = async (taskId: string): Promise<void> => {
 }
 
 export const askQuestion = async (data: {
-  task_id: string
+  task_id?: string
+  scope?: 'task' | 'library'
   question: string
   history: ChatMessage[]
   provider_id: string

@@ -112,6 +112,22 @@ def get_task_by_id(task_id: str):
         db.close()
 
 
+def list_task_ids_by_video(video_id: str, platform: str):
+    db = next(get_db())
+    try:
+        tasks = (
+            db.query(VideoTask.task_id)
+            .filter_by(video_id=video_id, platform=platform)
+            .all()
+        )
+        return [task_id for (task_id,) in tasks if task_id]
+    except Exception as e:
+        logger.error(f"Failed to list task ids by video: {e}")
+        return []
+    finally:
+        db.close()
+
+
 def list_video_tasks():
     db = next(get_db())
     try:

@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="./doc/icon.svg" alt="BiliNote Logo" width="72" height="72" />
+  <img src="./doc/icon.svg" alt="ReelMind Logo" width="72" height="72" />
 </p>
 
-<h1 align="center">BiliNote</h1>
+<h1 align="center">ReelMind</h1>
 
 <p align="center">
   <strong>把知识视频变成可复习、可搜索、可追问的 AI 笔记</strong>
 </p>
 
 <p align="center">
-  面向抖音精选知识视频的一站式知识管理助手，支持视频解析、音频转写、AI 总结、Markdown 笔记、思维导图、收藏回看和上下文问答。
+  把短视频变成可沉淀的知识，支持视频解析、音频转写、AI 总结、Markdown 笔记、思维导图、收藏回看和上下文问答。
 </p>
 
 <p align="center">
@@ -39,7 +39,7 @@
 
 ## 项目亮点
 
-BiliNote 当前版本已经收口为「抖音精选知识管理助手」演示版，重点验证从视频链接到知识资产的完整闭环。
+ReelMind 当前版本已经收口为抖音精选知识视频演示版，重点验证从视频链接到知识资产的完整闭环。
 
 - **一键生成知识笔记**：输入抖音精选视频链接，自动解析视频信息、下载音频、转写内容并生成结构化 Markdown。
 - **思维导图视图**：从笔记中提取专用 `## 思维导图` 章节，使用 Markmap 渲染可视化知识结构。
@@ -52,15 +52,15 @@ BiliNote 当前版本已经收口为「抖音精选知识管理助手」演示�
 ## 界面预览
 
 <p align="center">
-  <img src="./doc/image1.png" alt="BiliNote Preview 1" width="860" />
+  <img src="./doc/image1.png" alt="ReelMind Preview 1" width="860" />
 </p>
 
 <p align="center">
-  <img src="./doc/image3.png" alt="BiliNote Preview 2" width="860" />
+  <img src="./doc/image3.png" alt="ReelMind Preview 2" width="860" />
 </p>
 
 <p align="center">
-  <img src="./doc/image4.png" alt="BiliNote Preview 3" width="860" />
+  <img src="./doc/image4.png" alt="ReelMind Preview 3" width="860" />
 </p>
 
 ## 技术栈
@@ -251,7 +251,7 @@ http://127.0.0.1:8493/api/downloader_cookie_status/douyin
 推荐同步方式：
 
 1. 在浏览器中打开抖音精选并登录。
-2. 打开「精选知识助手」浏览器扩展。
+2. 打开 ReelMind 浏览器扩展。
 3. 点击 Cookie 状态块中的「同步 Cookie」。
 4. 回到 Web 设置页刷新状态。
 
