@@ -21,9 +21,5 @@ export function isDouyinUrl(url: string | undefined | null): boolean {
 }
 
 export const PLATFORM_LABELS: Record<Platform, string> = {
-  bilibili: '哔哩哔哩',
-  youtube: 'YouTube',
   douyin: '抖音精选',
-  kuaishou: '快手',
-  local: '本地',
 }

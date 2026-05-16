@@ -10,10 +10,6 @@ from pydantic import HttpUrl
 from dotenv import load_dotenv
 
 from app.downloaders.base import Downloader
-from app.downloaders.bilibili_downloader import BilibiliDownloader
-from app.downloaders.douyin_downloader import DouyinDownloader
-from app.downloaders.local_downloader import LocalDownloader
-from app.downloaders.youtube_downloader import YoutubeDownloader
 from app.db.video_task_dao import delete_task_by_video, upsert_video_task
 from app.enmus.exception import NoteErrorEnum, ProviderErrorEnum
 from app.enmus.task_status_enums import TaskStatus
@@ -148,7 +144,14 @@ class NoteGenerator:
                         segments=segments,
                         raw=data.get("raw"),
                     )
-                    logger.info(f"已从缓存加载转写结果，共 {len(segments)} 段")
+                    if self._is_real_transcript(transcript):
+                        logger.info(f"已从缓存加载转写结果，共 {len(segments)} 段")
+                    elif self._is_metadata_only_transcript(transcript):
+                        logger.info("转写缓存仅包含抖音元信息，将重新下载音频转写")
+                        transcript = None
+                    else:
+                        logger.info("转写缓存为空，将重新下载音频转写")
+                        transcript = None
                 except Exception as e:
                     logger.warning(f"加载转写缓存失败: {e}")
 
@@ -296,6 +299,17 @@ class NoteGenerator:
         if transcript.full_text and transcript.full_text.strip():
             return True
         return bool(transcript.segments)
+
+    @staticmethod
+    def _is_metadata_only_transcript(transcript: Optional[TranscriptResult]) -> bool:
+        if not transcript:
+            return False
+        raw = transcript.raw or {}
+        return raw.get("source") == "douyin_metadata"
+
+    @classmethod
+    def _is_real_transcript(cls, transcript: Optional[TranscriptResult]) -> bool:
+        return cls._is_transcript_usable(transcript) and not cls._is_metadata_only_transcript(transcript)
 
     @staticmethod
     def _metadata_text(audio_meta: AudioDownloadResult) -> str:
@@ -628,9 +642,12 @@ class NoteGenerator:
                     segments=segments,
                     raw=data.get("raw"),
                 )
-                if self._is_transcript_usable(transcript):
+                if self._is_real_transcript(transcript):
                     return transcript
-                logger.warning("转写缓存为空，将重新获取")
+                if self._is_metadata_only_transcript(transcript):
+                    logger.warning("转写缓存仅包含抖音元信息，将重新获取")
+                else:
+                    logger.warning("转写缓存为空，将重新获取")
             except Exception as e:
                 logger.warning(f"加载转写缓存失败，将重新获取：{e}")
 
@@ -688,9 +705,12 @@ class NoteGenerator:
                     segments=segments,
                     raw=data.get("raw"),
                 )
-                if self._is_transcript_usable(transcript):
+                if self._is_real_transcript(transcript):
                     return transcript
-                logger.warning("转写缓存为空，将重新转写")
+                if self._is_metadata_only_transcript(transcript):
+                    logger.warning("转写缓存仅包含抖音元信息，将重新转写")
+                else:
+                    logger.warning("转写缓存为空，将重新转写")
             except Exception as e:
                 logger.warning(f"加载转写缓存失败，将重新转写：{e}")
 

@@ -112,7 +112,7 @@ const Onboarding = () => {
     setError('')
     setSavingTranscriber(true)
     try {
-      // fast-whisper / mlx-whisper 需指定 model size；在线 (groq/bcut/kuaishou) 不用
+      // fast-whisper / mlx-whisper 需指定 model size；在线 (groq/bcut) 不用
       const needsSize = transcriberType === 'fast-whisper' || transcriberType === 'mlx-whisper'
       await updateTranscriberConfig({
         transcriber_type: transcriberType,
@@ -213,7 +213,6 @@ const Onboarding = () => {
             <div className="grid gap-2">
               {[
                 { value: 'bcut', title: '必剪（在线，推荐）', desc: '中文场景友好，无需本地模型，适合作为当前默认选项。' },
-                { value: 'kuaishou', title: '快手（在线，备选）', desc: '中文表现稳定，可作为必剪的备选转写通道。' },
                 { value: 'groq', title: 'Groq（在线，通用）', desc: '速度快，适合通用或英文内容；对当前产品不是首选。' },
                 { value: 'fast-whisper', title: 'Faster Whisper（本地）', desc: '完全离线但首次需下载 ~75MB（tiny）至 ~3GB（large-v3）的模型。CPU 慢。' },
               ].map(opt => (

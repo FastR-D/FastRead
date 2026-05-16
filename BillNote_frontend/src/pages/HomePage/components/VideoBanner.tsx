@@ -8,10 +8,7 @@ interface VideoBannerProps {
 
 /** 平台 label 映射 */
 const platformLabel: Record<string, string> = {
-  bilibili: '哔哩哔哩',
-  youtube: 'YouTube',
   douyin: '抖音',
-  xiaohongshu: '小红书',
 }
 
 export default function VideoBanner({ audioMeta, videoUrl }: VideoBannerProps) {

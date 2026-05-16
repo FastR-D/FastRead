@@ -6,11 +6,7 @@ import { PLATFORM_LABELS } from '~/logic/platform'
 const props = defineProps<{ platform: Platform | null }>()
 
 const colorMap: Record<Platform, string> = {
-  bilibili: 'bg-pink-100 text-pink-700',
-  youtube: 'bg-red-100 text-red-700',
   douyin: 'bg-zinc-200 text-zinc-800',
-  kuaishou: 'bg-orange-100 text-orange-700',
-  local: 'bg-gray-100 text-gray-600',
 }
 
 const cls = computed(() => (props.platform ? colorMap[props.platform] : 'bg-gray-100 text-gray-500'))

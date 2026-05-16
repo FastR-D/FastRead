@@ -292,43 +292,9 @@ class DouyinDownloader(Downloader):
 
     def download_subtitles(self, video_url: str, output_dir: str = None,
                            langs: list = None) -> Optional[TranscriptResult]:
-        video_data = self.fetch_video_info(video_url)
-        aweme_detail = video_data.get('aweme_detail') or {}
-        caption = (aweme_detail.get('caption') or '').strip()
-        item_title = (aweme_detail.get('item_title') or '').strip()
-        desc = (aweme_detail.get('desc') or '').strip()
-        video_tags = [
-            item.get('tag_name')
-            for item in aweme_detail.get('video_tag') or []
-            if item.get('tag_name')
-        ]
-        hashtags = [
-            item.get('hashtag_name')
-            for item in aweme_detail.get('text_extra') or []
-            if item.get('hashtag_name')
-        ]
-
-        lines = []
-        if item_title:
-            lines.append(f"标题：{item_title}")
-        if caption and caption != item_title:
-            lines.append(f"视频文案：{caption}")
-        if desc and desc not in caption:
-            lines.append(f"描述：{desc}")
-        tags = [*video_tags, *hashtags]
-        if tags:
-            lines.append("标签：" + "、".join(tags))
-
-        full_text = "\n".join(lines).strip()
-        if not full_text:
-            return None
-
-        return TranscriptResult(
-            language="zh",
-            full_text=full_text,
-            segments=[TranscriptSegment(start=0, end=0, text=full_text)],
-            raw={"source": "douyin_metadata", "aweme_id": aweme_detail.get("aweme_id")},
-        )
+        # 抖音详情接口里的标题、文案、描述和标签只是元信息，不是真正字幕。
+        # 返回 None 让主流程下载音频并走 ASR；元信息会在音频转写后作为补充上下文合并。
+        return None
 
     def download_video(self, video_url: str, output_dir: Union[str, None] = None) -> str:
 

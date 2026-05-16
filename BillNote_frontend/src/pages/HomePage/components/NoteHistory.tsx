@@ -142,22 +142,14 @@ const NoteHistory: FC<NoteHistoryProps> = ({ onSelect, selectedId }) => {
                 )}
               >
                 <div className="flex items-center gap-3">
-                  {task.platform === 'local' ? (
-                    <img
-                      src={task.audioMeta.cover_url || '/placeholder.png'}
-                      alt="封面"
-                      className="h-10 w-12 rounded-md object-cover"
-                    />
-                  ) : (
-                    <LazyImage
-                      src={
-                        task.audioMeta.cover_url
-                          ? `${baseURL}/image_proxy?url=${encodeURIComponent(task.audioMeta.cover_url)}`
-                          : '/placeholder.png'
-                      }
-                      alt="封面"
-                    />
-                  )}
+                  <LazyImage
+                    src={
+                      task.audioMeta.cover_url
+                        ? `${baseURL}/image_proxy?url=${encodeURIComponent(task.audioMeta.cover_url)}`
+                        : '/placeholder.png'
+                    }
+                    alt="封面"
+                  />
 
                   <TooltipProvider>
                     <Tooltip>

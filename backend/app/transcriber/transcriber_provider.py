@@ -5,7 +5,6 @@ from enum import Enum
 from app.transcriber.groq import GroqTranscriber
 from app.transcriber.whisper import WhisperTranscriber
 from app.transcriber.bcut import BcutTranscriber
-from app.transcriber.kuaishou import KuaishouTranscriber
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,7 +13,6 @@ class TranscriberType(str, Enum):
     FAST_WHISPER = "fast-whisper"
     MLX_WHISPER = "mlx-whisper"
     BCUT = "bcut"
-    KUAISHOU = "kuaishou"
     GROQ = "groq"
 
 # 在 Apple 平台尝试导入 MLX Whisper（不再依赖环境变量，支持前端动态切换）
@@ -34,7 +32,6 @@ _transcribers = {
     TranscriberType.FAST_WHISPER: None,
     TranscriberType.MLX_WHISPER: None,
     TranscriberType.BCUT: None,
-    TranscriberType.KUAISHOU: None,
     TranscriberType.GROQ: None,
 }
 
@@ -60,9 +57,6 @@ def get_whisper_transcriber(model_size="base", device="cuda"):
 def get_bcut_transcriber():
     return _init_transcriber(TranscriberType.BCUT, BcutTranscriber)
 
-def get_kuaishou_transcriber():
-    return _init_transcriber(TranscriberType.KUAISHOU, KuaishouTranscriber)
-
 def get_mlx_whisper_transcriber(model_size="base"):
     if not MLX_WHISPER_AVAILABLE:
         logger.warning("MLX Whisper 不可用，请确保在 Apple 平台且已安装 mlx_whisper")
@@ -75,7 +69,7 @@ def get_transcriber(transcriber_type="fast-whisper", model_size="base", device="
     获取指定类型的转录器实例
 
     参数:
-        transcriber_type: 支持 "fast-whisper", "mlx-whisper", "bcut", "kuaishou", "groq"
+        transcriber_type: 支持 "fast-whisper", "mlx-whisper", "bcut", "groq"
         model_size: 模型大小，适用于 whisper 类
         device: 设备类型（如 cuda / cpu），仅 whisper 使用
 
@@ -105,9 +99,6 @@ def get_transcriber(transcriber_type="fast-whisper", model_size="base", device="
 
     elif transcriber_enum == TranscriberType.BCUT:
         return get_bcut_transcriber()
-
-    elif transcriber_enum == TranscriberType.KUAISHOU:
-        return get_kuaishou_transcriber()
 
     elif transcriber_enum == TranscriberType.GROQ:
         return get_groq_transcriber()
