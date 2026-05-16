@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { getDownloaderCookie, setDownloaderCookie } from '~/logic/api'
+import { getDownloaderCookie, getDownloaderCookieStatus, setDownloaderCookie } from '~/logic/api'
 import { SUPPORTED_COOKIE_PLATFORMS, syncCookieToBackend } from '~/logic/cookies'
 import { PLATFORM_LABELS } from '~/logic/platform'
-import type { Platform } from '~/logic/types'
+import type { DownloaderCookieStatus, Platform } from '~/logic/types'
 
 interface Row {
   cookie: string
   busy: boolean
   status: { kind: 'ok' | 'err' | 'idle', text: string }
+  remoteStatus: DownloaderCookieStatus | null
 }
 
 const rows = reactive<Record<string, Row>>({})
@@ -16,14 +17,19 @@ const refreshing = ref(false)
 
 function ensureRow(p: string) {
   if (!rows[p])
-    rows[p] = { cookie: '', busy: false, status: { kind: 'idle', text: '' } }
+    rows[p] = { cookie: '', busy: false, status: { kind: 'idle', text: '' }, remoteStatus: null }
   return rows[p]
 }
 
 async function refreshOne(p: Exclude<Platform, 'local'>) {
   const r = ensureRow(p)
   try {
-    r.cookie = (await getDownloaderCookie(p)) ?? ''
+    const [cookie, status] = await Promise.all([
+      getDownloaderCookie(p),
+      getDownloaderCookieStatus(p),
+    ])
+    r.cookie = cookie ?? ''
+    r.remoteStatus = status
   }
   catch (e) {
     r.status = { kind: 'err', text: `读取失败：${(e as Error).message}` }
@@ -55,6 +61,7 @@ async function saveManual(p: Exclude<Platform, 'local'>) {
   r.status = { kind: 'idle', text: '保存中…' }
   try {
     await setDownloaderCookie(p, r.cookie || '')
+    r.remoteStatus = await getDownloaderCookieStatus(p)
     r.status = { kind: 'ok', text: '已保存 ✓' }
   }
   catch (e) {
@@ -93,11 +100,35 @@ onMounted(() => {
       <div class="flex items-center justify-between">
         <h2 class="font-semibold">{{ PLATFORM_LABELS[p] }}</h2>
         <span
-          v-if="rows[p]?.cookie"
+          v-if="rows[p]?.remoteStatus?.valid_looking"
           class="tag bg-green-100 text-green-700"
         >已配置</span>
+        <span
+          v-else-if="rows[p]?.remoteStatus?.configured"
+          class="tag bg-yellow-100 text-yellow-700"
+        >需同步</span>
         <span v-else class="tag bg-gray-100 text-gray-500">未配置</span>
       </div>
+
+      <p
+        v-if="rows[p]?.remoteStatus"
+        class="text-xs"
+        :class="{
+          'text-green-700': rows[p].remoteStatus?.valid_looking,
+          'text-amber-700': rows[p].remoteStatus?.configured && !rows[p].remoteStatus?.valid_looking,
+          'text-gray-500': !rows[p].remoteStatus?.configured,
+        }"
+      >
+        <template v-if="rows[p].remoteStatus?.valid_looking">
+          后端已保存 {{ rows[p].remoteStatus?.cookie_count }} 项 cookie。
+        </template>
+        <template v-else-if="rows[p].remoteStatus?.configured">
+          后端 Cookie 缺少 {{ rows[p].remoteStatus?.missing_keys.join('、') || '关键字段' }}，建议重新同步。
+        </template>
+        <template v-else>
+          后端未配置 Cookie，抖音精选视频解析可能失败。
+        </template>
+      </p>
 
       <textarea
         v-model="rows[p].cookie"

@@ -14,7 +14,7 @@ from app.downloaders.bilibili_downloader import BilibiliDownloader
 from app.downloaders.douyin_downloader import DouyinDownloader
 from app.downloaders.local_downloader import LocalDownloader
 from app.downloaders.youtube_downloader import YoutubeDownloader
-from app.db.video_task_dao import delete_task_by_video, insert_video_task
+from app.db.video_task_dao import delete_task_by_video, upsert_video_task
 from app.enmus.exception import NoteErrorEnum, ProviderErrorEnum
 from app.enmus.task_status_enums import TaskStatus
 from app.enmus.note_enums import DownloadQuality
@@ -146,6 +146,7 @@ class NoteGenerator:
                         language=data.get("language"),
                         full_text=data["full_text"],
                         segments=segments,
+                        raw=data.get("raw"),
                     )
                     logger.info(f"已从缓存加载转写结果，共 {len(segments)} 段")
                 except Exception as e:
@@ -198,6 +199,11 @@ class NoteGenerator:
                     status_phase=TaskStatus.TRANSCRIBING,
                     task_id=task_id,
                 )
+            transcript = self._enrich_transcript_with_metadata(transcript, audio_meta)
+            transcript_cache_file.write_text(
+                json.dumps(asdict(transcript), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
             # 3. GPT 总结
             markdown = self._summarize_text(
@@ -227,7 +233,13 @@ class NoteGenerator:
 
             # 5. 保存记录到数据库
             self._update_status(task_id, TaskStatus.SAVING)
-            self._save_metadata(video_id=audio_meta.video_id, platform=platform, task_id=task_id)
+            self._save_metadata(
+                video_id=audio_meta.video_id,
+                platform=platform,
+                task_id=task_id,
+                title=audio_meta.title,
+                cover_url=audio_meta.cover_url,
+            )
 
             # 6. 完成
             self._update_status(task_id, TaskStatus.SUCCESS)
@@ -284,6 +296,98 @@ class NoteGenerator:
         if transcript.full_text and transcript.full_text.strip():
             return True
         return bool(transcript.segments)
+
+    @staticmethod
+    def _metadata_text(audio_meta: AudioDownloadResult) -> str:
+        raw_info = audio_meta.raw_info or {}
+        parts = []
+        title = audio_meta.title or raw_info.get("title")
+        caption = raw_info.get("caption") or raw_info.get("metadata_text") or ""
+        desc = raw_info.get("desc")
+        hashtags = raw_info.get("hashtags") or raw_info.get("tags")
+
+        if title:
+            parts.append(f"标题：{title}")
+        if caption:
+            parts.append(f"视频文案：{caption}")
+        if desc and (not caption or desc not in caption):
+            parts.append(f"描述：{desc}")
+        if hashtags:
+            if isinstance(hashtags, list):
+                parts.append("标签：" + "、".join(str(tag) for tag in hashtags if tag))
+            else:
+                parts.append(f"标签：{hashtags}")
+
+        return "\n".join(part for part in parts if part).strip()
+
+    @staticmethod
+    def _is_low_confidence_transcript(transcript: TranscriptResult) -> bool:
+        text = (transcript.full_text or "").strip()
+        if len(text) < 80:
+            return True
+
+        ascii_chars = sum(1 for char in text if char.isascii() and char.isalpha())
+        chinese_chars = sum(1 for char in text if "\u4e00" <= char <= "\u9fff")
+        if ascii_chars > chinese_chars * 2 and chinese_chars < 30:
+            return True
+
+        raw = transcript.raw or {}
+        language = raw.get("language") or transcript.language
+        language_probability = raw.get("language_probability")
+        if language and language not in {"zh", "zh-cn", "zh-tw", "yue"}:
+            if language_probability is None or float(language_probability) < 0.7:
+                return True
+
+        return False
+
+    def _enrich_transcript_with_metadata(
+        self,
+        transcript: TranscriptResult,
+        audio_meta: AudioDownloadResult,
+    ) -> TranscriptResult:
+        metadata_text = self._metadata_text(audio_meta)
+        if not metadata_text:
+            return transcript
+
+        if not self._is_transcript_usable(transcript):
+            return TranscriptResult(
+                language="zh",
+                full_text=metadata_text,
+                segments=[TranscriptSegment(start=0, end=0, text=metadata_text)],
+                raw={"source": "douyin_metadata"},
+            )
+
+        raw = dict(transcript.raw or {})
+        if raw.get("source") == "douyin_metadata":
+            existing_text = transcript.full_text or ""
+            if metadata_text and metadata_text not in existing_text:
+                merged_text = f"{existing_text}\n\n{metadata_text}".strip()
+                return TranscriptResult(
+                    language=transcript.language or "zh",
+                    full_text=merged_text,
+                    segments=[
+                        *transcript.segments,
+                        TranscriptSegment(start=0, end=0, text=metadata_text),
+                    ],
+                    raw=raw,
+                )
+            return transcript
+
+        if not self._is_low_confidence_transcript(transcript):
+            return transcript
+
+        merged_text = f"{metadata_text}\n\n音频转写参考：{transcript.full_text}".strip()
+        merged_segments = [
+            TranscriptSegment(start=0, end=0, text=metadata_text),
+            *transcript.segments,
+        ]
+        raw["metadata_enriched"] = True
+        return TranscriptResult(
+            language="zh",
+            full_text=merged_text,
+            segments=merged_segments,
+            raw=raw,
+        )
 
     def _get_gpt(self, model_name: Optional[str], provider_id: Optional[str]) -> GPT:
         """
@@ -518,7 +622,12 @@ class NoteGenerator:
             try:
                 data = json.loads(transcript_cache_file.read_text(encoding="utf-8"))
                 segments = [TranscriptSegment(**seg) for seg in data.get("segments", [])]
-                transcript = TranscriptResult(language=data.get("language"), full_text=data["full_text"], segments=segments)
+                transcript = TranscriptResult(
+                    language=data.get("language"),
+                    full_text=data["full_text"],
+                    segments=segments,
+                    raw=data.get("raw"),
+                )
                 if self._is_transcript_usable(transcript):
                     return transcript
                 logger.warning("转写缓存为空，将重新获取")
@@ -573,7 +682,12 @@ class NoteGenerator:
             try:
                 data = json.loads(transcript_cache_file.read_text(encoding="utf-8"))
                 segments = [TranscriptSegment(**seg) for seg in data.get("segments", [])]
-                transcript = TranscriptResult(language=data["language"], full_text=data["full_text"], segments=segments)
+                transcript = TranscriptResult(
+                    language=data.get("language"),
+                    full_text=data["full_text"],
+                    segments=segments,
+                    raw=data.get("raw"),
+                )
                 if self._is_transcript_usable(transcript):
                     return transcript
                 logger.warning("转写缓存为空，将重新转写")
@@ -733,7 +847,14 @@ class NoteGenerator:
         """
         return extract_screenshot_timestamps(markdown)
 
-    def _save_metadata(self, video_id: str, platform: str, task_id: str) -> None:
+    def _save_metadata(
+        self,
+        video_id: str,
+        platform: str,
+        task_id: str,
+        title: str | None = None,
+        cover_url: str | None = None,
+    ) -> None:
         """
         将生成的笔记任务记录插入数据库
 
@@ -742,7 +863,13 @@ class NoteGenerator:
         :param task_id: 任务 ID
         """
         try:
-            insert_video_task(video_id=video_id, platform=platform, task_id=task_id)
+            upsert_video_task(
+                video_id=video_id,
+                platform=platform,
+                task_id=task_id,
+                title=title,
+                cover_url=cover_url,
+            )
             logger.info(f"已保存任务记录到数据库 (video_id={video_id}, platform={platform}, task_id={task_id})")
         except Exception as e:
             logger.error(f"保存任务记录失败：{e}")

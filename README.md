@@ -1,273 +1,332 @@
-<div style="display: flex; justify-content: center; align-items: center; gap: 10px;
-">
-    <p align="center">
-  <img src="./doc/icon.svg" alt="BiliNote Banner" width="50" height="50"  />
+<p align="center">
+  <img src="./doc/icon.svg" alt="BiliNote Logo" width="72" height="72" />
 </p>
-<h1 align="center" > BiliNote v2.2.3</h1>
-</div>
 
-<p align="center"><i>AI 视频笔记生成工具 让 AI 为你的视频做笔记</i></p>
+<h1 align="center">BiliNote</h1>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-MIT-blue.svg" />
-  <img src="https://img.shields.io/badge/frontend-react%2019-blue" />
-  <img src="https://img.shields.io/badge/backend-fastapi-green" />
-  <img src="https://img.shields.io/badge/GPT-openai%20%7C%20deepseek%20%7C%20qwen-ff69b4" />
-  <img src="https://img.shields.io/badge/docker-ghcr.io-blue" />
-  <img src="https://img.shields.io/badge/status-active-success" />
-  <img src="https://img.shields.io/github/stars/jefferyhcool/BiliNote?style=social" />
+  <strong>把知识视频变成可复习、可搜索、可追问的 AI 笔记</strong>
 </p>
-
-
-
-## ✨ 项目简介
-
-BiliNote 是一个开源的 AI 视频笔记助手，支持通过哔哩哔哩、YouTube、抖音等视频链接，自动提取内容并生成结构清晰、重点明确的 Markdown 格式笔记。支持插入截图、原片跳转、AI 问答等功能。
-
-## 📝 使用文档
-详细文档可以查看[这里](https://docs.bilinote.app/)
-
-## 体验地址
-可以通过访问 [这里](https://www.bilinote.app/) 进行体验，速度略慢，不支持长视频。
-
-## 📦 桌面版下载
-本项目提供了 Windows 和 macOS 桌面客户端，可在 [Releases](https://github.com/JefferyHcool/BiliNote/releases) 页面下载最新版本。
-
-> Windows 用户请注意：一定要在没有中文路径的环境下运行。
-
-## 🔧 功能特性
-
-- 支持多平台：Bilibili、YouTube、本地视频、抖音、快手
-- 支持返回笔记格式选择
-- 支持笔记风格选择
-- 支持多模态视频理解
-- 支持多版本记录保留
-- 支持自行配置 GPT 大模型（OpenAI、DeepSeek、Qwen 等）
-- 本地模型音频转写（支持 Fast-Whisper、MLX-Whisper、Groq、BCut）
-- GPT 大模型总结视频内容
-- 自动生成结构化 Markdown 笔记
-- 可选插入截图（自动截取）
-- 可选内容跳转链接（关联原视频）
-- 任务记录与历史回看
-- 基于 RAG 的笔记内容 AI 问答（支持 Function Calling）
-- 笔记顶部视频封面 Banner 展示
-- 工作区和生成历史面板支持折叠/展开
-
-### v2.2.3 修订
-
-- 修：vite build 在 CI 中报 'Rollup failed to resolve import @tauri-apps/api/event'（缺直接依赖声明）
-
-### v2.2.2 修订
-
-- 修复 v2.2.0 桌面端 Tauri 构建失败（main.yml 的 pnpm 版本没 pin，pnpm 11 不兼容 Node 20）
-
-### v2.2.1 修订
-
-- 修复 v2.2.0 ghcr.io 镜像构建失败（pnpm@latest 拉到 11，与 Node 20 不兼容；pin 到 pnpm 9.15.0）
-
-### v2.2.0 新增
-
-- **浏览器插件**笔记选项与 web 端完整对齐：style 9 个预设下拉、format 4 个 checkbox、extras 文本框、多模态视频理解开关
-- **桌面客户端**首启 4 步引导（连通自检 → 供应商/模型 → 转写引擎 → Cookie 提示）
-- **桌面客户端**右下角后端运行状态指示，点开看日志、一键重启
-- **桌面客户端**启动期主动检测中文 / 空格 / 不可写安装路径，弹横幅告警
-- Whisper 默认 size 从 medium（~1.5GB）改为 tiny（~75MB）；切大模型时显式 confirm
-- 修：whisper 半成品模型目录死循环；`/deploy_status` 在没装 torch 的部署 500
-- 详见 [CHANGELOG.md](./CHANGELOG.md)
-
-### v2.1.4 修订
-
-- CI：桌面端 Tauri 构建去掉 Linux（17m+ 慢线退役；Linux 用户继续走 Docker 镜像）
-- CI：commitlint workflow 修复 + 规范 release merge commit 标题约定
-
-### v2.1.3 修订
-
-- 修复 DeepSeek 等非多模态供应商被 400 拒绝的问题（issue #282）：`UniversalGPT` 的 message builder 按是否带图切换 string / 多模态数组形态
-- 感谢 @voidborne-d (#345)
-
-### v2.1.2 修订
-
-- 修复 v2.1.1 触发的 ghcr.io Docker 镜像构建失败（Node 18 + Tailwind v4 不兼容、缺 lockfile）
-- README 补上微信群二维码
-
-### v2.1.1 修订
-
-- 工程化与文档收尾：CONTRIBUTING.md / RELEASING.md / issue + PR 模板 / commitlint CI / 插件发版工作流
-- 关于页群聊二维码：换成最新版，改为 import 本地资源，不再依赖 CDN
-- 关于页移除 QQ 群入口（仅保留微信群）
-- 详见 [CHANGELOG.md](./CHANGELOG.md)
-
-### v2.1.0 新增
-
-- 浏览器插件（Chrome / Edge / Firefox MV3）—— 工具栏 popup、视频页悬浮按钮、右键菜单、侧边栏（Markdown / 思维导图 / AI 问答）四件套
-- 插件设置页五大块：模型供应商 CRUD、音频转写配置、下载配置（含浏览器 Cookie 一键同步）、部署监控
-- B 站字幕优先：插件在用户浏览器里直接抓字幕（带本地登录态 cookie），跳过后端音频转写
-- 后端 `BilibiliSubtitleFetcher`：非插件场景下走 player API 拿字幕，作为 yt-dlp 兜底
-- mlx-whisper 仓库 ID 修正（修复模型 404）
-- 后端 CORS 改用 regex，兼容浏览器扩展源
-- 详见 [CHANGELOG.md](./CHANGELOG.md)
-
-### v2.0.0 新增
-
-- 基于 RAG 的笔记内容 AI 问答功能，支持半屏/全屏模式
-- AI 问答支持 Function Calling，模型可主动查询原文数据
-- RAG 索引支持视频元信息（标题、作者、简介、标签等）
-- AI 回复支持 Markdown 渲染
-- 笔记顶部新增视频封面 Banner
-- 工作区和生成历史面板支持折叠/展开
-- 笔记开头添加来源链接功能
-- YouTube 字幕优先获取，有字幕时跳过音频下载
-- 性能优化与转写器配置改进
-
-## 📸 截图预览
-![screenshot](./doc/image1.png)
-![screenshot](./doc/image3.png)
-![screenshot](./doc/image.png)
-![screenshot](./doc/image4.png)
-![screenshot](./doc/image5.png)
-
-## 🚀 快速开始
-
-### 方式一：Docker 部署（推荐）
-
-确保已安装 Docker，直接拉取预构建镜像运行：
-
-```bash
-docker pull ghcr.io/jefferyhcool/bilinote:latest
-
-docker run -d -p 80:80 \
-  -v bilinote-data:/app/backend/data \
-  --name bilinote \
-  ghcr.io/jefferyhcool/bilinote:latest
-```
-
-访问：`http://localhost`
-
-也可以使用 docker-compose 本地构建：
-
-```bash
-# 标准部署
-docker-compose up -d
-
-# GPU 加速部署（需要 NVIDIA GPU）
-docker-compose -f docker-compose.gpu.yml up -d
-```
-
-### 方式二：源码部署
-
-#### 1. 克隆仓库
-
-```bash
-git clone https://github.com/JefferyHcool/BiliNote.git
-cd BiliNote
-mv .env.example .env
-```
-
-#### 2. 启动后端（FastAPI）
-
-```bash
-cd backend
-pip install -r requirements.txt
-python main.py
-```
-
-#### 3. 启动前端（Vite + React）
-
-```bash
-cd BillNote_frontend
-pnpm install
-pnpm dev
-```
-
-访问：`http://localhost:3015`
-
-## ⚙️ 依赖说明
-
-### 🎬 FFmpeg
-本项目依赖 ffmpeg 用于音频处理与转码，源码部署时必须安装：
-```bash
-# Mac (brew)
-brew install ffmpeg
-
-# Ubuntu / Debian
-sudo apt install ffmpeg
-
-# Windows
-# 请从官网下载安装：https://ffmpeg.org/download.html
-```
-> ⚠️ 若系统无法识别 ffmpeg，请将其加入系统环境变量 PATH
->
-> Docker 部署已内置 FFmpeg，无需额外安装。
-
-### 🚀 CUDA 加速（可选）
-若你希望更快地执行音频转写任务，可使用具备 NVIDIA GPU 的机器，并启用 fast-whisper + CUDA 加速版本：
-
-具体 `fast-whisper` 配置方法，请参考：[fast-whisper 项目地址](http://github.com/SYSTRAN/faster-whisper#requirements)
-
-### 🐳 使用 Docker 一键部署
-
-确保你已安装 Docker，然后直接拉取预构建镜像运行：
-
-```bash
-# 拉取最新镜像
-docker pull ghcr.io/jefferyhcool/bilinote:latest
-
-# 运行容器
-docker run -d -p 80:80 \
-  -v bilinote-data:/app/backend/data \
-  --name bilinote \
-  ghcr.io/jefferyhcool/bilinote:latest
-```
-
-访问：`http://localhost`
-
-也可以使用 docker-compose 本地构建：
-
-```bash
-# 标准部署
-docker-compose up -d
-
-# GPU 加速部署（需要 NVIDIA GPU）
-docker-compose -f docker-compose.gpu.yml up -d
-```
-
-## 🧠 TODO
-
-- [x] 支持抖音及快手等视频平台
-- [x] 支持前端设置切换 AI 模型切换、语音转文字模型
-- [x] AI 摘要风格自定义（学术风、口语风、重点提取等）
-- [x] 加入更多模型支持
-- [x] 加入更多音频转文本模型支持
-- [x] 基于 RAG 的笔记内容 AI 问答
-- [ ] 笔记导出为 PDF / Word / Notion
-
-### Contact and Join-联系和加入社区
-
-扫码加入 BiliNote 交流微信群（如二维码失效，请到 [Issues](https://github.com/JefferyHcool/BiliNote/issues) 反馈）：
 
 <p align="center">
-  <img src="./doc/wechat.png" alt="BiliNote 交流微信群" width="240" />
+  面向抖音精选知识视频的一站式知识管理助手，支持视频解析、音频转写、AI 总结、Markdown 笔记、思维导图、收藏回看和上下文问答。
 </p>
 
-
-
-## 🔎代码参考
-- 本项目中的 `抖音下载功能` 部分代码参考引用自：[Evil0ctal/Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API)
-
-## 📜 License
-
-MIT License
+<p align="center">
+  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" />
+  <img src="https://img.shields.io/badge/frontend-React%2019-61dafb" alt="React" />
+  <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/extension-Vue%203-42b883" alt="Vue" />
+  <img src="https://img.shields.io/badge/AI-OpenAI%20%7C%20DeepSeek%20%7C%20Qwen-ff69b4" alt="AI Providers" />
+  <img src="https://img.shields.io/badge/Docker-ready-2496ed" alt="Docker" />
+</p>
 
 ---
 
-💬 你的支持与反馈是我持续优化的动力！欢迎 PR、提 issue、Star ⭐️
-## Buy Me a Coffee / 捐赠
-如果你觉得项目对你有帮助，考虑支持我一下吧
-<div style='display:inline;'>
-    <img width='30%' src='https://common-1304618721.cos.ap-chengdu.myqcloud.com/8986c9eb29c356a0cfa3d470c23d3b6.jpg'/>
-    <img width='30%' src='https://common-1304618721.cos.ap-chengdu.myqcloud.com/2a049ea298b206bcd0d8b8da3219d6b.jpg'/>
-</div>
+## 目录
 
-## ⭐ Star History
+- [项目亮点](#项目亮点)
+- [界面预览](#界面预览)
+- [技术栈](#技术栈)
+- [快速开始](#快速开始)
+- [使用流程](#使用流程)
+- [配置说明](#配置说明)
+- [浏览器扩展](#浏览器扩展)
+- [常见问题](#常见问题)
+- [项目结构](#项目结构)
+- [路线图](#路线图)
+- [许可证](#许可证)
 
-[![Star History Chart](https://api.star-history.com/svg?repos=JefferyHcool/BiliNote&type=Date)](https://www.star-history.com/#JefferyHcool/BiliNote&Date)
+## 项目亮点
+
+BiliNote 当前版本已经收口为「抖音精选知识管理助手」演示版，重点验证从视频链接到知识资产的完整闭环。
+
+- **一键生成知识笔记**：输入抖音精选视频链接，自动解析视频信息、下载音频、转写内容并生成结构化 Markdown。
+- **思维导图视图**：从笔记中提取专用 `## 思维导图` 章节，使用 Markmap 渲染可视化知识结构。
+- **收藏与回看**：支持收藏夹、标签和备注，生成记录会持久化到后端，刷新或重启后仍可恢复。
+- **AI 上下文问答**：基于当前任务的视频元信息、转写文本和笔记内容进行追问。
+- **多模型供应商**：支持 OpenAI 兼容接口、DeepSeek、Qwen 等模型供应商配置。
+- **转写兜底策略**：支持 bcut、fast-whisper、Groq、MLX Whisper 等转写方式，并在低质量 ASR 场景下合并视频元信息。
+- **浏览器扩展辅助**：扩展提供 Cookie 同步、页面入口、弹窗和侧边栏能力，降低抖音登录态配置成本。
+
+## 界面预览
+
+<p align="center">
+  <img src="./doc/image1.png" alt="BiliNote Preview 1" width="860" />
+</p>
+
+<p align="center">
+  <img src="./doc/image3.png" alt="BiliNote Preview 2" width="860" />
+</p>
+
+<p align="center">
+  <img src="./doc/image4.png" alt="BiliNote Preview 3" width="860" />
+</p>
+
+## 技术栈
+
+| 模块 | 技术 |
+| --- | --- |
+| Web 前端 | React 19、Vite、TypeScript、Tailwind CSS、Radix UI、Zustand、Markmap |
+| 后端服务 | Python、FastAPI、SQLAlchemy、SQLite、Uvicorn |
+| 浏览器扩展 | Vue 3、Vite、WebExtension MV3、UnoCSS |
+| 桌面端预留 | Tauri 2 |
+| AI 与转写 | OpenAI Compatible API、DeepSeek、Qwen、faster-whisper、bcut、Groq |
+| 部署 | Docker Compose、Nginx |
+
+## 快速开始
+
+### 方式一：Docker 一键启动
+
+Windows 用户可以直接双击根目录的 `start-demo.bat`。
+
+脚本会自动：
+
+- 检查 Docker Desktop 是否可用
+- 创建默认 `.env`
+- 启动后端、前端和 Nginx
+- 通过健康检查后打开浏览器
+
+默认访问地址：
+
+```text
+http://127.0.0.1:3015/
+```
+
+也可以在终端中手动启动：
+
+```powershell
+docker compose up -d
+```
+
+停止服务：
+
+```powershell
+docker compose down
+```
+
+### 方式二：源码开发启动
+
+准备环境：
+
+- Python 3.11
+- Node.js 20+
+- FFmpeg
+- npm 或 pnpm
+
+复制环境变量：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+启动后端：
+
+```powershell
+cd backend
+pip install -r requirements.txt
+$env:BACKEND_PORT="8493"
+python main.py
+```
+
+后端健康检查：
+
+```text
+http://127.0.0.1:8493/api/sys_check
+```
+
+启动前端：
+
+```powershell
+cd BillNote_frontend
+npm install
+$env:VITE_API_BASE_URL="http://127.0.0.1:8493/api"
+npm run dev -- --host 127.0.0.1 --port 3016 --strictPort
+```
+
+开发访问地址：
+
+```text
+http://127.0.0.1:3016/
+```
+
+后端根路径不是页面入口，直接访问 `http://127.0.0.1:8493` 返回 `{"detail":"Not Found"}` 属于正常现象。
+
+## 使用流程
+
+1. 打开 Web 前端。
+2. 在「视频链接」中输入抖音精选链接，例如：
+
+```text
+https://www.douyin.com/jingxuan?modal_id=7633777410067926322
+```
+
+3. 在设置页确认模型供应商和模型已经配置。
+4. 可选填写收藏夹、标签和收藏备注。
+5. 点击「生成笔记」。
+6. 等待任务完成解析、下载、转写和总结。
+7. 在「我的收藏」中回看历史笔记。
+8. 切换「Markdown / 思维导图 / AI 问答」视图继续复习。
+
+生成结果默认写入：
+
+```text
+backend/note_results/
+```
+
+常见结果文件：
+
+```text
+{task_id}.json
+{task_id}.status.json
+{task_id}_audio.json
+{task_id}_transcript.json
+{task_id}_markdown.md
+{task_id}_markdown.status.json
+```
+
+## 配置说明
+
+主要配置位于根目录 `.env`。
+
+| 变量 | 说明 | 示例 |
+| --- | --- | --- |
+| `APP_PORT` | Docker/Nginx 对外端口 | `3015` |
+| `BACKEND_HOST` | 后端监听地址 | `0.0.0.0` |
+| `BACKEND_PORT` | 后端服务端口 | `8483` |
+| `VITE_API_BASE_URL` | 前端请求后端 API 地址 | `/api` 或 `http://127.0.0.1:8493/api` |
+| `TRANSCRIBER_TYPE` | 转写器类型 | `bcut`、`fast-whisper`、`groq` |
+| `WHISPER_MODEL_SIZE` | Whisper 模型大小 | `tiny`、`base`、`small`、`medium` |
+| `NOTE_OUTPUT_DIR` | 笔记结果目录 | `note_results` |
+| `FFMPEG_BIN_PATH` | FFmpeg 可执行文件路径 | 留空则使用系统 PATH |
+
+推荐开发期使用：
+
+```env
+TRANSCRIBER_TYPE=bcut
+WHISPER_MODEL_SIZE=tiny
+```
+
+首次触发 `fast-whisper tiny` 时会下载模型到：
+
+```text
+backend/models/whisper/whisper-tiny
+```
+
+## 浏览器扩展
+
+扩展目录位于 `BillNote_extension/`，用于同步抖音 Cookie、提供 popup、设置页和视频页入口。
+
+安装依赖：
+
+```powershell
+cd BillNote_extension
+pnpm install
+```
+
+开发构建：
+
+```powershell
+pnpm dev
+```
+
+生产构建：
+
+```powershell
+pnpm build
+```
+
+构建产物会输出到：
+
+```text
+BillNote_extension/extension/
+```
+
+抖音详情接口依赖有效 Cookie。如果视频详情为空、提示需要登录或下载失败，优先检查：
+
+```text
+http://127.0.0.1:8493/api/downloader_cookie_status/douyin
+```
+
+推荐同步方式：
+
+1. 在浏览器中打开抖音精选并登录。
+2. 打开「精选知识助手」浏览器扩展。
+3. 点击 Cookie 状态块中的「同步 Cookie」。
+4. 回到 Web 设置页刷新状态。
+
+## 常见问题
+
+### 页面一直显示后端初始化中
+
+检查前端是否指向了正确后端：
+
+```powershell
+$env:VITE_API_BASE_URL="http://127.0.0.1:8493/api"
+```
+
+修改后需要重启前端服务，并在浏览器中按 `Ctrl + F5` 强制刷新。
+
+### 生成失败并提示第三方服务异常
+
+通常是在线转写服务波动。当前后端会自动尝试回退到 `fast-whisper`。如果仍失败，检查：
+
+- FFmpeg 是否安装并加入 PATH
+- `backend/models/whisper/whisper-tiny` 是否下载完整
+- 后端日志中的具体异常
+- 抖音 Cookie 是否缺失或过期
+
+### 生成成功但笔记内容很少
+
+部分知识视频主要依赖画面文字或字幕，音频里没有完整讲解。当前后端会把标题、文案、描述和话题标签合并进上下文，但画面文字较多的视频仍需要后续增强 OCR 或视频理解能力。
+
+### Docker 服务启动后无法访问
+
+确认端口没有被占用，并查看服务状态：
+
+```powershell
+docker compose ps
+docker compose logs --tail=80
+```
+
+## 项目结构
+
+```text
+.
+├── backend/               # FastAPI 后端、下载器、转写、AI 总结、数据库
+├── BillNote_frontend/     # React Web 前端
+├── BillNote_extension/    # 浏览器扩展
+├── doc/                   # 文档图片和产品资料
+├── nginx/                 # Docker 反向代理配置
+├── readme/                # 阶段交接与补充文档
+├── docker-compose.yml     # Docker Compose 部署
+├── start-demo.bat         # Windows 一键启动脚本
+└── README-usage.md        # 当前 demo 的详细使用说明
+```
+
+## 路线图
+
+- [x] 抖音精选链接输入与视频元信息解析
+- [x] 音频下载、转写和 AI 总结闭环
+- [x] 收藏夹、标签、备注与历史回看
+- [x] Markdown 笔记和专用思维导图展示
+- [x] 基于当前笔记上下文的 AI 问答
+- [x] 浏览器扩展 Cookie 同步入口
+- [ ] 删除任务时统一清理数据库、结果文件、转写缓存和向量索引
+- [ ] 生成失败原因分类与用户可读提示
+- [ ] Markdown、图片、PDF、Word 等导出体验完善
+- [ ] 针对画面文字知识视频增强截图 OCR 或视频理解
+- [ ] 更完整的端到端回归测试
+
+## 相关文档
+
+- [详细使用说明](./README-usage.md)
+- [贡献指南](./CONTRIBUTING.md)
+- [更新日志](./CHANGELOG.md)
+- [发布说明](./RELEASING.md)
+
+## 许可证
+
+本项目基于 [MIT License](./LICENSE) 开源。
+
+抖音下载相关代码参考了 [Evil0ctal/Douyin_TikTok_Download_API](https://github.com/Evil0ctal/Douyin_TikTok_Download_API)。

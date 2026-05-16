@@ -94,7 +94,14 @@ class WhisperTranscriber(Transcriber):
     def transcript(self, file_path: str) -> TranscriptResult:
         try:
 
-            segments_raw, info = self.model.transcribe(file_path)
+            segments_raw, info = self.model.transcribe(
+                file_path,
+                language="zh",
+                initial_prompt="以下是中文知识类短视频、编程课程、算法课程或学习讲解的音频，请尽量输出简体中文。",
+                vad_filter=True,
+                beam_size=5,
+                condition_on_previous_text=False,
+            )
 
             segments = []
             full_text = ""
@@ -112,12 +119,19 @@ class WhisperTranscriber(Transcriber):
                 language=info.language,
                 full_text=full_text.strip(),
                 segments=segments,
-                raw=info
+                raw={
+                    "language": getattr(info, "language", None),
+                    "language_probability": getattr(info, "language_probability", None),
+                    "duration": getattr(info, "duration", None),
+                    "duration_after_vad": getattr(info, "duration_after_vad", None),
+                    "source": "fast-whisper",
+                },
             )
             # self.on_finish(file_path, result)
             return result
         except Exception as e:
             print(f"转写失败：{e}")
+            raise
 
 
     def on_finish(self,video_path:str,result: TranscriptResult)->None:
@@ -125,4 +139,3 @@ class WhisperTranscriber(Transcriber):
         transcription_finished.send({
             "file_path": video_path,
         })
-

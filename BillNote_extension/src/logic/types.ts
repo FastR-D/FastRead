@@ -40,6 +40,9 @@ export interface GenerateRequest {
   format?: string[]
   style?: string
   extras?: string
+  collection_folder?: string
+  collection_tags?: string[] | string
+  collection_note?: string
   video_understanding?: boolean
   video_interval?: number
   grid_size?: [number, number]
@@ -88,7 +91,7 @@ export type NoteStyle =
   | 'business' | 'meeting_minutes'
 
 // 与 backend/app/gpt/prompt_builder.py note_formats 一一对齐
-export type NoteFormat = 'toc' | 'link' | 'screenshot' | 'summary'
+export type NoteFormat = 'toc' | 'link' | 'screenshot' | 'summary' | 'mindmap'
 
 export const NOTE_STYLES: Array<{ value: NoteStyle, label: string }> = [
   { value: 'minimal', label: '精简' },
@@ -105,6 +108,7 @@ export const NOTE_STYLES: Array<{ value: NoteStyle, label: string }> = [
 export const NOTE_FORMATS: Array<{ value: NoteFormat, label: string }> = [
   { value: 'toc', label: '目录' },
   { value: 'summary', label: 'AI 总结' },
+  { value: 'mindmap', label: '思维导图' },
   { value: 'screenshot', label: '原片截图' },
   { value: 'link', label: '原片跳转' },
 ]
@@ -174,10 +178,19 @@ export interface TranscriberModelsStatus {
   mlx_available: boolean
 }
 
+export interface DownloaderCookieStatus {
+  platform: string
+  configured: boolean
+  cookie_count: number
+  length: number
+  updated_at?: string | null
+  valid_looking: boolean
+  missing_keys: string[]
+}
+
 export interface DeployStatus {
   backend: { status: string, port: number }
   cuda: { available: boolean, version: string | null, gpu_name: string | null }
   whisper: { model_size: string, transcriber_type: string }
   ffmpeg: { available: boolean }
 }
-

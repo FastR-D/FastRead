@@ -8,6 +8,7 @@ export const noteFormats = [
   { label: '原片跳转', value: 'link' },
   { label: '原片截图', value: 'screenshot' },
   { label: 'AI总结', value: 'summary' },
+  { label: '思维导图', value: 'mindmap' },
 ] as const
 
 export const noteStyles = [

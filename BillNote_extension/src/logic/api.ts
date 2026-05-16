@@ -1,5 +1,6 @@
 import type {
   DeployStatus,
+  DownloaderCookieStatus,
   GenerateRequest,
   Model,
   Provider,
@@ -62,6 +63,10 @@ export async function getDownloaderCookie(platform: string): Promise<string | nu
     `/api/get_downloader_cookie/${platform}`,
   )
   return data?.cookie ?? null
+}
+
+export async function getDownloaderCookieStatus(platform: string): Promise<DownloaderCookieStatus> {
+  return request<DownloaderCookieStatus>(`/api/downloader_cookie_status/${platform}`)
 }
 
 // ---- Provider CRUD ----

@@ -21,6 +21,13 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 import httpx
 from app.enmus.task_status_enums import TaskStatus
+from app.db.video_task_dao import (
+    delete_task_by_task_id,
+    delete_task_by_video,
+    list_video_tasks,
+    update_task_collection,
+    upsert_video_task,
+)
 
 # from app.services.downloader import download_raw_audio
 # from app.services.whisperer import transcribe_audio
@@ -29,8 +36,16 @@ router = APIRouter()
 
 
 class RecordRequest(BaseModel):
-    video_id: str
+    task_id: Optional[str] = None
+    video_id: Optional[str] = None
     platform: str = "douyin"
+
+
+class CollectionUpdateRequest(BaseModel):
+    task_id: str
+    collection_folder: Optional[str] = None
+    collection_tags: Optional[list[str] | str] = None
+    collection_note: Optional[str] = None
 
 
 class VideoRequest(BaseModel):
@@ -45,6 +60,9 @@ class VideoRequest(BaseModel):
     format: Optional[list] = []
     style: str = None
     extras: Optional[str]=None
+    collection_folder: Optional[str] = None
+    collection_tags: Optional[list[str] | str] = None
+    collection_note: Optional[str] = None
     video_understanding: Optional[bool] = False
     video_interval: Optional[int] = 0
     grid_size: Optional[list] = []
@@ -92,6 +110,23 @@ def _extract_source_url(markdown: str) -> str:
     return first_line.replace(prefix, "").strip() if first_line.startswith(prefix) else ""
 
 
+def _created_at_to_timestamp(value) -> float:
+    if not value:
+        return 0
+    try:
+        return value.timestamp()
+    except Exception:
+        return 0
+
+
+def _parse_collection_tags(raw) -> list[str]:
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(tag).strip() for tag in raw if str(tag).strip()]
+    return [tag.strip() for tag in str(raw).replace("，", ",").split(",") if tag.strip()]
+
+
 def _is_note_result_file(path: Path) -> bool:
     if path.suffix != ".json":
         return False
@@ -110,6 +145,21 @@ def save_note_to_file(task_id: str, note):
     os.makedirs(NOTE_OUTPUT_DIR, exist_ok=True)
     with open(os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json"), "w", encoding="utf-8") as f:
         json.dump(asdict(note), f, ensure_ascii=False, indent=2)
+
+
+def _delete_task_files(task_id: str) -> int:
+    result_dir = Path(NOTE_OUTPUT_DIR)
+    if not result_dir.exists():
+        return 0
+    deleted = 0
+    for path in result_dir.glob(f"{task_id}*"):
+        try:
+            if path.is_file() and path.resolve().parent == result_dir.resolve():
+                path.unlink()
+                deleted += 1
+        except Exception as e:
+            logger.warning(f"删除任务文件失败 ({path}): {e}")
+    return deleted
 
 
 def _persist_prefetched_transcript(task_id: str, transcript: dict) -> None:
@@ -192,9 +242,40 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
 @router.post('/delete_task')
 def delete_task(data: RecordRequest):
     try:
-        # TODO: 待持久化完成
-        # NoteGenerator().delete_note(video_id=data.video_id, platform=data.platform)
+        if data.task_id:
+            delete_task_by_task_id(data.task_id)
+            _delete_task_files(data.task_id)
+            try:
+                from app.services.vector_store import VectorStoreManager
+                VectorStoreManager().delete_index(data.task_id)
+            except Exception as e:
+                logger.warning(f"删除向量索引失败（不影响任务删除）: {e}")
+        elif data.video_id:
+            delete_task_by_video(data.video_id, data.platform)
         return R.success(msg='删除成功')
+    except Exception as e:
+        return R.error(msg=e)
+
+
+@router.post("/update_task_collection")
+def update_collection(data: CollectionUpdateRequest):
+    try:
+        updated = update_task_collection(
+            task_id=data.task_id,
+            collection_folder=data.collection_folder,
+            collection_tags=_parse_collection_tags(data.collection_tags),
+            collection_note=data.collection_note,
+        )
+        if not updated:
+            return R.error(msg="任务不存在", code=404)
+        return R.success(data={
+            "task_id": data.task_id,
+            "collection": {
+                "folder": updated.get("collection_folder") or "默认收藏夹",
+                "tags": _parse_collection_tags(updated.get("collection_tags")),
+                "note": updated.get("collection_note") or "",
+            },
+        })
     except Exception as e:
         return R.error(msg=e)
 
@@ -232,6 +313,17 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
             # 正常新建任务
             task_id = str(uuid.uuid4())
 
+        collection_tags = _parse_collection_tags(data.collection_tags)
+        upsert_video_task(
+            video_id=video_id or "",
+            platform=data.platform,
+            task_id=task_id,
+            video_url=data.video_url,
+            collection_folder=data.collection_folder or "默认收藏夹",
+            collection_tags=collection_tags,
+            collection_note=data.collection_note or "",
+        )
+
         # 统一先写入 PENDING，表示已进入队列等待串行执行
         NoteGenerator()._update_status(task_id, TaskStatus.PENDING)
 
@@ -253,15 +345,53 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
 @router.get("/tasks")
 def list_generated_tasks():
     result_dir = Path(NOTE_OUTPUT_DIR)
-    if not result_dir.exists():
+    db_tasks = list_video_tasks()
+    if not result_dir.exists() and not db_tasks:
         return R.success([])
 
     tasks = []
+    seen_task_ids = set()
+    for db_task in db_tasks:
+        task_id = db_task["task_id"]
+        seen_task_ids.add(task_id)
+        result_path = result_dir / f"{task_id}.json"
+        result = {}
+        if result_path.exists():
+            try:
+                with open(result_path, "r", encoding="utf-8") as f:
+                    result = json.load(f)
+            except Exception as e:
+                logger.warning(f"读取任务结果失败 (task_id={task_id}): {e}")
+
+        markdown = result.get("markdown") or ""
+        audio_meta = result.get("audio_meta") or {}
+        tasks.append({
+            "id": task_id,
+            "status": _read_task_status(task_id),
+            "markdown": markdown,
+            "audioMeta": audio_meta,
+            "createdAt": _created_at_to_timestamp(db_task.get("created_at")),
+            "videoUrl": db_task.get("video_url") or _extract_source_url(markdown),
+            "collection": {
+                "folder": db_task.get("collection_folder") or "默认收藏夹",
+                "tags": _parse_collection_tags(db_task.get("collection_tags")),
+                "note": db_task.get("collection_note") or "",
+            },
+            "title": db_task.get("title") or audio_meta.get("title") or "",
+            "coverUrl": db_task.get("cover_url") or audio_meta.get("cover_url") or "",
+        })
+
+    if not result_dir.exists():
+        tasks.sort(key=lambda item: item["createdAt"], reverse=True)
+        return R.success(tasks)
+
     for result_path in result_dir.iterdir():
         if not _is_note_result_file(result_path):
             continue
 
         task_id = result_path.stem
+        if task_id in seen_task_ids:
+            continue
         try:
             with open(result_path, "r", encoding="utf-8") as f:
                 result = json.load(f)

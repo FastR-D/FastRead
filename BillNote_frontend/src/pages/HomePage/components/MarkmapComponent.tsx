@@ -4,6 +4,7 @@ import { transformer } from '@/lib/markmap.ts'
 import { Toolbar } from 'markmap-toolbar'
 import 'markmap-toolbar/dist/style.css'
 import JSZip from 'jszip'
+import { extractMindmapMarkdown } from '@/utils/mindmap'
 
 export interface MarkmapEditorProps {
   /** 要渲染的 Markdown 文本 */
@@ -34,6 +35,7 @@ export default function MarkmapEditor({
 
   // 用于跟踪是否处于全屏状态
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const mindmapValue = extractMindmapMarkdown(value)
 
   // 监听全屏状态变化
   useEffect(() => {
@@ -64,7 +66,7 @@ export default function MarkmapEditor({
   // 导出HTML思维导图
   const exportHtml = () => {
     try {
-      const { root } = transformer.transform(value)
+      const { root } = transformer.transform(mindmapValue)
       const data = JSON.stringify(root)
       
       // 创建HTML内容
@@ -202,7 +204,7 @@ export default function MarkmapEditor({
   // 导出XMind格式思维导图
   const exportXMind = async () => {
     try {
-      const { root } = transformer.transform(value);
+      const { root } = transformer.transform(mindmapValue);
 
       // 生成唯一ID
       const generateId = () => Math.random().toString(36).substring(2, 15);
@@ -428,9 +430,9 @@ export default function MarkmapEditor({
   useEffect(() => {
     const mm = mmRef.current
     if (!mm) return
-    const { root } = transformer.transform(value)
+    const { root } = transformer.transform(mindmapValue)
     mm.setData(root).then(() => mm.fit())
-  }, [value])
+  }, [mindmapValue])
 
   // 文本输入变化回调（如果你自行添加 textarea 编辑区）
   // const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {

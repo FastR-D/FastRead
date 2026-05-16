@@ -13,6 +13,7 @@ from app.downloaders.base import Downloader
 from app.downloaders.douyin_helper.abogus import ABogus
 from app.enmus.note_enums import DownloadQuality
 from app.models.audio_model import AudioDownloadResult
+from app.models.transcriber_model import TranscriptResult, TranscriptSegment
 from app.services.cookie_manager import CookieConfigManager
 from app.utils.path_helper import get_data_dir
 from dotenv import load_dotenv
@@ -217,7 +218,8 @@ class DouyinDownloader(Downloader):
             video_url: str,
             output_dir: Union[str, None] = None,
             quality: DownloadQuality = "fast",
-            need_video: Optional[bool] = False
+            need_video: Optional[bool] = False,
+            skip_download: bool = False,
     ) -> AudioDownloadResult:
         try:
             print(
@@ -232,36 +234,101 @@ class DouyinDownloader(Downloader):
             output_path = os.path.join(output_dir, "%(id)s.%(ext)s")
 
             video_data = self.fetch_video_info(video_url)
+            aweme_detail = video_data['aweme_detail']
             output_path = output_path % {
-                "id": video_data['aweme_detail']['aweme_id'],
+                "id": aweme_detail['aweme_id'],
                 "ext": "mp3",
             }
-            url = video_data['aweme_detail']['music']['play_url']['uri']
-            # 下载音频
-            audio_data = requests.get(url)
-            with open(output_path, 'wb') as f:
-                f.write(audio_data.content)
-            print(url)
-            tags = []
-            for tag in video_data['aweme_detail']['video_tag']:
-                if tag['tag_name']:
-                    tags.append(tag['tag_name'])
+            url = aweme_detail['music']['play_url']['uri']
+            if not skip_download:
+                audio_data = requests.get(url)
+                with open(output_path, 'wb') as f:
+                    f.write(audio_data.content)
+                print(url)
+            video_tags = []
+            for tag in aweme_detail.get('video_tag') or []:
+                if tag.get('tag_name'):
+                    video_tags.append(tag['tag_name'])
+
+            caption = aweme_detail.get('caption') or ''
+            item_title = aweme_detail.get('item_title') or ''
+            desc = aweme_detail.get('desc') or ''
+            hashtags = [
+                item.get('hashtag_name')
+                for item in aweme_detail.get('text_extra') or []
+                if item.get('hashtag_name')
+            ]
+            tag_text = ' '.join(f"#{tag}" for tag in [*video_tags, *hashtags] if tag)
+            metadata_text = "\n".join(
+                part for part in (item_title, caption, desc, tag_text) if part
+            ).strip()
+            fallback_title = (
+                item_title
+                or next((line.strip() for line in caption.splitlines() if line.strip()), "")
+                or desc[:80]
+                or aweme_detail['aweme_id']
+            )
 
             return AudioDownloadResult(
                 file_path=output_path,
-                title=video_data['aweme_detail']['item_title'],
-                duration=video_data['aweme_detail']['video']['duration'],
-                cover_url=video_data['aweme_detail']['video']['cover_original_scale']['url_list'][0] if
-                video_data['aweme_detail']['video']['cover'] else video_data['video']['big_thumbs']['img_url'],
+                title=fallback_title[:80],
+                duration=aweme_detail['video']['duration'],
+                cover_url=aweme_detail['video']['cover_original_scale']['url_list'][0] if
+                aweme_detail['video']['cover'] else video_data['video']['big_thumbs']['img_url'],
                 platform="douyin",
-                video_id=video_data['aweme_detail']['aweme_id'],
+                video_id=aweme_detail['aweme_id'],
                 raw_info={
-                    'tags': video_data['aweme_detail']['caption'] + ''.join(tags),
+                    'title': item_title,
+                    'caption': caption,
+                    'desc': desc,
+                    'tags': [*video_tags, *hashtags],
+                    'hashtags': hashtags,
+                    'metadata_text': metadata_text,
                 },
                 video_path=None  # ❗音频下载不包含视频路径
             )
         except Exception as e:
             raise e
+
+    def download_subtitles(self, video_url: str, output_dir: str = None,
+                           langs: list = None) -> Optional[TranscriptResult]:
+        video_data = self.fetch_video_info(video_url)
+        aweme_detail = video_data.get('aweme_detail') or {}
+        caption = (aweme_detail.get('caption') or '').strip()
+        item_title = (aweme_detail.get('item_title') or '').strip()
+        desc = (aweme_detail.get('desc') or '').strip()
+        video_tags = [
+            item.get('tag_name')
+            for item in aweme_detail.get('video_tag') or []
+            if item.get('tag_name')
+        ]
+        hashtags = [
+            item.get('hashtag_name')
+            for item in aweme_detail.get('text_extra') or []
+            if item.get('hashtag_name')
+        ]
+
+        lines = []
+        if item_title:
+            lines.append(f"标题：{item_title}")
+        if caption and caption != item_title:
+            lines.append(f"视频文案：{caption}")
+        if desc and desc not in caption:
+            lines.append(f"描述：{desc}")
+        tags = [*video_tags, *hashtags]
+        if tags:
+            lines.append("标签：" + "、".join(tags))
+
+        full_text = "\n".join(lines).strip()
+        if not full_text:
+            return None
+
+        return TranscriptResult(
+            language="zh",
+            full_text=full_text,
+            segments=[TranscriptSegment(start=0, end=0, text=full_text)],
+            raw={"source": "douyin_metadata", "aweme_id": aweme_detail.get("aweme_id")},
+        )
 
     def download_video(self, video_url: str, output_dir: Union[str, None] = None) -> str:
 

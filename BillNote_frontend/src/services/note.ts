@@ -11,6 +11,9 @@ export const generateNote = async (data: {
   format: Array<string>
   style: string
   extras?: string
+  collection_folder?: string
+  collection_tags?: string
+  collection_note?: string
   video_understand?: boolean
   video_interval?: number
   grid_size: Array<number>
@@ -41,9 +44,18 @@ export const generateNote = async (data: {
   }
 }
 
-export const delete_task = async ({ video_id, platform }) => {
+export const delete_task = async ({
+  task_id,
+  video_id,
+  platform,
+}: {
+  task_id?: string
+  video_id?: string
+  platform: string
+}) => {
   try {
     const data = {
+      task_id,
       video_id,
       platform,
     }
@@ -57,6 +69,15 @@ export const delete_task = async ({ video_id, platform }) => {
     console.error('❌ 删除任务失败:', e)
     throw e
   }
+}
+
+export const update_task_collection = async (data: {
+  task_id: string
+  collection_folder: string
+  collection_tags: string[]
+  collection_note: string
+}) => {
+  return await request.post('/update_task_collection', data)
 }
 
 export const get_task_status = async (task_id: string) => {

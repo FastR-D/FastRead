@@ -4,7 +4,8 @@ note_formats = [
     {'label': '目录', 'value': 'toc'},
     {'label': '原片跳转', 'value': 'link'},
     {'label': '原片截图', 'value': 'screenshot'},
-    {'label': 'AI总结', 'value': 'summary'}
+    {'label': 'AI总结', 'value': 'summary'},
+    {'label': '思维导图', 'value': 'mindmap'}
 ]
 
 note_styles = [
@@ -49,7 +50,8 @@ def get_format_function(format_type):
         'toc': get_toc_format,
         'link': get_link_format,
         'screenshot': get_screenshot_format,
-        'summary': get_summary_format
+        'summary': get_summary_format,
+        'mindmap': get_mindmap_format,
     }
     return format_map.get(format_type, lambda: '')()
 
@@ -112,4 +114,23 @@ def get_screenshot_format():
 def get_summary_format():
     return '''
     12. **AI总结**: 在笔记末尾加入简短的AI生成总结,并且二级标题 就是 AI 总结 例如 ## AI 总结。
+    '''
+
+
+def get_mindmap_format():
+    return '''
+    13. **思维导图**: 在笔记末尾加入一个专门用于 Markmap 渲染的章节，二级标题必须是 `## 思维导图`。
+    该章节只能使用 Markdown 标题层级和短项目符号表达知识结构，不要写长段落。
+    结构要求：
+    - `## 思维导图`
+    - `### 中心主题`
+    - `#### 一级分支`
+    - `- 二级要点`
+    - `  - 三级细节`
+    内容要求：
+    - 中心主题应概括视频核心主题。
+    - 一级分支控制在 4-8 个，按知识依赖或讲解顺序排列。
+    - 每个分支保留关键概念、结论、步骤、例子或注意事项。
+    - 每个节点尽量短，适合在思维导图节点中显示。
+    - 不要发明视频没有提到的内容。
     '''

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { delete_task, generateNote, list_generated_tasks } from '@/services/note.ts'
+import { delete_task, generateNote, list_generated_tasks, update_task_collection } from '@/services/note.ts'
 import { v4 as uuidv4 } from 'uuid'
 import toast from 'react-hot-toast'
 import { get, set, del } from 'idb-keyval'
@@ -101,6 +101,8 @@ const DEFAULT_COLLECTION: CollectionMeta = {
   note: '',
 }
 
+const collectionSyncTimers = new Map<string, ReturnType<typeof setTimeout>>()
+
 const parseTags = (value?: string) =>
   (value || '')
     .split(/[，,\s]+/)
@@ -166,7 +168,11 @@ export const useTaskStore = create<TaskStore>()(
               status: task.status || 'SUCCESS',
               markdown: task.markdown || '',
               platform: task.audioMeta?.platform || 'douyin',
-              collection: DEFAULT_COLLECTION,
+              collection: {
+                ...DEFAULT_COLLECTION,
+                ...(task.collection || {}),
+                tags: Array.isArray(task.collection?.tags) ? task.collection.tags : [],
+              },
               transcript: emptyTranscript(),
               createdAt: task.createdAt
                 ? new Date(Number(task.createdAt) * 1000).toISOString()
@@ -189,7 +195,7 @@ export const useTaskStore = create<TaskStore>()(
                 model_name: '',
                 provider_id: '',
                 style: 'minimal',
-                format: [],
+                format: ['toc', 'summary', 'mindmap'],
               },
             }))
 
@@ -257,20 +263,47 @@ export const useTaskStore = create<TaskStore>()(
           }),
         })),
 
-      updateTaskCollection: (id, collection) =>
+      updateTaskCollection: (id, collection) => {
+        let nextCollection: CollectionMeta | null = null
+
         set(state => ({
-          tasks: state.tasks.map(task =>
-            task.id === id
-              ? {
-                  ...task,
-                  collection: {
-                    ...(task.collection || DEFAULT_COLLECTION),
-                    ...collection,
-                  },
-                }
-              : task
-          ),
-        })),
+          tasks: state.tasks.map(task => {
+            if (task.id !== id) return task
+
+            nextCollection = {
+              ...(task.collection || DEFAULT_COLLECTION),
+              ...collection,
+            }
+
+            return {
+              ...task,
+              collection: nextCollection,
+            }
+          }),
+        }))
+
+        if (!nextCollection) return
+
+        const existingTimer = collectionSyncTimers.get(id)
+        if (existingTimer)
+          clearTimeout(existingTimer)
+
+        const timer = setTimeout(() => {
+          const latest = get().tasks.find(task => task.id === id)?.collection || nextCollection!
+          update_task_collection({
+            task_id: id,
+            collection_folder: latest.folder,
+            collection_tags: latest.tags || [],
+            collection_note: latest.note || '',
+          }).catch(err => {
+            console.warn('同步收藏信息失败:', err)
+          }).finally(() => {
+            collectionSyncTimers.delete(id)
+          })
+        }, 500)
+
+        collectionSyncTimers.set(id, timer)
+      },
 
       getCurrentTask: () => {
         const currentTaskId = get().currentTaskId
@@ -315,6 +348,7 @@ export const useTaskStore = create<TaskStore>()(
 
         if (task) {
           await delete_task({
+            task_id: task.id,
             video_id: task.audioMeta.video_id,
             platform: task.platform,
           })

@@ -9,7 +9,13 @@ export { DEFAULT_BACKEND_URL, DEFAULT_SETTINGS, MAX_TASKS } from './constants'
 export const { data: settings, dataReady: settingsReady } = useWebExtensionStorage<Settings>(
   SETTINGS_KEY,
   DEFAULT_SETTINGS,
-  { mergeDefaults: true },
+  {
+    mergeDefaults: (stored, defaults) => ({
+      ...defaults,
+      ...stored,
+      formats: Array.from(new Set([...(defaults.formats || []), ...((stored as Partial<Settings>).formats || [])])),
+    }),
+  },
 )
 
 export const { data: tasks, dataReady: tasksReady } = useWebExtensionStorage<TaskRecord[]>(

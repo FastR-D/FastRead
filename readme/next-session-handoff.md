@@ -1,6 +1,144 @@
 # BiliNote 独立改造项目交接文档
 
-更新时间：2026-05-13
+更新时间：2026-05-15
+
+## 0. 2026-05-15 最新进展
+
+本次已在 MVP 主线上继续完成以下内容：
+
+### 0.1 收藏管理后端持久化
+
+已完成：
+
+- `video_tasks` 表新增收藏与视频元数据字段：
+  - `video_url`
+  - `title`
+  - `cover_url`
+  - `collection_folder`
+  - `collection_tags`
+  - `collection_note`
+  - `updated_at`
+- `init_db` 增加轻量迁移逻辑，旧 SQLite 表启动时会自动补缺失列。
+- `/api/generate_note` 提交任务时会先写入任务记录和收藏元数据。
+- `/api/tasks` 优先从数据库恢复任务和收藏元数据，同时兼容旧 `note_results` 文件。
+- Web 端“我的收藏”中编辑收藏夹、标签、备注后，会 500ms 防抖同步到后端。
+
+关键文件：
+
+- `backend/app/db/models/video_tasks.py`
+- `backend/app/db/init_db.py`
+- `backend/app/db/video_task_dao.py`
+- `backend/app/routers/note.py`
+- `BillNote_frontend/src/store/taskStore/index.ts`
+- `BillNote_frontend/src/services/note.ts`
+
+### 0.2 Cookie 状态诊断与前端同步入口
+
+已完成：
+
+- 后端新增 `GET /api/downloader_cookie_status/{platform}`。
+- Cookie 保存时记录 `updated_at`。
+- 状态接口返回：
+  - `configured`
+  - `valid_looking`
+  - `cookie_count`
+  - `length`
+  - `missing_keys`
+  - `updated_at`
+- 扩展 popup 顶部新增 Cookie 状态块：
+  - 已同步 / 需重新同步 / 未同步
+  - 一键“同步 Cookie”
+  - “打开抖音精选”登录入口
+- 扩展设置页继续保留 Cookie 同步与手动保存。
+- Web 下载器设置页明确说明 Web 端无法直接读取跨域 Cookie，推荐使用扩展 popup 同步，并保留手动粘贴兜底。
+
+关键文件：
+
+- `backend/app/services/cookie_manager.py`
+- `backend/app/routers/config.py`
+- `BillNote_extension/src/popup/Popup.vue`
+- `BillNote_extension/src/options/pages/Downloader.vue`
+- `BillNote_extension/src/logic/api.ts`
+- `BillNote_extension/src/logic/cookies.ts`
+- `BillNote_frontend/src/components/Form/DownloaderForm/Form.tsx`
+- `BillNote_frontend/src/services/downloader.ts`
+
+### 0.3 思维导图专用生成和渲染
+
+已完成：
+
+- 后端 prompt 增加 `mindmap` 输出格式。
+- 默认输出格式包含：
+  - `toc`
+  - `summary`
+  - `mindmap`
+- LLM 会在笔记末尾生成 `## 思维导图` 专用章节。
+- Web 和扩展的 Markmap 渲染会优先提取 `## 思维导图` 到下一个 `##` 之间的内容。
+- 旧笔记没有该章节时，仍回退渲染整篇 Markdown。
+
+关键文件：
+
+- `backend/app/gpt/prompt_builder.py`
+- `BillNote_frontend/src/constant/note.ts`
+- `BillNote_frontend/src/pages/HomePage/components/NoteForm.tsx`
+- `BillNote_frontend/src/pages/HomePage/components/MarkmapComponent.tsx`
+- `BillNote_frontend/src/utils/mindmap.ts`
+- `BillNote_extension/src/logic/types.ts`
+- `BillNote_extension/src/logic/constants.ts`
+- `BillNote_extension/src/logic/storage.ts`
+- `BillNote_extension/src/logic/mindmap.ts`
+- `BillNote_extension/src/components/MindMap.vue`
+
+### 0.4 删除接口的当前状态
+
+已完成：
+
+- `/api/delete_task` 按 `task_id` 删除时会清理：
+  - 数据库任务记录
+  - `note_results/{task_id}*` 结果文件
+  - Chroma 向量索引
+
+仍待补齐：
+
+- 按 `video_id` 删除时，目前只删数据库记录，还没有逐个清理相关结果文件和向量索引。
+
+### 0.5 当前验证结果
+
+已通过：
+
+```powershell
+cd BillNote_extension
+npm run typecheck
+```
+
+```powershell
+cd BillNote_frontend
+npm run build
+```
+
+```powershell
+cd backend
+python -m py_compile app\db\video_task_dao.py app\routers\note.py
+```
+
+```powershell
+git diff --check
+```
+
+说明：
+
+- Web 构建需要在沙盒外/提权环境运行，否则 Vite/esbuild 可能因为目录权限报 `Access is denied`。
+- 构建仍有既有警告：`lottie-web` 使用 `eval`、部分 chunk 超过 500KB；当前不影响构建通过。
+
+### 0.6 当前建议下一步
+
+优先继续：
+
+1. 补齐删除清理：按 `video_id` 删除时同步清理结果文件、缓存文件、向量索引。
+2. 做生成失败原因分类展示：Cookie、模型供应商、ASR、抖音详情接口、LLM 调用。
+3. 做真实端到端回归：同步 Cookie、生成笔记、查看导图、编辑收藏元数据、刷新恢复、删除清理。
+
+---
 
 ## 1. 当前目标
 
@@ -327,4 +465,3 @@ PRD 参考文件在：
 
 - `doc/next-session-handoff.md`
 - `C:\Users\Lenovo\Downloads\PRD.md`
-

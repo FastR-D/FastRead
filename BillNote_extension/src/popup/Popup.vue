@@ -2,8 +2,9 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { detectPlatform } from '~/logic/platform'
 import { settings, settingsReady, tasks, tasksReady, upsertTask } from '~/logic/storage'
-import { generateNote, getTaskStatus, resolveImageUrl } from '~/logic/api'
-import { NOTE_FORMATS, NOTE_STYLES, type NoteFormat, type TaskRecord } from '~/logic/types'
+import { generateNote, getDownloaderCookieStatus, getTaskStatus, resolveImageUrl } from '~/logic/api'
+import { syncCookieToBackend } from '~/logic/cookies'
+import { NOTE_FORMATS, NOTE_STYLES, type DownloaderCookieStatus, type NoteFormat, type TaskRecord } from '~/logic/types'
 
 const tabUrl = ref<string>('')
 const tabTitle = ref<string>('')
@@ -15,6 +16,9 @@ const submitting = ref(false)
 const errorMsg = ref('')
 const activeTaskId = ref<string>('')
 const activeTask = computed<TaskRecord | undefined>(() => tasks.value?.find(t => t.taskId === activeTaskId.value))
+const cookieStatus = ref<DownloaderCookieStatus | null>(null)
+const cookieBusy = ref(false)
+const cookieMsg = ref('')
 
 let pollTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -107,6 +111,33 @@ function openOptions() {
   browser.runtime.openOptionsPage()
 }
 
+async function refreshCookieStatus() {
+  try {
+    cookieStatus.value = await getDownloaderCookieStatus('douyin')
+  }
+  catch (e) {
+    cookieMsg.value = `Cookie 状态读取失败：${(e as Error).message}`
+  }
+}
+
+async function syncDouyinCookie() {
+  cookieBusy.value = true
+  cookieMsg.value = '正在从浏览器同步抖音 Cookie…'
+  const res = await syncCookieToBackend('douyin')
+  if (res.ok) {
+    cookieMsg.value = `已同步 ${res.count} 条 Cookie`
+    await refreshCookieStatus()
+  }
+  else {
+    cookieMsg.value = res.error || '同步失败'
+  }
+  cookieBusy.value = false
+}
+
+async function openDouyinLogin() {
+  await browser.tabs.create({ url: 'https://www.douyin.com/jingxuan' })
+}
+
 function toggleFormat(value: NoteFormat, checked: boolean) {
   const cur = settings.value.formats || []
   settings.value.formats = checked
@@ -150,6 +181,7 @@ function fmtTime(ts?: number) {
 onMounted(async () => {
   await Promise.all([settingsReady, tasksReady])
   await loadActiveTab()
+  await refreshCookieStatus()
   const running = tasks.value?.find(t => t.status !== 'SUCCESS' && t.status !== 'FAILED')
   if (running) {
     activeTaskId.value = running.taskId
@@ -176,6 +208,39 @@ onUnmounted(() => {
     <div class="text-xs text-gray-500 truncate" :title="tabUrl">
       {{ tabUrl || '当前没有打开的标签页' }}
     </div>
+
+    <section
+      class="text-xs rounded border p-2 flex flex-col gap-1"
+      :class="cookieStatus?.valid_looking
+        ? 'border-green-200 bg-green-50 text-green-800'
+        : cookieStatus?.configured
+          ? 'border-amber-200 bg-amber-50 text-amber-800'
+          : 'border-neutral-200 bg-neutral-50 text-neutral-600'"
+    >
+      <div class="flex items-center justify-between gap-2">
+        <span class="font-medium">
+          <template v-if="cookieStatus?.valid_looking">抖音 Cookie 已同步</template>
+          <template v-else-if="cookieStatus?.configured">抖音 Cookie 需重新同步</template>
+          <template v-else>抖音 Cookie 未同步</template>
+        </span>
+        <button class="underline shrink-0" :disabled="cookieBusy" @click="syncDouyinCookie">
+          {{ cookieBusy ? '同步中…' : '同步 Cookie' }}
+        </button>
+      </div>
+      <div v-if="cookieStatus?.valid_looking">
+        后端已有 {{ cookieStatus.cookie_count }} 项 Cookie，可用于解析抖音精选视频。
+      </div>
+      <div v-else-if="cookieStatus?.configured">
+        缺少 {{ cookieStatus.missing_keys.join('、') || '关键字段' }}。先确认已登录抖音，再重新同步。
+      </div>
+      <div v-else>
+        先在浏览器登录抖音精选，再点击同步。
+        <button class="underline ml-1" @click="openDouyinLogin">打开抖音精选</button>
+      </div>
+      <div v-if="cookieMsg" class="text-gray-500 break-words">
+        {{ cookieMsg }}
+      </div>
+    </section>
 
     <div v-if="!supported" class="text-xs text-amber-700 bg-amber-50 p-2 rounded">
       当前页面不是抖音精选视频链接

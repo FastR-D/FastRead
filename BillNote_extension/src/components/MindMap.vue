@@ -3,6 +3,7 @@ import { onMounted, ref, watch } from 'vue'
 import { Transformer } from 'markmap-lib'
 import { Markmap } from 'markmap-view'
 import { absolutizeMarkdownImages, stripSourceLink } from '~/logic/api'
+import { extractMindmapMarkdown } from '~/logic/mindmap'
 
 const props = defineProps<{ markdown: string }>()
 
@@ -13,7 +14,7 @@ const transformer = new Transformer()
 function render() {
   if (!svgRef.value)
     return
-  const md = absolutizeMarkdownImages(stripSourceLink(props.markdown || ''))
+  const md = extractMindmapMarkdown(absolutizeMarkdownImages(stripSourceLink(props.markdown || '')))
   const { root } = transformer.transform(md)
   if (!mm)
     mm = Markmap.create(svgRef.value, undefined, root)

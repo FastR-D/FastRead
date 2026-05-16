@@ -94,7 +94,7 @@ const createEmptyFormValues = (modelName = ''): NoteFormValues => ({
   style: 'minimal',
   video_interval: 6,
   grid_size: [2, 2],
-  format: [],
+  format: ['toc', 'summary', 'mindmap'],
   collection_folder: '默认收藏夹',
   collection_tags: '',
   collection_note: '',
@@ -197,7 +197,7 @@ const NoteForm = () => {
       video_understanding: formData.video_understanding ?? false,
       video_interval: formData.video_interval ?? 6,
       grid_size: formData.grid_size ?? [2, 2],
-      format: formData.format ?? [],
+      format: formData.format ?? ['toc', 'summary', 'mindmap'],
     })
   }, [
     // 当下面任意一个变了，就重新 reset
