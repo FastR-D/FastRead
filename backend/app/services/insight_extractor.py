@@ -1,3 +1,6 @@
+import json
+import logging
+import os
 import re
 from dataclasses import asdict, is_dataclass
 from typing import Any
@@ -5,6 +8,22 @@ from typing import Any
 
 CARD_LIMIT = 8
 CLAIM_LIMIT = 8
+LLM_CONTEXT_CHARS = int(os.getenv("INSIGHT_LLM_CONTEXT_CHARS", "24000"))
+
+logger = logging.getLogger(__name__)
+
+CARD_TYPES = {
+    "核心结论",
+    "关键概念",
+    "机制原理",
+    "操作步骤",
+    "风险提醒",
+    "反常识",
+    "行动清单",
+    "案例证据",
+    "金句",
+    "知识要点",
+}
 
 HIGH_RISK_TOPICS = {
     "医疗健康": ["治疗", "治愈", "药", "疾病", "癌", "疫苗", "医生", "医院", "保健", "减肥", "血压", "血糖"],
@@ -43,7 +62,12 @@ def _clean_markdown(text: str) -> str:
 
 def _sentences(text: str) -> list[str]:
     parts = re.split(r"[。！？!?；;\n]+", _clean_markdown(text))
-    return [p.strip(" -:*#\t") for p in parts if len(p.strip()) >= 12]
+    ignored = ["来源链接", "思维导图", "免责声明"]
+    return [
+        p.strip(" -:*#\t")
+        for p in parts
+        if len(p.strip()) >= 12 and not _contains_any(p, ignored)
+    ]
 
 
 def _clamp(value: float) -> int:
@@ -84,6 +108,223 @@ def _extract_bullets(markdown: str) -> list[str]:
 
 def _contains_any(text: str, words: list[str]) -> bool:
     return any(word in text for word in words)
+
+
+def _truncate_middle(text: str, limit: int) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    marker = "\n\n...[中间内容已压缩，保留首尾以控制 API 请求长度]...\n\n"
+    head_len = max(0, int((limit - len(marker)) * 0.58))
+    tail_len = max(0, limit - len(marker) - head_len)
+    return f"{text[:head_len]}{marker}{text[-tail_len:]}"
+
+
+def _format_timestamp(seconds: Any) -> str:
+    try:
+        total = max(0, int(float(seconds)))
+    except Exception:
+        total = 0
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _segment_text(segments: list[Any], full_text: str) -> str:
+    lines = []
+    for seg in segments or []:
+        data = _as_dict(seg)
+        text = str(data.get("text") or "").strip()
+        if not text:
+            continue
+        start = data.get("start", 0)
+        lines.append(f"[{_format_timestamp(start)}] {text}")
+    if lines:
+        return "\n".join(lines)
+    return full_text or ""
+
+
+def _json_from_response(text: str) -> dict:
+    raw = (text or "").strip()
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+        raw = re.sub(r"\s*```$", "", raw)
+    try:
+        loaded = json.loads(raw)
+        return loaded if isinstance(loaded, dict) else {}
+    except Exception:
+        pass
+
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start >= 0 and end > start:
+        try:
+            loaded = json.loads(raw[start:end + 1])
+            return loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _sanitize_card_text(value: Any, limit: int) -> str:
+    text = _clean_markdown(str(value or ""))
+    text = text.strip(" ，,。；;：:")
+    return text[:limit]
+
+
+def _looks_like_filler(card: dict) -> bool:
+    joined = f"{card.get('title', '')} {card.get('content', '')}"
+    filler_terms = [
+        "围绕",
+        "知识主题",
+        "回到原笔记",
+        "没有足够",
+        "基于标题和元数据",
+        "本视频主要介绍",
+        "本期视频讲了",
+    ]
+    if _contains_any(joined, filler_terms):
+        return True
+    content = card.get("content", "")
+    return len(content) < 28 and card.get("type") != "金句"
+
+
+def _normalize_llm_cards(raw_cards: Any) -> list[dict]:
+    if not isinstance(raw_cards, list):
+        return []
+
+    cards = []
+    for raw_card in raw_cards:
+        if not isinstance(raw_card, dict):
+            continue
+        card_type = _sanitize_card_text(raw_card.get("type"), 12) or "知识要点"
+        if card_type not in CARD_TYPES:
+            card_type = "知识要点"
+        title = _sanitize_card_text(raw_card.get("title"), 40)
+        content = _sanitize_card_text(raw_card.get("content"), 260)
+        evidence = _sanitize_card_text(raw_card.get("evidence"), 180)
+        try:
+            priority = int(raw_card.get("priority", 60))
+        except Exception:
+            priority = 60
+        priority = max(0, min(100, priority))
+
+        card = {
+            "type": card_type,
+            "title": title or card_type,
+            "content": content,
+            "evidence": evidence,
+            "priority": priority,
+        }
+        if _looks_like_filler(card):
+            continue
+        cards.append(card)
+
+    return _dedupe_cards(cards)
+
+
+def _build_llm_card_prompt(markdown: str, transcript_data: dict, audio_data: dict) -> str:
+    raw_info = _as_dict(audio_data.get("raw_info"))
+    tags = raw_info.get("tags") or raw_info.get("hashtags") or []
+    if isinstance(tags, list):
+        tags = "、".join(str(tag) for tag in tags if tag)
+
+    title = audio_data.get("title") or raw_info.get("title") or "未命名视频"
+    desc = raw_info.get("desc") or raw_info.get("caption") or raw_info.get("metadata_text") or ""
+    transcript_text = transcript_data.get("full_text") or ""
+    transcript_context = _segment_text(transcript_data.get("segments") or [], transcript_text)
+
+    notes_budget = max(3000, int(LLM_CONTEXT_CHARS * 0.34))
+    transcript_budget = max(6000, LLM_CONTEXT_CHARS - notes_budget)
+    note_context = _truncate_middle(markdown or "", notes_budget)
+    transcript_context = _truncate_middle(transcript_context, transcript_budget)
+
+    schema = {
+        "cards": [
+            {
+                "type": "核心结论",
+                "title": "8到24个字的具体标题",
+                "content": "80到180字，直接讲清一个可复用知识点、判断、机制、步骤或风险。",
+                "evidence": "来自转录或笔记的短证据，尽量保留原话或时间点。",
+                "priority": 95,
+            }
+        ]
+    }
+
+    return f"""你是严苛的视频知识编辑。请从下面的视频转录、笔记和元信息中提取真正有学习价值的知识卡片。
+
+目标：让用户不看原视频，也能抓住视频的核心知识、关键判断、方法步骤、风险边界和可复用经验。
+
+硬性规则：
+1. 优先依据“时间轴转录”，笔记只能作为辅助校验；不要只改写目录、标题或小节名。
+2. 输出 5 到 8 张卡片。宁可少，也不要空话、重复话、标题党。
+3. 每张卡片必须承载一个具体知识点：结论、概念、机制、步骤、案例证据、风险、反常识或行动建议。
+4. content 要说清“是什么 + 为什么重要/怎么用/边界是什么”，不要写“本视频主要讲了……”。
+5. evidence 放能支撑这张卡片的短证据；如果有时间点，保留时间点。
+6. 不要输出 Markdown，不要解释过程，只输出合法 JSON。
+
+允许的 type：核心结论、关键概念、机制原理、操作步骤、风险提醒、反常识、行动清单、案例证据、金句、知识要点。
+
+JSON 结构示例：
+{json.dumps(schema, ensure_ascii=False)}
+
+视频元信息：
+标题：{title}
+标签：{tags}
+简介：{desc}
+
+笔记：
+{note_context}
+
+时间轴转录：
+{transcript_context}
+"""
+
+
+def _call_llm_for_cards(markdown: str, transcript_data: dict, audio_data: dict, gpt: Any) -> list[dict]:
+    if gpt is None:
+        return []
+
+    prompt = _build_llm_card_prompt(markdown, transcript_data, audio_data)
+    messages = [{"role": "user", "content": prompt}]
+    old_temperature = getattr(gpt, "temperature", None)
+
+    try:
+        if old_temperature is not None:
+            gpt.temperature = 0.2
+
+        if hasattr(gpt, "_chat_completion_create"):
+            response = gpt._chat_completion_create(messages)
+        else:
+            client = getattr(gpt, "client", None)
+            model = getattr(gpt, "model", None)
+            if client is None or model is None:
+                return []
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.2,
+            )
+    except Exception as exc:
+        logger.warning(f"LLM 知识卡片生成失败，回退到离线规则: {exc}")
+        return []
+    finally:
+        if old_temperature is not None:
+            gpt.temperature = old_temperature
+
+    try:
+        content = response.choices[0].message.content
+    except Exception:
+        return []
+
+    payload = _json_from_response(content)
+    cards = _normalize_llm_cards(payload.get("cards"))
+    if len(cards) < 3:
+        logger.warning("LLM 知识卡片数量不足，回退到离线规则")
+        return []
+    return cards
 
 
 def _claim_key(text: str) -> str:
@@ -319,6 +560,8 @@ def _dedupe_cards(cards: list[dict]) -> list[dict]:
     seen = set()
     result = []
     for card in sorted(cards, key=lambda item: item.get("priority", 0), reverse=True):
+        if _looks_like_filler(card):
+            continue
         key = re.sub(r"\W+", "", f"{card.get('title', '')}{card.get('content', '')}")[:36]
         if not key or key in seen:
             continue
@@ -350,8 +593,12 @@ def _build_cards(markdown: str, transcript_text: str, audio_meta: dict) -> list[
             cards.append(_make_card("知识要点", text[:18], text, 70, text))
 
     for heading in headings[:6]:
-        if 4 <= len(heading) <= 32:
-            cards.append(_make_card("概念解释", heading, f"围绕「{heading}」整理出的知识主题，可回到原笔记查看展开内容。", 64))
+        related = next(
+            (sentence for sentence in sentences if heading in sentence and len(sentence) >= 24),
+            "",
+        )
+        if related and 4 <= len(heading) <= 32:
+            cards.append(_make_card("关键概念", heading, related, 66, related))
 
     quote_candidates = [
         s for s in sentences
@@ -360,14 +607,16 @@ def _build_cards(markdown: str, transcript_text: str, audio_meta: dict) -> list[
     for sentence in quote_candidates[:2]:
         cards.append(_make_card("金句", "高浓度表达", sentence, 78, sentence))
 
-    if not cards and title:
-        cards.append(_make_card("核心结论", title, "当前视频没有足够的转录内容，先基于标题和元数据生成知识入口。", 50))
+    result = _dedupe_cards(cards)
+    if not result and title:
+        fallback_text = sentences[0] if sentences else _clean_markdown(transcript_text)[:160]
+        if fallback_text:
+            result = [_make_card("核心结论", title, fallback_text, 50, fallback_text)]
+    return result
 
-    return _dedupe_cards(cards)
 
-
-def build_insights(markdown: str, transcript: Any, audio_meta: Any) -> dict:
-    """从笔记、转录和视频元信息中生成轻量结构化洞察，不额外消耗 LLM token。"""
+def build_insights(markdown: str, transcript: Any, audio_meta: Any, gpt: Any = None) -> dict:
+    """从笔记、转录和视频元信息中生成结构化洞察；有 GPT 时优先抽取高质量知识卡片。"""
     transcript_data = _as_dict(transcript)
     audio_data = _as_dict(audio_meta)
     raw = _as_dict(transcript_data.get("raw"))
@@ -408,6 +657,8 @@ def build_insights(markdown: str, transcript: Any, audio_meta: Any) -> dict:
     verification = _build_verification(markdown_text, transcript_text, metadata_only, transcript_len)
     credibility_score = min(credibility_score, verification["overall"]["score"] + 12)
 
+    llm_cards = _call_llm_for_cards(markdown_text, transcript_data, audio_data, gpt)
+
     return {
         "version": 1,
         "summary": {
@@ -422,5 +673,5 @@ def build_insights(markdown: str, transcript: Any, audio_meta: Any) -> dict:
             "actionability": _score_item(actionability_score, f"检测到 {action_hits} 个行动词和 {len(bullets)} 个列表项。"),
         },
         "verification": verification,
-        "cards": _build_cards(markdown_text, transcript_text, audio_data),
+        "cards": llm_cards or _build_cards(markdown_text, transcript_text, audio_data),
     }

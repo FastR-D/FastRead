@@ -8,12 +8,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
-  // 在 Docker 环境中，父目录可能没有 .env 文件，使用当前目录
-  const envDir = process.env.DOCKER_BUILD ? __dirname : path.resolve(__dirname, '../')
+  // 优先使用进程环境变量；避免本地 Vite/esbuild 在 Windows 上向上扫描用户目录。
+  const envDir = process.env.VITE_ENV_DIR || __dirname
   const env = loadEnv(mode, envDir)
 
-  const apiBaseUrl = env.VITE_API_BASE_URL || 'http://127.0.0.1:8483'
-  const port = parseInt(env.VITE_FRONTEND_PORT || '3015', 10)
+  const apiBaseUrl = process.env.VITE_API_BASE_URL || env.VITE_API_BASE_URL || '/api'
+  const backendPort = process.env.BACKEND_PORT || env.BACKEND_PORT || '8483'
+  const proxyTarget = apiBaseUrl.startsWith('/')
+    ? `http://127.0.0.1:${backendPort}`
+    : apiBaseUrl
+  const port = parseInt(process.env.VITE_FRONTEND_PORT || env.VITE_FRONTEND_PORT || '3015', 10)
 
   return {
     base: './',
@@ -40,12 +44,12 @@ export default defineConfig(({ mode }) => {
       allowedHosts: true, // 允许任意域名访问
       proxy: {
         '/api': {
-          target: apiBaseUrl,
+          target: proxyTarget,
           changeOrigin: true,
           rewrite: path => path.replace(/^\/api/, '/api'),
         },
         '/static': {
-          target: apiBaseUrl,
+          target: proxyTarget,
           changeOrigin: true,
           rewrite: path => path.replace(/^\/static/, '/static'),
         },

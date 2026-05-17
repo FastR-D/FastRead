@@ -1,4 +1,5 @@
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Any, Callable
 
@@ -18,6 +19,18 @@ class ConcurrentTaskExecutor:
         self._pool.shutdown(wait=wait)
 
 
-# 保持向后兼容的导出名
-SerialTaskExecutor = ConcurrentTaskExecutor
+class SerialTaskExecutor:
+    """按调用顺序串行执行任务，用于需要互斥的旧调用方和测试。"""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+
+    def run(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return fn(*args, **kwargs)
+
+    def shutdown(self, wait: bool = True):
+        return None
+
+
 task_serial_executor = ConcurrentTaskExecutor()

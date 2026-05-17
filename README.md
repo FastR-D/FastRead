@@ -76,14 +76,23 @@ Reel Mind 当前版本已经收口为抖音精选知识视频演示版，重点�
 
 ## 快速开始
 
-### 方式一：Docker 一键启动
+### 方式一：Docker 启动整套服务（推荐）
 
-Windows 用户可以直接双击根目录的 `start-demo.bat`。
+Docker 是最接近开箱即用的启动方式。Windows 用户可以双击根目录的 `run-docker.bat`；需要强制重建镜像时，在终端执行：
+
+```powershell
+.\run-docker.bat --rebuild
+```
+
+也可以直接使用 Docker Compose：
+
+```powershell
+docker compose up -d --build
+```
 
 脚本会自动：
 
 - 检查 Docker Desktop 是否可用
-- 创建默认 `.env`
 - 启动后端、前端和 Nginx
 - 通过健康检查后打开浏览器
 
@@ -91,12 +100,6 @@ Windows 用户可以直接双击根目录的 `start-demo.bat`。
 
 ```text
 http://127.0.0.1:3015/
-```
-
-也可以在终端中手动启动：
-
-```powershell
-docker compose up -d --build
 ```
 
 Docker 模式下，后端不直接暴露到宿主机；统一通过 Nginx 入口访问：
@@ -155,13 +158,16 @@ docker compose up -d --build
 Copy-Item .env.example .env
 ```
 
+如果使用 Windows 本地脚本，`start-demo.bat` 会调用 `run.bat` 启动源码开发环境。这个脚本不会创建虚拟环境或安装前端依赖；首次运行前需要先完成下面的依赖安装。
+
 启动后端：
 
 ```powershell
 cd backend
-pip install -r requirements.txt
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 $env:BACKEND_PORT="8493"
-python main.py
+.\.venv\Scripts\python.exe main.py
 ```
 
 后端健康检查：
@@ -186,6 +192,32 @@ http://127.0.0.1:3016/
 ```
 
 后端根路径不是页面入口，直接访问 `http://127.0.0.1:8493` 返回 `{"detail":"Not Found"}` 属于正常现象。
+
+## 测试
+
+后端测试依赖单独放在 `backend/requirements-dev.txt`。首次配置测试环境：
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+cd ..
+```
+
+从仓库根目录运行后端测试：
+
+```powershell
+backend\.venv\Scripts\python.exe -m pytest
+```
+
+前端和扩展构建检查：
+
+```powershell
+cd reel-mind-frontend
+npm run build
+
+cd ..\reel-mind-extension
+npm run build
+```
 
 ## 使用流程
 
@@ -341,7 +373,10 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 ├── nginx/                 # Docker 反向代理配置
 ├── readme/                # 阶段交接与补充文档
 ├── docker-compose.yml     # Docker Compose 部署
-├── start-demo.bat         # Windows 一键启动脚本
+├── run-docker.bat         # Windows Docker 启动脚本
+├── run.bat                # Windows 源码开发启动脚本
+├── start-demo.bat         # Windows 源码开发启动入口，调用 run.bat
+├── pytest.ini             # 后端 pytest 配置
 └── README-usage.md        # 当前 demo 的详细使用说明
 ```
 

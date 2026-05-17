@@ -34,7 +34,13 @@
 
 ### 方式一：Docker 启动整套服务
 
-在仓库根目录执行：
+Windows 用户可以双击根目录的 `run-docker.bat`。需要强制重建镜像时，在仓库根目录执行：
+
+```powershell
+.\run-docker.bat --rebuild
+```
+
+也可以直接执行：
 
 ```powershell
 docker compose up -d --build
@@ -112,14 +118,18 @@ reel-mind-nginx
 - 后端：`http://127.0.0.1:8493`
 - 前端：`http://127.0.0.1:3016`
 
+Windows 的 `start-demo.bat` 会调用 `run.bat` 启动源码开发环境。它要求 `backend\.venv` 和 `reel-mind-frontend\node_modules` 已经存在；首次运行前先安装依赖。
+
 #### 启动后端
 
 在仓库根目录执行：
 
 ```powershell
 cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 $env:BACKEND_PORT="8493"
-python main.py
+.\.venv\Scripts\python.exe main.py
 ```
 
 后端健康检查：

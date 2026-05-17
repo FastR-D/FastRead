@@ -231,5 +231,57 @@ class TestOnlineVerifierBrave(unittest.TestCase):
         self.assertEqual(captured["headers"]["Accept-Language"], "zh-CN,zh;q=0.9,en;q=0.7")
 
 
+class TestOnlineVerifierDomesticAcademic(unittest.TestCase):
+    def setUp(self):
+        self.env_patch = mock.patch.dict(
+            os.environ,
+            {
+                "ONLINE_VERIFY_SEARCH_PROVIDER": "bing_academic",
+                "ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS": "baidu_xueshu,baidu,bing_cn,brave",
+            },
+        )
+        self.env_patch.start()
+        self.online_verifier = _load_online_verifier()
+
+    def tearDown(self):
+        self.env_patch.stop()
+
+    def test_provider_chain_prefers_domestic_academic_search(self):
+        self.assertEqual(
+            self.online_verifier._provider_chain(),
+            ["bing_academic", "baidu_xueshu", "baidu", "bing_cn", "brave"],
+        )
+
+    def test_search_web_dispatches_to_bing_academic_first(self):
+        result = [{"title": "paper", "url": "https://cn.bing.com/academic", "snippet": ""}]
+        with mock.patch.object(
+            self.online_verifier,
+            "search_bing_academic",
+            return_value=result,
+        ) as search_bing_academic, mock.patch.object(
+            self.online_verifier,
+            "search_brave",
+        ) as search_brave:
+            self.assertEqual(self.online_verifier.search_web("query", max_results=3), result)
+
+        search_bing_academic.assert_called_once_with("query", max_results=3)
+        search_brave.assert_not_called()
+
+    def test_search_web_falls_back_to_baidu_xueshu(self):
+        result = [{"title": "academic", "url": "https://xueshu.baidu.com/s", "snippet": ""}]
+        with mock.patch.object(
+            self.online_verifier,
+            "search_bing_academic",
+            return_value=[],
+        ), mock.patch.object(
+            self.online_verifier,
+            "search_baidu_xueshu",
+            return_value=result,
+        ) as search_baidu_xueshu:
+            self.assertEqual(self.online_verifier.search_web("query", max_results=3), result)
+
+        search_baidu_xueshu.assert_called_once_with("query", max_results=3)
+
+
 if __name__ == "__main__":
     unittest.main()

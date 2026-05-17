@@ -11,7 +11,7 @@ SUPPORTED_PLATFORMS = {
 
 def is_supported_video_url(url: str, platform: str | None = None) -> bool:
     patterns = [SUPPORTED_PLATFORMS.get(platform)] if platform else SUPPORTED_PLATFORMS.values()
-    match = any(pattern and re.search(pattern, url) for pattern in patterns)
+    match = next((re.search(pattern, url) for pattern in patterns if pattern), None)
     if not match:
         return False
 

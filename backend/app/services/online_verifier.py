@@ -23,10 +23,13 @@ load_dotenv(Path(__file__).resolve().parents[3] / ".env", override=False)
 
 SEARCH_TIMEOUT = float(os.getenv("ONLINE_VERIFY_TIMEOUT", "8"))
 DEFAULT_MAX_RESULTS = int(os.getenv("ONLINE_VERIFY_RESULTS", "5"))
-SEARCH_PROVIDER = os.getenv("ONLINE_VERIFY_SEARCH_PROVIDER", "bing_cn").strip().lower()
+SEARCH_PROVIDER = os.getenv("ONLINE_VERIFY_SEARCH_PROVIDER", "bing_academic").strip().lower()
 SEARCH_FALLBACK_PROVIDERS = [
     provider.strip().lower()
-    for provider in os.getenv("ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS", "baidu,bing_cn").split(",")
+    for provider in os.getenv(
+        "ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS",
+        "baidu_xueshu,baidu,bing_cn,brave",
+    ).split(",")
     if provider.strip()
 ]
 BRAVE_SEARCH_ENDPOINT = os.getenv(
@@ -54,6 +57,9 @@ TRUSTED_DOMAIN_HINTS = (
     "pku.edu.cn",
     "tsinghua.edu.cn",
     "cnki.net",
+    "wanfangdata.com.cn",
+    "cqvip.com",
+    "xueshu.baidu.com",
     "nature.com",
     "science.org",
 )
@@ -68,6 +74,10 @@ AUTHORITY_TITLE_HINTS = (
     "研究",
     "报告",
     "论文",
+    "学报",
+    "期刊",
+    "硕士",
+    "博士",
 )
 
 KEEP_CHINESE_TERMS = {
@@ -218,6 +228,51 @@ def _parse_baidu_results(html: str, max_results: int) -> list[dict]:
     return results
 
 
+def _parse_baidu_xueshu_results(html: str, max_results: int) -> list[dict]:
+    soup = BeautifulSoup(html, "html.parser")
+    results = []
+    for result in soup.select(".result, .sc_content, .c_font, .result-container"):
+        link = result.select_one("h3 a, .t a, .sc_content h3 a, a[href]")
+        if not link:
+            continue
+        title = link.get_text(" ", strip=True)
+        url = _clean_result_url(link.get("href") or "")
+        snippet_el = result.select_one(".c_abstract, .c-abstract, .abstract, .sc_content")
+        snippet = snippet_el.get_text(" ", strip=True) if snippet_el else ""
+        if not title or not url:
+            continue
+        results.append(_result_item(title, url, snippet))
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def _parse_bing_academic_results(html: str, max_results: int) -> list[dict]:
+    soup = BeautifulSoup(html, "html.parser")
+    results = []
+    selectors = [
+        "li.b_algo",
+        ".aca_algo",
+        ".academic_paper",
+        ".b_entityTP",
+        ".b_ans",
+    ]
+    for result in soup.select(", ".join(selectors)):
+        link = result.select_one("h2 a, h3 a, a[href]")
+        if not link:
+            continue
+        title = link.get_text(" ", strip=True)
+        url = _clean_result_url(link.get("href") or "")
+        snippet_el = result.select_one(".b_caption p, .aca_snippet, .snippet, p")
+        snippet = snippet_el.get_text(" ", strip=True) if snippet_el else ""
+        if not title or not url or not url.startswith(("http://", "https://")):
+            continue
+        results.append(_result_item(title, url, snippet))
+        if len(results) >= max_results:
+            break
+    return results
+
+
 def _strip_html(text: str) -> str:
     if not text:
         return ""
@@ -252,6 +307,10 @@ def _parse_brave_results(payload: dict, max_results: int) -> list[dict]:
 
 
 def _provider_results(provider: str, query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict]:
+    if provider in {"baidu_xueshu", "xueshu_baidu", "baidu_scholar"}:
+        return search_baidu_xueshu(query, max_results=max_results)
+    if provider in {"bing_academic", "bing_scholar", "academic_bing"}:
+        return search_bing_academic(query, max_results=max_results)
     if provider in {"brave", "brave_api", "brave_search"}:
         return search_brave(query, max_results=max_results)
     if provider in {"bing", "bing_cn", "cn_bing"}:
@@ -292,6 +351,14 @@ def search_web(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict]
     return search_bing_cn(query, max_results=max_results)
 
 
+def _domestic_supplement_providers() -> list[str]:
+    providers = []
+    for provider in ("baidu_xueshu", "bing_academic", "baidu", "bing_cn"):
+        if provider not in _provider_chain() and provider not in providers:
+            providers.append(provider)
+    return providers
+
+
 def search_web_multi(
     queries: list[str],
     max_results: int = DEFAULT_MAX_RESULTS,
@@ -326,6 +393,23 @@ def search_web_multi(
                 query_fallback.append(item)
                 continue
             query_relevant.append(item)
+        if claim and not query_relevant:
+            try:
+                for provider in _domestic_supplement_providers():
+                    for item in _provider_results(provider, query, max_results=max_results):
+                        url = item.get("url") or ""
+                        key = url or f"{item.get('title', '')}|{item.get('snippet', '')}"
+                        if not key or key in seen_urls:
+                            continue
+                        seen_urls.add(key)
+                        if not _result_relevance(claim, item)["relevant"]:
+                            query_fallback.append(item)
+                            continue
+                        query_relevant.append(item)
+                    if query_relevant:
+                        break
+            except Exception as exc:
+                logger.warning(f"联网核验国内补充检索失败 query={query}: {exc}")
         if claim and not query_relevant and SEARCH_PROVIDER in {"bing", "bing_cn", "cn_bing"}:
             try:
                 for item in search_baidu(query, max_results=max_results):
@@ -390,6 +474,22 @@ def search_bing_cn(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[d
     return results
 
 
+def search_bing_academic(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict]:
+    url = f"https://cn.bing.com/academic/search?q={quote_plus(query)}"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
+        ),
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+    }
+    with httpx.Client(timeout=SEARCH_TIMEOUT, follow_redirects=True, headers=headers) as client:
+        response = client.get(url)
+        response.raise_for_status()
+    results = _parse_bing_academic_results(response.text, max_results=max_results)
+    return results or _parse_bing_results(response.text, max_results=max_results)
+
+
 def search_baidu(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict]:
     url = f"https://www.baidu.com/s?wd={quote_plus(query)}"
     headers = {
@@ -404,6 +504,22 @@ def search_baidu(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dic
         response.raise_for_status()
     results = _parse_baidu_results(response.text, max_results=max_results)
     return results or search_wikipedia(query, max_results=max_results)
+
+
+def search_baidu_xueshu(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict]:
+    url = f"https://xueshu.baidu.com/s?wd={quote_plus(query)}"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
+        ),
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+    }
+    with httpx.Client(timeout=SEARCH_TIMEOUT, follow_redirects=True, headers=headers) as client:
+        response = client.get(url)
+        response.raise_for_status()
+    results = _parse_baidu_xueshu_results(response.text, max_results=max_results)
+    return results or _parse_baidu_results(response.text, max_results=max_results)
 
 
 def search_brave(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict]:

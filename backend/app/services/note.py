@@ -235,7 +235,7 @@ class NoteGenerator:
                 )
 
             markdown = prepend_source_link(markdown, str(video_url))
-            insights = build_insights(markdown, transcript, audio_meta)
+            insights = build_insights(markdown, transcript, audio_meta, gpt=gpt)
 
             # 5. 保存记录到数据库
             self._update_status(task_id, TaskStatus.SAVING)

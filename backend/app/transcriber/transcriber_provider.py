@@ -2,9 +2,6 @@ import os
 import platform
 from enum import Enum
 
-from app.transcriber.groq import GroqTranscriber
-from app.transcriber.whisper import WhisperTranscriber
-from app.transcriber.bcut import BcutTranscriber
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -14,16 +11,6 @@ class TranscriberType(str, Enum):
     MLX_WHISPER = "mlx-whisper"
     BCUT = "bcut"
     GROQ = "groq"
-
-# 在 Apple 平台尝试导入 MLX Whisper（不再依赖环境变量，支持前端动态切换）
-MLX_WHISPER_AVAILABLE = False
-if platform.system() == "Darwin":
-    try:
-        from app.transcriber.mlx_whisper_transcriber import MLXWhisperTranscriber
-        MLX_WHISPER_AVAILABLE = True
-        logger.info("MLX Whisper 可用，已导入")
-    except ImportError:
-        logger.warning("MLX Whisper 导入失败，可能未安装 mlx_whisper")
 
 logger.info('初始化转录服务提供器')
 
@@ -49,18 +36,28 @@ def _init_transcriber(key: TranscriberType, cls, *args, **kwargs):
 
 # 各类型获取方法
 def get_groq_transcriber():
+    from app.transcriber.groq import GroqTranscriber
+
     return _init_transcriber(TranscriberType.GROQ, GroqTranscriber)
 
 def get_whisper_transcriber(model_size="base", device="cuda"):
+    from app.transcriber.whisper import WhisperTranscriber
+
     return _init_transcriber(TranscriberType.FAST_WHISPER, WhisperTranscriber, model_size=model_size, device=device)
 
 def get_bcut_transcriber():
+    from app.transcriber.bcut import BcutTranscriber
+
     return _init_transcriber(TranscriberType.BCUT, BcutTranscriber)
 
 def get_mlx_whisper_transcriber(model_size="base"):
-    if not MLX_WHISPER_AVAILABLE:
-        logger.warning("MLX Whisper 不可用，请确保在 Apple 平台且已安装 mlx_whisper")
-        raise ImportError("MLX Whisper 不可用")
+    if platform.system() != "Darwin":
+        raise RuntimeError("MLX Whisper 不可用：需要 macOS 平台。")
+    try:
+        from app.transcriber.mlx_whisper_transcriber import MLXWhisperTranscriber
+    except ImportError as exc:
+        logger.warning("MLX Whisper 导入失败，可能未安装 mlx_whisper")
+        raise ImportError("MLX Whisper 不可用，请安装 mlx_whisper 包。") from exc
     return _init_transcriber(TranscriberType.MLX_WHISPER, MLXWhisperTranscriber, model_size=model_size)
 
 # 通用入口
@@ -90,7 +87,7 @@ def get_transcriber(transcriber_type="fast-whisper", model_size="base", device="
         return get_whisper_transcriber(whisper_model_size, device=device)
 
     elif transcriber_enum == TranscriberType.MLX_WHISPER:
-        if not MLX_WHISPER_AVAILABLE:
+        if platform.system() != "Darwin":
             raise RuntimeError(
                 "MLX Whisper 不可用：需要 macOS 平台并安装 mlx_whisper 包 (pip install mlx_whisper)。"
                 "请在「音频转写配置」页面切换到其他转写引擎。"

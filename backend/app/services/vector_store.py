@@ -3,9 +3,6 @@ import os
 import re
 from typing import Optional
 
-import chromadb
-from chromadb.config import Settings
-
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -105,6 +102,15 @@ class VectorStoreManager:
     """基于 ChromaDB 的笔记向量存储管理器。"""
 
     def __init__(self):
+        try:
+            import chromadb
+            from chromadb.config import Settings
+        except ImportError as exc:
+            raise RuntimeError(
+                "当前本地环境未安装 ChromaDB，知识库问答向量索引不可用。"
+                "如需启用，请运行：backend\\.venv\\Scripts\\python.exe -m pip install chromadb"
+            ) from exc
+
         os.makedirs(VECTOR_DB_DIR, exist_ok=True)
         self._client = chromadb.PersistentClient(
             path=VECTOR_DB_DIR,
