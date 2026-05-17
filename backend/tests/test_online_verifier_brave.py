@@ -282,6 +282,44 @@ class TestOnlineVerifierDomesticAcademic(unittest.TestCase):
 
         search_baidu_xueshu.assert_called_once_with("query", max_results=3)
 
+    def test_search_web_multi_supplements_when_primary_source_is_weak(self):
+        weak_result = {
+            "title": "鸡蛋 1500种 独特 蛋白质",
+            "url": "https://www.zhihu.com/question/1",
+            "snippet": "鸡蛋 1500种 独特 蛋白质",
+            "trusted": False,
+        }
+        academic_result = {
+            "title": "鸡蛋 1500种 独特 蛋白质 研究",
+            "url": "https://example.edu/paper",
+            "snippet": "鸡蛋 1500种 独特 蛋白质 研究",
+            "trusted": True,
+        }
+
+        def provider_results(provider, _query, max_results=5):
+            if provider == "baidu_xueshu":
+                return [academic_result]
+            return []
+
+        provider_trace = []
+        with mock.patch.object(
+            self.online_verifier,
+            "_search_web_with_provider",
+            return_value=([weak_result], "bing_academic"),
+        ), mock.patch.object(
+            self.online_verifier,
+            "_provider_results",
+            side_effect=provider_results,
+        ):
+            results = self.online_verifier.search_web_multi(
+                ["鸡蛋 1500种 蛋白质"],
+                claim="鸡蛋中含有超过1500种独特蛋白质",
+                provider_trace=provider_trace,
+            )
+
+        self.assertEqual(results, [weak_result, academic_result])
+        self.assertEqual(provider_trace, ["bing_academic", "baidu_xueshu"])
+
 
 if __name__ == "__main__":
     unittest.main()

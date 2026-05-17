@@ -5,11 +5,11 @@
 <h1 align="center">Reel Mind</h1>
 
 <p align="center">
-  <strong>把知识视频变成可复习、可搜索、可追问的 AI 笔记</strong>
+  <strong>把知识视频变成可复习、可搜索、可追问、可核验的 AI 笔记</strong>
 </p>
 
 <p align="center">
-  把短视频变成可沉淀的知识，支持视频解析、音频转写、AI 总结、Markdown 笔记、思维导图、收藏回看和上下文问答。
+  把短视频变成可沉淀的知识，支持视频解析、音频转写、AI 总结、Markdown 笔记、思维导图、知识卡片、联网核验、收藏回看和上下文问答。
 </p>
 
 <p align="center">
@@ -41,10 +41,14 @@
 
 Reel Mind 当前版本已经收口为抖音精选知识视频演示版，重点验证从视频链接到知识资产的完整闭环。
 
+我们做了一款面向**知识型短视频学习者、内容整理者和对信息可信度敏感的用户**，在**刷到有价值但真假难辨、难以复习的知识视频**场景下，通过**视频链接一键生成 AI 笔记、知识卡片、思维导图，并对关键主张进行联网核验**，带来**既能快速吸收知识，又能判断内容可信度的安心学习体验**的产物。
+
 - **一键生成知识笔记**：输入抖音精选视频链接，自动解析视频信息、下载音频、转写内容并生成结构化 Markdown。
 - **思维导图视图**：从笔记中提取专用 `## 思维导图` 章节，使用 Markmap 渲染可视化知识结构。
+- **知识卡片与内容评分**：从笔记、转写和视频元信息中提取核心结论、操作步骤、风险提醒和行动清单，并给出信息密度、可信度、可执行性评分。
+- **联网核验**：从视频笔记中抽取数据陈述、因果判断、高风险建议等可核验主张，结合学术/国内/Brave 等搜索源和 AI 判断，提示外部佐证、反证或证据不足。
 - **收藏与回看**：支持收藏夹、标签和备注，生成记录会持久化到后端，刷新或重启后仍可恢复。
-- **AI 上下文问答**：基于当前任务的视频元信息、转写文本和笔记内容进行追问。
+- **AI 上下文问答**：支持基于当前任务的视频元信息、转写文本和笔记内容追问，也支持跨视频知识库问答。
 - **多模型供应商**：支持 OpenAI 兼容接口、DeepSeek、Qwen 等模型供应商配置。
 - **转写兜底策略**：支持 bcut、fast-whisper、Groq、MLX Whisper 等转写方式，并在低质量 ASR 场景下合并视频元信息。
 - **浏览器扩展辅助**：扩展提供 Cookie 同步、页面入口、弹窗和侧边栏能力，降低抖音登录态配置成本。
@@ -246,7 +250,9 @@ https://www.douyin.com/jingxuan?modal_id=7633777410067926322
 5. 点击「生成笔记」。
 6. 等待任务完成解析、下载、转写和总结。
 7. 在「我的收藏」中回看历史笔记。
-8. 切换「Markdown / 思维导图 / AI 问答」视图继续复习。
+8. 切换「Markdown / 思维导图 / 知识卡片 / AI 问答」视图继续复习。
+9. 在知识卡片视图查看信息密度、可信度、可执行性评分。
+10. 点击「联网核验」对关键主张进行外部资料核验，查看来源、佐证、反证或证据不足提示。
 
 生成结果默认写入：
 
@@ -279,6 +285,11 @@ backend/note_results/
 | `WHISPER_MODEL_SIZE` | Whisper 模型大小 | `tiny`、`base`、`small`、`medium` |
 | `NOTE_OUTPUT_DIR` | 笔记结果目录 | `note_results` |
 | `FFMPEG_BIN_PATH` | FFmpeg 可执行文件路径 | 留空则使用系统 PATH |
+| `ONLINE_VERIFY_SEARCH_PROVIDER` | 联网核验主搜索源 | `bing_academic`、`brave`、`bing_cn` |
+| `ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS` | 联网核验兜底搜索源 | `baidu_xueshu,baidu,bing_cn,brave` |
+| `BRAVE_SEARCH_API_KEY` | Brave Search API Key | 使用 Brave 搜索源时填写 |
+| `BRAVE_SEARCH_COUNTRY` | Brave 搜索国家/地区 | `CN` |
+| `BRAVE_SEARCH_LANG` | Brave 搜索语言 | `zh-hans` |
 
 推荐开发期使用：
 
@@ -385,6 +396,7 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 ├── doc/                   # 文档图片和产品资料
 ├── nginx/                 # Docker 反向代理配置
 ├── readme/                # 阶段交接与补充文档
+├── task/                  # PRD 汇报版和使用指南
 ├── docker-compose.yml     # Docker Compose 部署
 ├── OPEN_ME_FIRST.md       # 给非技术人员的最短说明
 ├── CHECK_REQUIREMENTS.bat # Windows 环境体检入口
@@ -406,15 +418,21 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 - [x] 收藏夹、标签、备注与历史回看
 - [x] Markdown 笔记和专用思维导图展示
 - [x] 基于当前笔记上下文的 AI 问答
+- [x] 知识卡片、信息密度、可信度、可执行性评分
+- [x] 离线主张抽取与联网核验
+- [x] 跨视频知识库问答 MVP
 - [x] 浏览器扩展 Cookie 同步入口
 - [ ] 删除任务时统一清理数据库、结果文件、转写缓存和向量索引
 - [ ] 生成失败原因分类与用户可读提示
 - [ ] Markdown、图片、PDF、Word 等导出体验完善
 - [ ] 针对画面文字知识视频增强截图 OCR 或视频理解
+- [ ] 联网核验支持按单条主张重新核验和人工标注
 - [ ] 更完整的端到端回归测试
 
 ## 相关文档
 
+- [PRD 技术汇报版](./task/ReelMind_PRD_汇报版.md)
+- [产品使用指南](./task/ReelMind_使用指南.md)
 - [详细使用说明](./README-usage.md)
 - [贡献指南](./CONTRIBUTING.md)
 - [更新日志](./CHANGELOG.md)

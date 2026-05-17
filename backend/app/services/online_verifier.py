@@ -331,7 +331,7 @@ def _provider_chain() -> list[str]:
     return deduped or ["bing_cn"]
 
 
-def search_web(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict]:
+def _search_web_with_provider(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> tuple[list[dict], str]:
     errors = []
     for provider in _provider_chain():
         try:
@@ -341,14 +341,20 @@ def search_web(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict]
             logger.warning(f"联网核验搜索源 {provider!r} 失败 query={query}: {exc}")
             continue
         if results:
+            logger.info(f"联网核验搜索源 {provider!r} 返回 {len(results)} 条 query={query}")
             if provider != SEARCH_PROVIDER:
                 logger.info(f"联网核验使用兜底搜索源 {provider!r} query={query}")
-            return results
+            return results, provider
 
     if errors:
         raise errors[0][1]
     logger.warning(f"未知联网核验搜索源 {SEARCH_PROVIDER!r}，使用 cn.bing.com")
-    return search_bing_cn(query, max_results=max_results)
+    return search_bing_cn(query, max_results=max_results), "bing_cn"
+
+
+def search_web(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict]:
+    results, _provider = _search_web_with_provider(query, max_results=max_results)
+    return results
 
 
 def _domestic_supplement_providers() -> list[str]:
@@ -359,10 +365,52 @@ def _domestic_supplement_providers() -> list[str]:
     return providers
 
 
+def _quality_supplement_providers(used_providers: set[str] | None = None) -> list[str]:
+    used_providers = used_providers or set()
+    providers = []
+    for provider in ("baidu_xueshu", "bing_academic", "brave", "bing_cn", "baidu"):
+        if provider not in used_providers and provider not in providers:
+            providers.append(provider)
+    return providers
+
+
+def _result_key(item: dict) -> str:
+    return item.get("url") or f"{item.get('title', '')}|{item.get('snippet', '')}"
+
+
+def _split_relevant_results(items: list[dict], claim: str, seen_urls: set[str]) -> tuple[list[dict], list[dict]]:
+    relevant = []
+    fallback = []
+    for item in items:
+        key = _result_key(item)
+        if not key or key in seen_urls:
+            continue
+        seen_urls.add(key)
+        if claim and not _result_relevance(claim, item)["relevant"]:
+            fallback.append(item)
+            continue
+        relevant.append(item)
+    return relevant, fallback
+
+
+def _needs_quality_supplement(results: list[dict], claim: str) -> bool:
+    if not claim:
+        return False
+    if not results:
+        return True
+    return len(results) < 2 or not any(result.get("trusted") for result in results)
+
+
+def _record_provider(provider_trace: list[str] | None, provider: str) -> None:
+    if provider_trace is not None and provider and provider not in provider_trace:
+        provider_trace.append(provider)
+
+
 def search_web_multi(
     queries: list[str],
     max_results: int = DEFAULT_MAX_RESULTS,
     claim: str = "",
+    provider_trace: list[str] | None = None,
 ) -> list[dict]:
     seen_queries = set()
     seen_urls = set()
@@ -375,55 +423,50 @@ def search_web_multi(
             continue
         seen_queries.add(query)
         logger.info(f"联网核验检索 query={query}")
+        used_providers = set()
         try:
-            query_results = search_web(query, max_results=max_results)
+            query_results, provider = _search_web_with_provider(query, max_results=max_results)
+            used_providers.add(provider)
+            _record_provider(provider_trace, provider)
         except Exception as exc:
             logger.warning(f"联网核验单条检索失败 query={query}: {exc}")
             failures.append(exc)
             continue
-        query_relevant = []
-        query_fallback = []
-        for item in query_results:
-            url = item.get("url") or ""
-            key = url or f"{item.get('title', '')}|{item.get('snippet', '')}"
-            if not key or key in seen_urls:
-                continue
-            seen_urls.add(key)
-            if claim and not _result_relevance(claim, item)["relevant"]:
-                query_fallback.append(item)
-                continue
-            query_relevant.append(item)
+
+        query_relevant, query_fallback = _split_relevant_results(query_results, claim, seen_urls)
+
         if claim and not query_relevant:
-            try:
-                for provider in _domestic_supplement_providers():
-                    for item in _provider_results(provider, query, max_results=max_results):
-                        url = item.get("url") or ""
-                        key = url or f"{item.get('title', '')}|{item.get('snippet', '')}"
-                        if not key or key in seen_urls:
-                            continue
-                        seen_urls.add(key)
-                        if not _result_relevance(claim, item)["relevant"]:
-                            query_fallback.append(item)
-                            continue
-                        query_relevant.append(item)
-                    if query_relevant:
-                        break
-            except Exception as exc:
-                logger.warning(f"联网核验国内补充检索失败 query={query}: {exc}")
-        if claim and not query_relevant and SEARCH_PROVIDER in {"bing", "bing_cn", "cn_bing"}:
-            try:
-                for item in search_baidu(query, max_results=max_results):
-                    url = item.get("url") or ""
-                    key = url or f"{item.get('title', '')}|{item.get('snippet', '')}"
-                    if not key or key in seen_urls:
-                        continue
-                    seen_urls.add(key)
-                    if not _result_relevance(claim, item)["relevant"]:
-                        query_fallback.append(item)
-                        continue
-                    query_relevant.append(item)
-            except Exception as exc:
-                logger.warning(f"联网核验百度补充检索失败 query={query}: {exc}")
+            for provider in _domestic_supplement_providers():
+                try:
+                    supplement_results = _provider_results(provider, query, max_results=max_results)
+                except Exception as exc:
+                    logger.warning(f"联网核验国内补充检索失败 provider={provider!r} query={query}: {exc}")
+                    continue
+                used_providers.add(provider)
+                _record_provider(provider_trace, provider)
+                logger.info(f"联网核验国内补充搜索源 {provider!r} 返回 {len(supplement_results)} 条 query={query}")
+                relevant, fallback = _split_relevant_results(supplement_results, claim, seen_urls)
+                query_relevant.extend(relevant)
+                query_fallback.extend(fallback)
+                if query_relevant:
+                    break
+
+        if claim and _needs_quality_supplement(query_relevant, claim):
+            for provider in _quality_supplement_providers(used_providers):
+                try:
+                    supplement_results = _provider_results(provider, query, max_results=max_results)
+                except Exception as exc:
+                    logger.warning(f"联网核验质量补充检索失败 provider={provider!r} query={query}: {exc}")
+                    continue
+                used_providers.add(provider)
+                _record_provider(provider_trace, provider)
+                logger.info(f"联网核验质量补充搜索源 {provider!r} 返回 {len(supplement_results)} 条 query={query}")
+                relevant, fallback = _split_relevant_results(supplement_results, claim, seen_urls)
+                query_relevant.extend(relevant)
+                query_fallback.extend(fallback)
+                if not _needs_quality_supplement(query_relevant, claim):
+                    break
+
         fallback_results.extend(query_fallback)
         for item in query_relevant:
             results.append(item)
@@ -1079,7 +1122,13 @@ def verify_claims_online(
                 else _build_search_queries(claim_text)
             )
             query = queries[0] if queries else _build_search_query(claim_text)
-            raw_results = search_web_multi(queries or [query], max_results=DEFAULT_MAX_RESULTS, claim=claim_text)
+            search_providers = []
+            raw_results = search_web_multi(
+                queries or [query],
+                max_results=DEFAULT_MAX_RESULTS,
+                claim=claim_text,
+                provider_trace=search_providers,
+            )
             results = _filter_relevant_results(claim_text, raw_results)
             metrics = _score_results(claim_text, results)
             ai_result = None
@@ -1108,6 +1157,7 @@ def verify_claims_online(
                 "confidence": confidence,
                 "metrics": metrics,
                 "sources": results,
+                "search_providers": search_providers,
                 "ai_checked": bool(ai_result),
                 "raw_result_count": len(raw_results),
                 "filtered_result_count": len(results),
