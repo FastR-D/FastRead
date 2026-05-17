@@ -32,12 +32,14 @@
 
 推荐优先使用 Docker 启动整套 demo；如果要调试源码，再使用源码端口。
 
+如果只是交给非技术人员启动，先让对方双击根目录的 `CHECK_REQUIREMENTS.bat` 做环境体检，再双击 `START_HERE.bat`。状态检查用 `STATUS_HERE.bat`，停止服务用 `STOP_HERE.bat`。
+
 ### 方式一：Docker 启动整套服务
 
-Windows 用户可以双击根目录的 `run-docker.bat`。需要强制重建镜像时，在仓库根目录执行：
+Windows 用户可以双击根目录的 `START_HERE.bat` 或 `run-docker.bat`。默认会构建并启动服务。需要快速重启且不重新构建镜像时，在仓库根目录执行：
 
 ```powershell
-.\run-docker.bat --rebuild
+.\run-docker.bat --quick
 ```
 
 也可以直接执行：

@@ -76,9 +76,22 @@ Reel Mind 当前版本已经收口为抖音精选知识视频演示版，重点�
 
 ## 快速开始
 
+### 给非技术人员
+
+Windows 上优先用根目录这三个入口：
+
+```text
+CHECK_REQUIREMENTS.bat  启动前体检 Docker、端口和磁盘空间
+START_HERE.bat   启动整套 Docker demo
+STATUS_HERE.bat  查看服务状态和健康检查
+STOP_HERE.bat    停止服务
+```
+
+第一次启动前只需要安装并打开 Docker Desktop。详细说明见 [笨蛋部署说明](./DEPLOYMENT.md)。
+
 ### 方式一：Docker 启动整套服务（推荐）
 
-Docker 是最接近开箱即用的启动方式。Windows 用户可以双击根目录的 `run-docker.bat`；需要强制重建镜像时，在终端执行：
+Docker 是最接近开箱即用的启动方式。Windows 用户可以双击根目录的 `START_HERE.bat` 或 `run-docker.bat`；需要强制重建镜像时，在终端执行：
 
 ```powershell
 .\run-docker.bat --rebuild
@@ -373,10 +386,16 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 ├── nginx/                 # Docker 反向代理配置
 ├── readme/                # 阶段交接与补充文档
 ├── docker-compose.yml     # Docker Compose 部署
+├── OPEN_ME_FIRST.md       # 给非技术人员的最短说明
+├── CHECK_REQUIREMENTS.bat # Windows 环境体检入口
+├── START_HERE.bat         # Windows 一键启动入口
+├── STATUS_HERE.bat        # Windows 服务状态检查入口
+├── STOP_HERE.bat          # Windows 停止服务入口
 ├── run-docker.bat         # Windows Docker 启动脚本
 ├── run.bat                # Windows 源码开发启动脚本
 ├── start-demo.bat         # Windows 源码开发启动入口，调用 run.bat
 ├── pytest.ini             # 后端 pytest 配置
+├── DEPLOYMENT.md          # 面向非技术人员的部署说明
 └── README-usage.md        # 当前 demo 的详细使用说明
 ```
 
