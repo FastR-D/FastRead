@@ -6,8 +6,8 @@ type CookiePlatform = Extract<Platform, 'douyin'>
 
 // 后端期望的 cookie 字符串格式：name=value; name=value; ...
 // 当前入口只暴露抖音精选，其他平台 cookie 兼容层暂不展示。
-const COOKIE_DOMAINS = {
-  douyin: '.douyin.com',
+const COOKIE_URLS = {
+  douyin: 'https://www.douyin.com/',
 } satisfies Record<CookiePlatform, string>
 
 export const SUPPORTED_COOKIE_PLATFORMS: CookiePlatform[] = [
@@ -15,8 +15,8 @@ export const SUPPORTED_COOKIE_PLATFORMS: CookiePlatform[] = [
 ]
 
 export async function readBrowserCookies(platform: CookiePlatform): Promise<string> {
-  const domain = COOKIE_DOMAINS[platform]
-  const list = await browser.cookies.getAll({ domain })
+  const url = COOKIE_URLS[platform]
+  const list = await browser.cookies.getAll({ url })
   return list.map(c => `${c.name}=${c.value}`).join('; ')
 }
 

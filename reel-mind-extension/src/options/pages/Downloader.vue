@@ -121,6 +121,9 @@ onMounted(() => {
       >
         <template v-if="rows[p].remoteStatus?.valid_looking">
           后端已保存 {{ rows[p].remoteStatus?.cookie_count }} 项 cookie。
+          <span v-if="rows[p].remoteStatus?.warning_message">
+            {{ rows[p].remoteStatus?.warning_message }}
+          </span>
         </template>
         <template v-else-if="rows[p].remoteStatus?.configured">
           后端 Cookie 缺少 {{ rows[p].remoteStatus?.missing_keys.join('、') || '关键字段' }}，建议重新同步。

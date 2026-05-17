@@ -8,6 +8,8 @@ export interface DownloaderCookieStatus {
   updated_at?: string | null
   valid_looking: boolean
   missing_keys: string[]
+  warning_keys?: string[]
+  warning_message?: string
 }
 
 export const getDownloaderCookie = async (id?: string) => {

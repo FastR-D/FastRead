@@ -28,8 +28,11 @@ const statusTone = computed(() => {
 })
 
 const statusText = computed(() => {
-  if (status.value?.valid_looking)
+  if (status.value?.valid_looking) {
+    if (status.value.warning_message)
+      return `后端已有 ${status.value.cookie_count} 项 Cookie；${status.value.warning_message}`
     return `后端已有 ${status.value.cookie_count} 项 Cookie`
+  }
   if (status.value?.configured)
     return `Cookie 不完整，缺少 ${status.value.missing_keys.join('、') || '关键字段'}`
   return '后端尚未保存抖音 Cookie'
@@ -93,7 +96,7 @@ async function openDouyin() {
 }
 
 async function openWebSettings() {
-  await browser.tabs.create({ url: 'http://localhost:3015/settings/downloader/douyin' })
+  await browser.tabs.create({ url: `${backendUrl.value}/settings/download/douyin` })
 }
 
 onMounted(async () => {

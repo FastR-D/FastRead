@@ -174,7 +174,9 @@ const DownloaderForm = () => {
                 {status.valid_looking ? <CheckCircle2 className="mt-0.5 h-4 w-4" /> : <ShieldAlert className="mt-0.5 h-4 w-4" />}
                 <span>
                   {status.valid_looking
-                    ? `Cookie 已同步，包含 ${status.cookie_count} 项，可用于后端下载器。`
+                    ? status.warning_message
+                      ? `Cookie 已同步，包含 ${status.cookie_count} 项，可用于后端下载器。提示：${status.warning_message}`
+                      : `Cookie 已同步，包含 ${status.cookie_count} 项，可用于后端下载器。`
                     : status.configured
                       ? `Cookie 已保存，但缺少 ${status.missing_keys.join('、') || '关键字段'}，建议重新复制完整 Cookie。`
                       : 'Cookie 未同步，抖音精选视频解析可能失败。'}

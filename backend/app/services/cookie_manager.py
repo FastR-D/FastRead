@@ -72,9 +72,12 @@ class CookieConfigManager:
 
         parts = [part.strip() for part in cookie.split(";") if part.strip()]
         names = {part.split("=", 1)[0].strip() for part in parts if "=" in part}
-        required = {"ttwid", "msToken"}
+        required = {"ttwid"}
+        recommended = {"msToken"}
         missing = sorted(required - names)
+        warning = sorted(recommended - names)
         configured = bool(cookie.strip())
+        valid_looking = configured and len(parts) >= 2 and not missing
 
         return {
             "platform": platform,
@@ -82,6 +85,12 @@ class CookieConfigManager:
             "cookie_count": len(parts),
             "length": len(cookie),
             "updated_at": updated_at,
-            "valid_looking": configured and len(parts) >= 2 and not missing,
+            "valid_looking": valid_looking,
             "missing_keys": missing,
+            "warning_keys": warning,
+            "warning_message": (
+                "缺少 msToken 通常不绝对影响使用；当前后端会为抖音详情请求动态生成 msToken。"
+                if valid_looking and "msToken" in warning
+                else ""
+            ),
         }

@@ -60,6 +60,11 @@ export async function setDownloaderCookie(platform: string, cookie: string): Pro
   })
 }
 
+export async function getDownloaderCookie(platform: string): Promise<string | null> {
+  const payload = await request<{ platform: string, cookie?: string } | null>(`/api/get_downloader_cookie/${platform}`)
+  return payload?.cookie || null
+}
+
 export async function getDownloaderCookieStatus(platform: string): Promise<DownloaderCookieStatus> {
   return request<DownloaderCookieStatus>(`/api/downloader_cookie_status/${platform}`)
 }

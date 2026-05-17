@@ -1,10 +1,13 @@
 import os
 import platform
+from importlib.util import find_spec
 from enum import Enum
 
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+MLX_WHISPER_AVAILABLE = platform.system() == "Darwin" and find_spec("mlx_whisper") is not None
 
 class TranscriberType(str, Enum):
     FAST_WHISPER = "fast-whisper"
