@@ -2,7 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 title ReelMind Requirements Check
 
 set "APP_PORT=3015"
@@ -56,7 +56,7 @@ echo [check] Docker Desktop engine
 docker info >nul 2>nul
 if errorlevel 1 (
   echo [fail] Docker Desktop is installed but not running.
-  echo Open Docker Desktop, wait until it finishes starting, then run START_HERE.bat.
+  echo Open Docker Desktop, wait until it finishes starting, then run scripts\windows\start.bat.
   goto SUMMARY_FAIL
 ) else (
   echo [ok] Docker engine is running.
@@ -88,13 +88,13 @@ echo [ok] Project files look complete.
 
 echo.
 echo [done] Basic requirements look good.
-echo Next step: double click START_HERE.bat
+echo Next step: double click scripts\windows\start.bat
 pause
 exit /b 0
 
 :SUMMARY_FAIL
 echo.
 echo Requirements check failed.
-echo Fix the item above, then run CHECK_REQUIREMENTS.bat again.
+echo Fix the item above, then run scripts\windows\check.bat again.
 pause
 exit /b 1

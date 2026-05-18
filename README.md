@@ -80,25 +80,26 @@ Reel Mind 当前版本已经收口为抖音精选知识视频演示版，重点�
 
 ## 快速开始
 
-### 给非技术人员
+### Windows 快速入口
 
-Windows 上优先用根目录这三个入口：
+Windows 辅助脚本统一放在 `scripts/windows/`：
 
 ```text
-CHECK_REQUIREMENTS.bat  启动前体检 Docker、端口和磁盘空间
-START_HERE.bat   启动整套 Docker demo
-STATUS_HERE.bat  查看服务状态和健康检查
-STOP_HERE.bat    停止服务
+check.bat   启动前体检 Docker、端口和磁盘空间
+start.bat   构建并启动整套 Docker demo
+status.bat  查看服务状态和健康检查
+stop.bat    停止服务
+dev.bat     源码开发启动入口
 ```
 
-第一次启动前只需要安装并打开 Docker Desktop。详细说明见 [笨蛋部署说明](./DEPLOYMENT.md)。
+第一次启动前只需要安装并打开 Docker Desktop。详细说明见 [部署说明](./docs/deployment.md)。
 
 ### 方式一：Docker 启动整套服务（推荐）
 
-Docker 是最接近开箱即用的启动方式。Windows 用户可以双击根目录的 `START_HERE.bat` 或 `run-docker.bat`；需要强制重建镜像时，在终端执行：
+Docker 是最接近开箱即用的启动方式。Windows 用户可以双击 `scripts/windows/start.bat`；需要强制重建镜像时，在终端执行：
 
 ```powershell
-.\run-docker.bat --rebuild
+.\scripts\windows\start.bat --rebuild
 ```
 
 也可以直接使用 Docker Compose：
@@ -167,7 +168,7 @@ docker compose up -d --build
 - Python 3.11
 - Node.js 20+
 - FFmpeg
-- npm 或 pnpm
+- pnpm
 
 复制环境变量：
 
@@ -175,7 +176,7 @@ docker compose up -d --build
 Copy-Item .env.example .env
 ```
 
-如果使用 Windows 本地脚本，`start-demo.bat` 会调用 `run.bat` 启动源码开发环境。这个脚本不会创建虚拟环境或安装前端依赖；首次运行前需要先完成下面的依赖安装。
+如果使用 Windows 本地脚本，`scripts/windows/dev.bat` 会启动源码开发环境。这个脚本不会创建虚拟环境或安装前端依赖；首次运行前需要先完成下面的依赖安装。
 
 启动后端：
 
@@ -197,9 +198,9 @@ http://127.0.0.1:8493/api/sys_check
 
 ```powershell
 cd reel-mind-frontend
-npm install
+pnpm install
 $env:VITE_API_BASE_URL="http://127.0.0.1:8493/api"
-npm run dev -- --host 127.0.0.1 --port 3016 --strictPort
+pnpm dev -- --host 127.0.0.1 --port 3016 --strictPort
 ```
 
 开发访问地址：
@@ -230,10 +231,10 @@ backend\.venv\Scripts\python.exe -m pytest
 
 ```powershell
 cd reel-mind-frontend
-npm run build
+pnpm build
 
 cd ..\reel-mind-extension
-npm run build
+pnpm build
 ```
 
 ## 使用流程
@@ -394,21 +395,12 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 ├── reel-mind-frontend/     # React Web 前端
 ├── reel-mind-extension/    # 浏览器扩展
 ├── doc/                   # 文档图片和产品资料
+├── docs/                  # 部署和发布文档
 ├── nginx/                 # Docker 反向代理配置
-├── readme/                # 阶段交接与补充文档
-├── task/                  # PRD 汇报版和使用指南
+├── scripts/windows/       # Windows 启动、检查、状态脚本
 ├── docker-compose.yml     # Docker Compose 部署
-├── OPEN_ME_FIRST.md       # 给非技术人员的最短说明
-├── CHECK_REQUIREMENTS.bat # Windows 环境体检入口
-├── START_HERE.bat         # Windows 一键启动入口
-├── STATUS_HERE.bat        # Windows 服务状态检查入口
-├── STOP_HERE.bat          # Windows 停止服务入口
-├── run-docker.bat         # Windows Docker 启动脚本
-├── run.bat                # Windows 源码开发启动脚本
-├── start-demo.bat         # Windows 源码开发启动入口，调用 run.bat
-├── pytest.ini             # 后端 pytest 配置
-├── DEPLOYMENT.md          # 面向非技术人员的部署说明
-└── README-usage.md        # 当前 demo 的详细使用说明
+├── docker-compose.gpu.yml # GPU 后端部署选项
+└── pytest.ini             # 后端 pytest 配置
 ```
 
 ## 路线图
@@ -431,12 +423,10 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 
 ## 相关文档
 
-- [PRD 技术汇报版](./task/ReelMind_PRD_汇报版.md)
-- [产品使用指南](./task/ReelMind_使用指南.md)
-- [详细使用说明](./README-usage.md)
 - [贡献指南](./CONTRIBUTING.md)
+- [部署说明](./docs/deployment.md)
 - [更新日志](./CHANGELOG.md)
-- [发布说明](./RELEASING.md)
+- [发布说明](./docs/releasing.md)
 
 ## 许可证
 

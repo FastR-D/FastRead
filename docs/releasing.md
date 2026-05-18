@@ -1,6 +1,6 @@
 # 发版手册（Release Manager）
 
-本文档面向**发版执行者**，覆盖从 `develop` 切发版到产物上架商店的完整步骤。日常分支与提交规范见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+本文档面向**发版执行者**，覆盖从 `develop` 切发版到产物上架商店的完整步骤。日常分支与提交规范见 [CONTRIBUTING.md](../CONTRIBUTING.md)。
 
 ---
 
@@ -29,9 +29,9 @@ git checkout -b release/X.Y.Z
 
 在 `release/X.Y.Z` 上：
 
-- 编辑 [`CHANGELOG.md`](./CHANGELOG.md)，新增 `## [X.Y.Z] - YYYY-MM-DD` 段，按 Keep a Changelog 分类（Added / Changed / Fixed / Removed / Security / Internal）
-- 编辑 [`README.md`](./README.md) 顶部标题中的版本号 + 新增"vX.Y.Z 新增"摘要段
-- 重大变更也同步更新 [`CLAUDE.md`](./CLAUDE.md)
+- 编辑 [`CHANGELOG.md`](../CHANGELOG.md)，新增 `## [X.Y.Z] - YYYY-MM-DD` 段，按 Keep a Changelog 分类（Added / Changed / Fixed / Removed / Security / Internal）
+- 编辑 [`README.md`](../README.md) 顶部标题中的版本号 + 新增"vX.Y.Z 新增"摘要段
+- 重大变更也同步更新 [`CONTRIBUTING.md`](../CONTRIBUTING.md) 或 [`deployment.md`](./deployment.md) 中对应的开发、部署说明
 
 ```bash
 git commit -am "docs: vX.Y.Z CHANGELOG + README 版本"
@@ -65,7 +65,7 @@ git tag -a vX.Y.Z -m "BiliNote vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-push tag **会自动触发 [`.github/workflows/release-extension.yml`](.github/workflows/release-extension.yml)**：构建插件并把 `.zip` / `.xpi` / `.crx` 挂到对应 GitHub Release。
+push tag **会自动触发 [`.github/workflows/release-extension.yml`](../.github/workflows/release-extension.yml)**：构建插件并把 `.zip` / `.xpi` / `.crx` 挂到对应 GitHub Release。
 
 ## 5. 创建 GitHub Release（如果还没有）
 
@@ -74,7 +74,7 @@ CI 默认会创建 / 更新 `vX.Y.Z` 对应的 Release。如果你想自己写 r
 1. 打开 https://github.com/JefferyHcool/BiliNote/releases/new
 2. Tag: 选 `vX.Y.Z`
 3. Title: `vX.Y.Z`
-4. Body: 直接贴 [`CHANGELOG.md`](./CHANGELOG.md) 的对应段
+4. Body: 直接贴 [`CHANGELOG.md`](../CHANGELOG.md) 的对应段
 5. CI 跑完后 Release 页面会自动出现 `bilinote-extension-X.Y.Z.zip` / `.xpi` / `.crx`
 
 ## 6. 上传到各商店（人工）

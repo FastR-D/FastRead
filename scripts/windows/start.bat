@@ -2,7 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 title ReelMind Docker Starter
 
 set "APP_PORT=3015"
@@ -79,7 +79,7 @@ echo   ReelMind Docker Starter
 echo ========================================
 echo.
 echo Default mode rebuilds images for reliability.
-echo Faster restart: run-docker.bat --quick
+echo Faster restart: scripts\windows\start.bat --quick
 echo.
 
 where docker >nul 2>nul
@@ -154,9 +154,9 @@ echo.
 echo [done] Docker services are ready: %APP_URL%
 echo.
 echo Useful commands:
-echo   STATUS_HERE.bat   Check service status
-echo   STOP_HERE.bat     Stop services
-echo   run-docker.bat --quick   Fast restart
+echo   scripts\windows\status.bat   Check service status
+echo   scripts\windows\stop.bat     Stop services
+echo   scripts\windows\start.bat --quick   Fast restart
 echo.
 if "%NO_OPEN%"=="0" start "" "%APP_URL%"
 exit /b 0
@@ -165,10 +165,10 @@ exit /b 0
 echo ReelMind Docker Starter
 echo.
 echo Usage:
-echo   run-docker.bat              Build and start services
-echo   run-docker.bat --quick      Start without rebuilding images
-echo   run-docker.bat --no-open    Do not open browser after startup
-echo   run-docker.bat --rebuild    Explicitly rebuild images
+echo   scripts\windows\start.bat              Build and start services
+echo   scripts\windows\start.bat --quick      Start without rebuilding images
+echo   scripts\windows\start.bat --no-open    Do not open browser after startup
+echo   scripts\windows\start.bat --rebuild    Explicitly rebuild images
 exit /b 0
 
 :FAIL

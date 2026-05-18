@@ -2,7 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 title ReelMind Local Starter
 
 set "BACKEND_PORT=8483"
@@ -82,13 +82,13 @@ if not exist "%FRONTEND_DIR%\node_modules" (
   echo [error] frontend dependencies not found: %FRONTEND_DIR%\node_modules
   echo Install them first:
   echo   cd reel-mind-frontend
-  echo   npm install
+  echo   pnpm install
   goto FAIL
 )
 
-where npm >nul 2>nul
+where pnpm >nul 2>nul
 if errorlevel 1 (
-  echo [error] npm was not found. Please install Node.js 20+.
+  echo [error] pnpm was not found. Please install Node.js 20+ and pnpm.
   goto FAIL
 )
 
@@ -119,7 +119,7 @@ goto FAIL
 :BACKEND_READY
 echo [ok] Backend is ready.
 echo [start] Frontend window...
-start "ReelMind Frontend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:VITE_API_BASE_URL='%FRONTEND_API_BASE%'; $env:VITE_SCREENSHOT_BASE_URL='/static/screenshots'; $env:VITE_FRONTEND_PORT='%FRONTEND_PORT%'; $env:BACKEND_PORT='%BACKEND_PORT%'; $env:VITE_ENV_DIR='%FRONTEND_DIR%'; Set-Location '%FRONTEND_DIR%'; npm run dev -- --host 0.0.0.0 --port %FRONTEND_PORT%"
+start "ReelMind Frontend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:VITE_API_BASE_URL='%FRONTEND_API_BASE%'; $env:VITE_SCREENSHOT_BASE_URL='/static/screenshots'; $env:VITE_FRONTEND_PORT='%FRONTEND_PORT%'; $env:BACKEND_PORT='%BACKEND_PORT%'; $env:VITE_ENV_DIR='%FRONTEND_DIR%'; Set-Location '%FRONTEND_DIR%'; pnpm dev -- --host 0.0.0.0 --port %FRONTEND_PORT%"
 
 echo [wait] Frontend dev server...
 for /l %%I in (1,1,60) do (

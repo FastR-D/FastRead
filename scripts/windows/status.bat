@@ -2,7 +2,7 @@
 setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
-cd /d "%~dp0"
+cd /d "%~dp0..\.."
 title ReelMind Status
 
 set "APP_PORT=3015"
