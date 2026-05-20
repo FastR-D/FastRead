@@ -4,22 +4,18 @@ Chat function calling 工具定义与执行。
 """
 
 import json
-import os
 from typing import Optional
 
+from app.repositories.note_artifacts import NoteArtifactRepository
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
+ARTIFACTS = NoteArtifactRepository()
 
 
 def _load_note_data(task_id: str) -> Optional[dict]:
-    path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json")
-    if not os.path.exists(path):
-        return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    return ARTIFACTS.read_result(task_id)
 
 
 # ── 工具定义（OpenAI function calling 格式）──────────────────────

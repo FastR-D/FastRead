@@ -13,15 +13,24 @@ import {
   Lightbulb,
   List,
   Loader2,
-  MoreVertical,
   Plus,
   Search,
   Settings,
   Tags,
+  Trash2,
 } from 'lucide-react'
 import logo from '@/assets/icon.png'
 import { useTaskStore, type Task } from '@/store/taskStore'
 import { cn } from '@/lib/utils'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 
 type LibraryFilter = 'all' | 'mine' | 'featured'
 type ViewMode = 'grid' | 'list'
@@ -114,19 +123,25 @@ function FeaturedNotebookCard({
   task,
   index,
   onOpen,
+  onDelete,
 }: {
   task: Task
   index: number
   onOpen: (taskId: string) => void
+  onDelete: (task: Task) => void
 }) {
   const image = coverUrl(task)
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(task.id)}
+    <div
       className="group relative h-[168px] overflow-hidden rounded-lg text-left shadow-sm outline-none transition hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary"
     >
+      <button
+        type="button"
+        onClick={() => onOpen(task.id)}
+        className="absolute inset-0 z-10"
+        aria-label={`打开笔记本：${getNotebookTitle(task)}`}
+      />
       {image ? (
         <img
           src={image}
@@ -138,7 +153,16 @@ function FeaturedNotebookCard({
         <FlatPattern index={index} />
       )}
       <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/10" />
-      <div className="relative flex h-full flex-col justify-end p-5 text-white">
+      <button
+        type="button"
+        onClick={() => onDelete(task)}
+        className="absolute right-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white opacity-0 transition hover:bg-rose-600 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-white group-hover:opacity-100"
+        aria-label={`删除笔记本：${getNotebookTitle(task)}`}
+        title="删除"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+      <div className="pointer-events-none relative z-10 flex h-full flex-col justify-end p-5 text-white">
         <div className="mb-3 flex items-center gap-2 text-sm text-white/85">
           <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-primary">
             <BookOpen className="h-4 w-4" />
@@ -155,7 +179,7 @@ function FeaturedNotebookCard({
           </span>
         </div>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -164,11 +188,13 @@ function RecentNotebookCard({
   index,
   viewMode,
   onOpen,
+  onDelete,
 }: {
   task: Task
   index: number
   viewMode: ViewMode
   onOpen: (taskId: string) => void
+  onDelete: (task: Task) => void
 }) {
   const image = coverUrl(task)
   const tags = task.collection?.tags || []
@@ -176,37 +202,52 @@ function RecentNotebookCard({
 
   if (viewMode === 'list') {
     return (
-      <button
-        type="button"
-        onClick={() => onOpen(task.id)}
-        className="flex min-h-24 w-full items-center gap-4 rounded-lg border border-neutral-200 bg-white px-4 py-3 text-left transition hover:border-neutral-300 hover:bg-neutral-50 focus-visible:ring-2 focus-visible:ring-primary"
-      >
-        <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded-md bg-neutral-100">
-          {image ? (
-            <img src={image} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
-          ) : (
-            <FlatPattern index={index} />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="line-clamp-1 text-base font-medium text-neutral-950">
-            {getNotebookTitle(task)}
+      <div className="flex min-h-24 w-full items-center gap-3 rounded-lg border border-neutral-200 bg-white px-4 py-3 transition hover:border-neutral-300 hover:bg-neutral-50">
+        <button
+          type="button"
+          onClick={() => onOpen(task.id)}
+          className="flex min-w-0 flex-1 items-center gap-4 text-left outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          <div className="relative h-16 w-24 shrink-0 overflow-hidden rounded-md bg-neutral-100">
+            {image ? (
+              <img src={image} alt="" referrerPolicy="no-referrer" className="h-full w-full object-cover" />
+            ) : (
+              <FlatPattern index={index} />
+            )}
           </div>
-          <div className="mt-1 text-sm text-neutral-500">
-            {formatDate(task.createdAt)} · {getSourceCount(task)} 个来源
+          <div className="min-w-0 flex-1">
+            <div className="line-clamp-1 text-base font-medium text-neutral-950">
+              {getNotebookTitle(task)}
+            </div>
+            <div className="mt-1 text-sm text-neutral-500">
+              {formatDate(task.createdAt)} · {getSourceCount(task)} 个来源
+            </div>
           </div>
-        </div>
+        </button>
         <StatusMark task={task} />
-      </button>
+        <button
+          type="button"
+          onClick={() => onDelete(task)}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-rose-50 hover:text-rose-600 focus-visible:ring-2 focus-visible:ring-rose-500"
+          aria-label={`删除笔记本：${getNotebookTitle(task)}`}
+          title="删除"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
     )
   }
 
   return (
-    <button
-      type="button"
-      onClick={() => onOpen(task.id)}
+    <div
       className="group relative h-[168px] overflow-hidden rounded-lg border border-transparent text-left outline-none transition hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary"
     >
+      <button
+        type="button"
+        onClick={() => onOpen(task.id)}
+        className="absolute inset-0 z-10"
+        aria-label={`打开笔记本：${getNotebookTitle(task)}`}
+      />
       {image ? (
         <>
           <img
@@ -220,12 +261,25 @@ function RecentNotebookCard({
       ) : (
         <FlatPattern index={index} />
       )}
-      <div className={cn('relative flex h-full flex-col p-5', image ? 'text-white' : 'text-neutral-950')}>
+      <button
+        type="button"
+        onClick={() => onDelete(task)}
+        className={cn(
+          'absolute right-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-full opacity-0 transition focus-visible:opacity-100 focus-visible:ring-2 group-hover:opacity-100',
+          image
+            ? 'bg-black/35 text-white hover:bg-rose-600 focus-visible:ring-white'
+            : 'bg-white/75 text-neutral-600 hover:bg-rose-50 hover:text-rose-600 focus-visible:ring-rose-500'
+        )}
+        aria-label={`删除笔记本：${getNotebookTitle(task)}`}
+        title="删除"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+      <div className={cn('pointer-events-none relative z-10 flex h-full flex-col p-5', image ? 'text-white' : 'text-neutral-950')}>
         <div className="flex items-start justify-between gap-3">
           <span className={cn('flex h-9 w-9 items-center justify-center rounded-full', image ? 'bg-white/18' : 'bg-white/60')}>
             <NotebookIcon className={cn('h-4 w-4', image ? 'text-white' : 'text-neutral-700')} />
           </span>
-          <MoreVertical className={cn('h-4 w-4', image ? 'text-white/80' : 'text-neutral-500')} />
         </div>
         <div className="mt-auto">
           <h3 className="line-clamp-2 text-xl font-medium leading-snug">{getNotebookTitle(task)}</h3>
@@ -240,7 +294,7 @@ function RecentNotebookCard({
           )}
         </div>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -263,9 +317,12 @@ export default function LibraryPage() {
   const navigate = useNavigate()
   const tasks = useTaskStore(state => state.tasks)
   const setCurrentTask = useTaskStore(state => state.setCurrentTask)
+  const removeTask = useTaskStore(state => state.removeTask)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<LibraryFilter>('all')
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
+  const [taskToDelete, setTaskToDelete] = useState<Task | null>(null)
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null)
 
   const sortedTasks = useMemo(
     () => [...tasks].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
@@ -309,6 +366,20 @@ export default function LibraryPage() {
   const createTask = () => {
     setCurrentTask(null)
     navigate('/workspace')
+  }
+
+  const confirmDeleteTask = async () => {
+    if (!taskToDelete) return
+
+    setDeletingTaskId(taskToDelete.id)
+    try {
+      await removeTask(taskToDelete.id)
+      setTaskToDelete(null)
+    } catch {
+      // delete_task already shows the error toast; keep the dialog open so users can retry.
+    } finally {
+      setDeletingTaskId(null)
+    }
   }
 
   const tabs: Array<{ id: LibraryFilter; label: string }> = [
@@ -415,7 +486,13 @@ export default function LibraryPage() {
             </div>
             <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
               {featuredTasks.map((task, index) => (
-                <FeaturedNotebookCard key={task.id} task={task} index={index} onOpen={openTask} />
+                <FeaturedNotebookCard
+                  key={task.id}
+                  task={task}
+                  index={index}
+                  onOpen={openTask}
+                  onDelete={setTaskToDelete}
+                />
               ))}
             </div>
           </section>
@@ -435,6 +512,7 @@ export default function LibraryPage() {
                   index={index}
                   viewMode={viewMode}
                   onOpen={openTask}
+                  onDelete={setTaskToDelete}
                 />
               ))}
             </div>
@@ -448,6 +526,7 @@ export default function LibraryPage() {
                   index={index}
                   viewMode={viewMode}
                   onOpen={openTask}
+                  onDelete={setTaskToDelete}
                 />
               ))}
             </div>
@@ -462,6 +541,45 @@ export default function LibraryPage() {
           )}
         </section>
       </main>
+
+      <Dialog open={Boolean(taskToDelete)} onOpenChange={open => !open && setTaskToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除这条笔记？</DialogTitle>
+            <DialogDescription>
+              将删除「{taskToDelete ? getNotebookTitle(taskToDelete) : ''}」以及对应的本地结果和知识库索引，此操作不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setTaskToDelete(null)}
+              disabled={Boolean(deletingTaskId)}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={confirmDeleteTask}
+              disabled={Boolean(deletingTaskId)}
+            >
+              {deletingTaskId ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  删除中
+                </>
+              ) : (
+                <>
+                  <Trash2 className="h-4 w-4" />
+                  删除
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

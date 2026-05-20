@@ -36,8 +36,8 @@ if not exist ".env" (
   >> ".env" echo TRANSCRIBER_TYPE=bcut
   >> ".env" echo WHISPER_MODEL_SIZE=tiny
   >> ".env" echo GROQ_TRANSCRIBER_MODEL=whisper-large-v3-turbo
-  >> ".env" echo ONLINE_VERIFY_SEARCH_PROVIDER=bing_academic
-  >> ".env" echo ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS=baidu_xueshu,baidu,bing_cn,brave
+  >> ".env" echo ONLINE_VERIFY_SEARCH_PROVIDER=brave
+  >> ".env" echo ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS=bing_academic,bing_cn,baidu
 )
 
 for /f "usebackq tokens=1,* delims==" %%A in (".env") do (

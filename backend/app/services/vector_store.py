@@ -1,13 +1,13 @@
-import json
 import os
 import re
 from typing import Optional
 
+from app.repositories.note_artifacts import NoteArtifactRepository
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
+ARTIFACTS = NoteArtifactRepository()
 VECTOR_DB_DIR = os.getenv("VECTOR_DB_DIR", "vector_db")
 
 
@@ -123,13 +123,10 @@ class VectorStoreManager:
 
     def index_task(self, task_id: str) -> None:
         """读取笔记结果并建立向量索引。"""
-        result_path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json")
-        if not os.path.exists(result_path):
-            logger.warning(f"笔记文件不存在，跳过索引: {result_path}")
+        note_data = ARTIFACTS.read_result(task_id)
+        if not note_data:
+            logger.warning(f"笔记文件不存在，跳过索引: {ARTIFACTS.result_path(task_id)}")
             return
-
-        with open(result_path, "r", encoding="utf-8") as f:
-            note_data = json.load(f)
 
         markdown = note_data.get("markdown", "")
         transcript = note_data.get("transcript", {})

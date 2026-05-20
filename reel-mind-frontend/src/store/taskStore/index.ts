@@ -185,7 +185,7 @@ interface TaskStore {
   updateTaskContent: (id: string, data: Partial<Omit<Task, 'id' | 'createdAt'>>) => void
   updateTaskCollection: (id: string, collection: Partial<CollectionMeta>) => void
   loadSavedTasks: () => Promise<void>
-  removeTask: (id: string) => void
+  removeTask: (id: string) => Promise<void>
   clearTasks: () => void
   setCurrentTask: (taskId: string | null) => void
   getCurrentTask: () => Task | null
@@ -444,7 +444,9 @@ export const useTaskStore = create<TaskStore>()(
       },
 
       removeTask: async id => {
-        const task = get().tasks.find(t => t.id === id)
+        const previousTasks = get().tasks
+        const task = previousTasks.find(t => t.id === id)
+        const previousCurrentTaskId = get().currentTaskId
 
         set(state => ({
           tasks: state.tasks.filter(task => task.id !== id),
@@ -452,11 +454,19 @@ export const useTaskStore = create<TaskStore>()(
         }))
 
         if (task) {
-          await delete_task({
-            task_id: task.id,
-            video_id: task.audioMeta.video_id,
-            platform: task.platform,
-          })
+          try {
+            await delete_task({
+              task_id: task.id,
+              video_id: task.audioMeta.video_id,
+              platform: task.platform,
+            })
+          } catch (error) {
+            set({
+              tasks: previousTasks,
+              currentTaskId: previousCurrentTaskId,
+            })
+            throw error
+          }
         }
       },
 

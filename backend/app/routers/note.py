@@ -1,37 +1,22 @@
 # app/routers/note.py
-import json
 import os
 import uuid
 from typing import Optional
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
 from pydantic import BaseModel, field_validator, model_validator
-from dataclasses import asdict
 
 from app.enmus.exception import NoteErrorEnum
 from app.enmus.note_enums import DownloadQuality
 from app.exceptions.note import NoteError
-from app.services.note import NoteGenerator, logger
-from app.services.insight_extractor import build_insights
-from app.services.task_serial_executor import task_serial_executor
+from app.repositories.note_artifacts import NoteArtifactRepository
+from app.services.note import logger
+from app.services.note_task_service import NoteTaskService
 from app.utils.response import ResponseWrapper as R
-from app.utils.url_parser import extract_video_id
 from app.validators.video_url_validator import SUPPORTED_PLATFORMS, is_supported_video_url
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 import httpx
-from app.enmus.task_status_enums import TaskStatus
-from app.db.video_task_dao import (
-    delete_task_by_task_id,
-    delete_task_by_video,
-    list_task_ids_by_video,
-    list_video_tasks,
-    update_task_collection,
-    upsert_video_task,
-)
-from app.services.error_classifier import classify_generation_error
-from app.services.online_verifier import verify_claims_online
 
 # from app.services.downloader import download_raw_audio
 # from app.services.whisperer import transcribe_audio
@@ -54,7 +39,7 @@ class CollectionUpdateRequest(BaseModel):
 
 class OnlineVerificationRequest(BaseModel):
     task_id: str
-    max_claims: int = 5
+    max_claims: int = 8
     model_name: Optional[str] = None
     provider_id: Optional[str] = None
 
@@ -99,161 +84,8 @@ class VideoRequest(BaseModel):
 
 NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
 UPLOAD_DIR = "uploads"
-
-
-def _read_task_status(task_id: str) -> str:
-    return _read_task_status_payload(task_id).get("status") or TaskStatus.SUCCESS.value
-
-
-def _read_task_status_payload(task_id: str) -> dict:
-    status_path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.status.json")
-    if not os.path.exists(status_path):
-        return {"status": TaskStatus.SUCCESS.value}
-    try:
-        with open(status_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        status = data.get("status") or TaskStatus.SUCCESS.value
-        data["status"] = status
-        if status == TaskStatus.FAILED.value and not data.get("error"):
-            data["error"] = classify_generation_error(data.get("message"))
-        return data
-    except Exception:
-        return {"status": TaskStatus.SUCCESS.value}
-
-
-def _extract_source_url(markdown: str) -> str:
-    if not markdown:
-        return ""
-    first_line = markdown.splitlines()[0] if markdown.splitlines() else ""
-    prefix = "> 来源链接："
-    return first_line.replace(prefix, "").strip() if first_line.startswith(prefix) else ""
-
-
-def _created_at_to_timestamp(value) -> float:
-    if not value:
-        return 0
-    try:
-        return value.timestamp()
-    except Exception:
-        return 0
-
-
-def _parse_collection_tags(raw) -> list[str]:
-    if not raw:
-        return []
-    if isinstance(raw, list):
-        return [str(tag).strip() for tag in raw if str(tag).strip()]
-    return [tag.strip() for tag in str(raw).replace("，", ",").split(",") if tag.strip()]
-
-
-def _is_note_result_file(path: Path) -> bool:
-    if path.suffix != ".json":
-        return False
-    name = path.name
-    ignored_suffixes = (
-        ".status.json",
-        "_status.json",
-        "_transcript.json",
-        "_audio.json",
-        "_markdown.status.json",
-    )
-    return not any(name.endswith(suffix) for suffix in ignored_suffixes)
-
-
-def _get_note_insights(result: dict) -> Optional[dict]:
-    if result.get("insights") and result["insights"].get("verification"):
-        return result.get("insights")
-    markdown = result.get("markdown") or ""
-    transcript = result.get("transcript") or {}
-    audio_meta = result.get("audio_meta") or {}
-    if not markdown and not transcript and not audio_meta:
-        return None
-    try:
-        return build_insights(markdown, transcript, audio_meta)
-    except Exception as e:
-        logger.warning(f"生成历史笔记洞察失败: {e}")
-        return None
-
-
-def _build_verification_context(result: dict) -> str:
-    audio_meta = result.get("audio_meta") or {}
-    transcript = result.get("transcript") or {}
-    raw_info = audio_meta.get("raw_info") or {}
-    parts = [
-        f"标题：{audio_meta.get('title') or raw_info.get('title') or ''}",
-        f"平台：{audio_meta.get('platform') or ''}",
-        f"标签：{raw_info.get('tags') or raw_info.get('hashtags') or ''}",
-        f"视频简介：{raw_info.get('desc') or raw_info.get('caption') or ''}",
-        f"笔记内容：{result.get('markdown') or ''}",
-        f"转录全文：{transcript.get('full_text') or ''}",
-    ]
-    return "\n\n".join(str(part) for part in parts if str(part).strip())
-
-
-def _attach_note_insights(result: dict) -> dict:
-    insights = _get_note_insights(result)
-    if insights:
-        result["insights"] = insights
-    return result
-
-
-def save_note_to_file(task_id: str, note):
-    os.makedirs(NOTE_OUTPUT_DIR, exist_ok=True)
-    with open(os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json"), "w", encoding="utf-8") as f:
-        json.dump(asdict(note), f, ensure_ascii=False, indent=2)
-
-
-def _result_path(task_id: str) -> Path:
-    return Path(NOTE_OUTPUT_DIR) / f"{task_id}.json"
-
-
-def _delete_task_files(task_id: str) -> int:
-    result_dir = Path(NOTE_OUTPUT_DIR)
-    if not result_dir.exists():
-        return 0
-    deleted = 0
-    for path in result_dir.glob(f"{task_id}*"):
-        try:
-            if path.is_file() and path.resolve().parent == result_dir.resolve():
-                path.unlink()
-                deleted += 1
-        except Exception as e:
-            logger.warning(f"删除任务文件失败 ({path}): {e}")
-    return deleted
-
-
-def _persist_prefetched_transcript(task_id: str, transcript: dict) -> None:
-    """把客户端预取的字幕写到 NoteGenerator 期望的转写缓存文件里。
-
-    NoteGenerator.generate 会优先读 <task_id>_transcript.json，命中即跳过 download_subtitles
-    与音频转写流程。要求字段：language(可空)/full_text/segments[{start,end,text}]
-    """
-    segments = transcript.get("segments") or []
-    cleaned_segments = []
-    for s in segments:
-        text = (s.get("text") or "").strip()
-        if not text:
-            continue
-        cleaned_segments.append({
-            "start": float(s.get("start", 0)),
-            "end": float(s.get("end", 0)),
-            "text": text,
-        })
-    if not cleaned_segments:
-        raise ValueError("prefetched_transcript 没有可用的 segments")
-
-    full_text = transcript.get("full_text") or " ".join(s["text"] for s in cleaned_segments)
-    payload = {
-        "language": transcript.get("language") or "zh",
-        "full_text": full_text,
-        "segments": cleaned_segments,
-    }
-
-    os.makedirs(NOTE_OUTPUT_DIR, exist_ok=True)
-    target = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}_transcript.json")
-    with open(target, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-    logger.info(f"已写入客户端预取字幕缓存: {target} ({len(cleaned_segments)} 段)")
+ARTIFACTS = NoteArtifactRepository(NOTE_OUTPUT_DIR)
+NOTE_TASKS = NoteTaskService(ARTIFACTS)
 
 
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
@@ -264,62 +96,28 @@ def run_note_task(task_id: str, video_url: str, platform: str, quality: Download
 
     if not model_name or not provider_id:
         raise HTTPException(status_code=400, detail="请选择模型和提供者")
-
-    def _execute_note_task():
-        return NoteGenerator().generate(
-            video_url=video_url,
-            platform=platform,
-            quality=quality,
-            task_id=task_id,
-            model_name=model_name,
-            provider_id=provider_id,
-            link=link,
-            _format=_format,
-            style=style,
-            extras=extras,
-            screenshot=screenshot,
-            video_understanding=video_understanding,
-            video_interval=video_interval,
-            grid_size=grid_size,
-        )
-
-    logger.info(f"任务进入执行队列 (task_id={task_id})")
-    note = task_serial_executor.run(_execute_note_task)
-    logger.info(f"Note generated: {task_id}")
-    if not note or not note.markdown:
-        logger.warning(f"任务 {task_id} 执行失败，跳过保存")
-        return
-    save_note_to_file(task_id, note)
-
-    # 自动建立向量索引（用于 AI 问答），失败不影响笔记生成
-    try:
-        from app.services.vector_store import VectorStoreManager
-        VectorStoreManager().index_task(task_id)
-    except Exception as e:
-        logger.warning(f"向量索引失败（不影响笔记）: {e}")
+    NOTE_TASKS.execute_generation_task(
+        task_id=task_id,
+        video_url=video_url,
+        platform=platform,
+        quality=quality,
+        link=link,
+        screenshot=screenshot,
+        model_name=model_name,
+        provider_id=provider_id,
+        formats=_format,
+        style=style,
+        extras=extras,
+        video_understanding=video_understanding,
+        video_interval=video_interval,
+        grid_size=grid_size,
+    )
 
 
 @router.post('/delete_task')
 def delete_task(data: RecordRequest):
     try:
-        if data.task_id:
-            delete_task_by_task_id(data.task_id)
-            _delete_task_files(data.task_id)
-            try:
-                from app.services.vector_store import VectorStoreManager
-                VectorStoreManager().delete_index(data.task_id)
-            except Exception as e:
-                logger.warning(f"删除向量索引失败（不影响任务删除）: {e}")
-        elif data.video_id:
-            task_ids = list_task_ids_by_video(data.video_id, data.platform)
-            delete_task_by_video(data.video_id, data.platform)
-            for task_id in task_ids:
-                _delete_task_files(task_id)
-                try:
-                    from app.services.vector_store import VectorStoreManager
-                    VectorStoreManager().delete_index(task_id)
-                except Exception as e:
-                    logger.warning(f"删除向量索引失败（不影响任务删除）: {e}")
+        NOTE_TASKS.delete_task(task_id=data.task_id, video_id=data.video_id, platform=data.platform)
         return R.success(msg='删除成功')
     except Exception as e:
         return R.error(msg=e)
@@ -328,22 +126,15 @@ def delete_task(data: RecordRequest):
 @router.post("/update_task_collection")
 def update_collection(data: CollectionUpdateRequest):
     try:
-        updated = update_task_collection(
+        updated = NOTE_TASKS.update_collection(
             task_id=data.task_id,
             collection_folder=data.collection_folder,
-            collection_tags=_parse_collection_tags(data.collection_tags),
+            collection_tags=data.collection_tags,
             collection_note=data.collection_note,
         )
         if not updated:
             return R.error(msg="任务不存在", code=404)
-        return R.success(data={
-            "task_id": data.task_id,
-            "collection": {
-                "folder": updated.get("collection_folder") or "默认收藏夹",
-                "tags": _parse_collection_tags(updated.get("collection_tags")),
-                "note": updated.get("collection_note") or "",
-            },
-        })
+        return R.success(data=updated)
     except Exception as e:
         return R.error(msg=e)
 
@@ -351,36 +142,15 @@ def update_collection(data: CollectionUpdateRequest):
 @router.post("/verify_task_online")
 def verify_task_online(data: OnlineVerificationRequest):
     try:
-        result_path = _result_path(data.task_id)
-        if not result_path.exists():
-            return R.error(msg="任务结果不存在", code=404)
-
-        with open(result_path, "r", encoding="utf-8") as f:
-            result = json.load(f)
-
-        result = _attach_note_insights(result)
-        insights = result.get("insights") or {}
-        verification = insights.get("verification")
-        if not verification:
-            return R.error(msg="当前任务没有可核验的主张", code=400)
-
-        max_claims = max(1, min(int(data.max_claims or 5), 8))
-        insights["verification"] = verify_claims_online(
-            verification,
-            max_claims=max_claims,
+        result = NOTE_TASKS.verify_task_online(
+            task_id=data.task_id,
+            max_claims=data.max_claims,
             model_name=data.model_name,
             provider_id=data.provider_id,
-            context=_build_verification_context(result),
         )
-        result["insights"] = insights
-
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-        return R.success(data={
-            "task_id": data.task_id,
-            "insights": insights,
-        })
+        if not result["ok"]:
+            return R.error(msg=result["message"], code=result["code"])
+        return R.success(data=result["data"])
     except Exception as e:
         logger.error(f"联网核验失败 (task_id={data.task_id}): {e}", exc_info=True)
         return R.error(msg=f"联网核验失败: {e}")
@@ -401,44 +171,21 @@ async def upload(file: UploadFile = File(...)):
 @router.post("/generate_note")
 def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
     try:
-
-        video_id = extract_video_id(data.video_url, data.platform)
-        # if not video_id:
-        #     raise HTTPException(status_code=400, detail="无法提取视频 ID")
-        # existing = get_task_by_video(video_id, data.platform)
-        # if existing:
-        #     return R.error(
-        #         msg='笔记已生成，请勿重复发起',
-        #
-        #     )
         if data.task_id:
-            # 如果传了task_id，说明是重试！
             task_id = data.task_id
             logger.info(f"重试模式，复用已有 task_id={task_id}")
         else:
-            # 正常新建任务
             task_id = str(uuid.uuid4())
 
-        collection_tags = _parse_collection_tags(data.collection_tags)
-        upsert_video_task(
-            video_id=video_id or "",
+        NOTE_TASKS.prepare_generation_task(
+            video_url=data.video_url,
             platform=data.platform,
             task_id=task_id,
-            video_url=data.video_url,
             collection_folder=data.collection_folder or "默认收藏夹",
-            collection_tags=collection_tags,
+            collection_tags=data.collection_tags,
             collection_note=data.collection_note or "",
+            prefetched_transcript=data.prefetched_transcript,
         )
-
-        # 统一先写入 PENDING，表示已进入队列等待串行执行
-        NoteGenerator()._update_status(task_id, TaskStatus.PENDING)
-
-        # 客户端已经抓好字幕的话，写到转写缓存文件，NoteGenerator 的 cache-hit 逻辑会直接用上
-        if data.prefetched_transcript:
-            try:
-                _persist_prefetched_transcript(task_id, data.prefetched_transcript)
-            except Exception as e:
-                logger.warning(f"写入预取字幕失败 (task_id={task_id}): {e}")
 
         background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
                                   data.screenshot, data.model_name, data.provider_id, data.format, data.style,
@@ -450,150 +197,12 @@ def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
 
 @router.get("/tasks")
 def list_generated_tasks():
-    result_dir = Path(NOTE_OUTPUT_DIR)
-    db_tasks = list_video_tasks()
-    if not result_dir.exists() and not db_tasks:
-        return R.success([])
-
-    tasks = []
-    seen_task_ids = set()
-    for db_task in db_tasks:
-        task_id = db_task["task_id"]
-        seen_task_ids.add(task_id)
-        result_path = result_dir / f"{task_id}.json"
-        result = {}
-        if result_path.exists():
-            try:
-                with open(result_path, "r", encoding="utf-8") as f:
-                    result = json.load(f)
-            except Exception as e:
-                logger.warning(f"读取任务结果失败 (task_id={task_id}): {e}")
-
-        markdown = result.get("markdown") or ""
-        audio_meta = result.get("audio_meta") or {}
-        status_payload = _read_task_status_payload(task_id)
-        tasks.append({
-            "id": task_id,
-            "status": status_payload.get("status"),
-            "message": status_payload.get("message", ""),
-            "error": status_payload.get("error"),
-            "markdown": markdown,
-            "insights": _get_note_insights(result),
-            "audioMeta": audio_meta,
-            "createdAt": _created_at_to_timestamp(db_task.get("created_at")),
-            "videoUrl": db_task.get("video_url") or _extract_source_url(markdown),
-            "collection": {
-                "folder": db_task.get("collection_folder") or "默认收藏夹",
-                "tags": _parse_collection_tags(db_task.get("collection_tags")),
-                "note": db_task.get("collection_note") or "",
-            },
-            "title": db_task.get("title") or audio_meta.get("title") or "",
-            "coverUrl": db_task.get("cover_url") or audio_meta.get("cover_url") or "",
-        })
-
-    if not result_dir.exists():
-        tasks.sort(key=lambda item: item["createdAt"], reverse=True)
-        return R.success(tasks)
-
-    for result_path in result_dir.iterdir():
-        if not _is_note_result_file(result_path):
-            continue
-
-        task_id = result_path.stem
-        if task_id in seen_task_ids:
-            continue
-        try:
-            with open(result_path, "r", encoding="utf-8") as f:
-                result = json.load(f)
-        except Exception as e:
-            logger.warning(f"读取任务结果失败 (task_id={task_id}): {e}")
-            continue
-
-        markdown = result.get("markdown") or ""
-        audio_meta = result.get("audio_meta") or {}
-        status_payload = _read_task_status_payload(task_id)
-        tasks.append({
-            "id": task_id,
-            "status": status_payload.get("status"),
-            "message": status_payload.get("message", ""),
-            "error": status_payload.get("error"),
-            "markdown": markdown,
-            "insights": _get_note_insights(result),
-            "audioMeta": audio_meta,
-            "createdAt": result_path.stat().st_mtime,
-            "videoUrl": _extract_source_url(markdown),
-        })
-
-    tasks.sort(key=lambda item: item["createdAt"], reverse=True)
-    return R.success(tasks)
+    return R.success(NOTE_TASKS.list_tasks())
 
 
 @router.get("/task_status/{task_id}")
 def get_task_status(task_id: str):
-    status_path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.status.json")
-    result_path = os.path.join(NOTE_OUTPUT_DIR, f"{task_id}.json")
-
-    # 优先读状态文件
-    if os.path.exists(status_path):
-        with open(status_path, "r", encoding="utf-8") as f:
-            status_content = json.load(f)
-
-        status = status_content.get("status")
-        message = status_content.get("message", "")
-
-        if status == TaskStatus.SUCCESS.value:
-            # 成功状态的话，继续读取最终笔记内容
-            if os.path.exists(result_path):
-                with open(result_path, "r", encoding="utf-8") as rf:
-                    result_content = json.load(rf)
-                result_content = _attach_note_insights(result_content)
-                return R.success({
-                    "status": status,
-                    "result": result_content,
-                    "message": message,
-                    "task_id": task_id
-                })
-            else:
-                # 理论上不会出现，保险处理
-                return R.success({
-                    "status": TaskStatus.PENDING.value,
-                    "message": "任务完成，但结果文件未找到",
-                    "task_id": task_id
-                })
-
-        if status == TaskStatus.FAILED.value:
-            error = status_content.get("error") or classify_generation_error(message)
-            return R.success({
-                "status": status,
-                "message": message,
-                "error": error,
-                "task_id": task_id,
-            })
-
-        # 处理中状态
-        return R.success({
-            "status": status,
-            "message": message,
-            "task_id": task_id
-        })
-
-    # 没有状态文件，但有结果
-    if os.path.exists(result_path):
-        with open(result_path, "r", encoding="utf-8") as f:
-            result_content = json.load(f)
-        result_content = _attach_note_insights(result_content)
-        return R.success({
-            "status": TaskStatus.SUCCESS.value,
-            "result": result_content,
-            "task_id": task_id
-        })
-
-    # 什么都没有，默认PENDING
-    return R.success({
-        "status": TaskStatus.PENDING.value,
-        "message": "任务排队中",
-        "task_id": task_id
-    })
+    return R.success(NOTE_TASKS.get_task_status(task_id))
 
 
 @router.get("/image_proxy")

@@ -62,18 +62,24 @@ def _install_app_stubs():
     dotenv_stub = types.ModuleType("dotenv")
     dotenv_stub.load_dotenv = lambda *_args, **_kwargs: False
 
+    app_stub = types.ModuleType("app")
+    app_stub.__path__ = [str(ROOT / "app")]
+    services_stub = types.ModuleType("app.services")
+    services_stub.__path__ = [str(ROOT / "app" / "services")]
+
     stubs = {
         "httpx": httpx_stub,
         "bs4": bs4_stub,
         "dotenv": dotenv_stub,
-        "app": types.ModuleType("app"),
+        "app": app_stub,
         "app.gpt": types.ModuleType("app.gpt"),
         "app.gpt.gpt_factory": types.ModuleType("app.gpt.gpt_factory"),
         "app.models": types.ModuleType("app.models"),
         "app.models.model_config": types.ModuleType("app.models.model_config"),
         "app.db": types.ModuleType("app.db"),
         "app.db.model_dao": types.ModuleType("app.db.model_dao"),
-        "app.services": types.ModuleType("app.services"),
+        "app.services": services_stub,
+        "app.services.gpt_provider": types.ModuleType("app.services.gpt_provider"),
         "app.services.provider": types.ModuleType("app.services.provider"),
         "app.utils": types.ModuleType("app.utils"),
         "app.utils.logger": types.ModuleType("app.utils.logger"),
@@ -91,6 +97,11 @@ def _install_app_stubs():
         def get_provider_by_id(_provider_id):
             return None
 
+    class GPTProvider:
+        @staticmethod
+        def create(**_kwargs):
+            return None
+
     class Logger:
         def info(self, *_args, **_kwargs):
             pass
@@ -101,19 +112,36 @@ def _install_app_stubs():
     stubs["app.gpt.gpt_factory"].GPTFactory = GPTFactory
     stubs["app.models.model_config"].ModelConfig = ModelConfig
     stubs["app.db.model_dao"].get_all_models = lambda: []
+    stubs["app.services.gpt_provider"].GPTProvider = GPTProvider
     stubs["app.services.provider"].ProviderService = ProviderService
     stubs["app.utils.logger"].get_logger = lambda _name: Logger()
+    previous = {name: sys.modules.get(name) for name in stubs}
     sys.modules.update(stubs)
+    for name in list(sys.modules):
+        if name.startswith("app.services.verification"):
+            previous[name] = sys.modules.pop(name)
+    return previous
+
+
+def _restore_app_stubs(previous):
+    for name, module in previous.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
 
 
 def _load_online_verifier():
-    _install_app_stubs()
-    spec = importlib.util.spec_from_file_location("online_verifier_under_test", MODULE_PATH)
-    if spec is None or spec.loader is None:
-        raise ImportError("online_verifier module spec not found")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    previous_modules = _install_app_stubs()
+    try:
+        spec = importlib.util.spec_from_file_location("online_verifier_under_test", MODULE_PATH)
+        if spec is None or spec.loader is None:
+            raise ImportError("online_verifier module spec not found")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        _restore_app_stubs(previous_modules)
 
 
 class TestOnlineVerifierBrave(unittest.TestCase):
@@ -236,8 +264,8 @@ class TestOnlineVerifierDomesticAcademic(unittest.TestCase):
         self.env_patch = mock.patch.dict(
             os.environ,
             {
-                "ONLINE_VERIFY_SEARCH_PROVIDER": "bing_academic",
-                "ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS": "baidu_xueshu,baidu,bing_cn,brave",
+                "ONLINE_VERIFY_SEARCH_PROVIDER": "brave",
+                "ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS": "bing_academic,bing_cn,baidu",
             },
         )
         self.env_patch.start()
@@ -249,38 +277,38 @@ class TestOnlineVerifierDomesticAcademic(unittest.TestCase):
     def test_provider_chain_prefers_domestic_academic_search(self):
         self.assertEqual(
             self.online_verifier._provider_chain(),
-            ["bing_academic", "baidu_xueshu", "baidu", "bing_cn", "brave"],
+            ["brave", "bing_academic", "bing_cn", "baidu"],
         )
 
-    def test_search_web_dispatches_to_bing_academic_first(self):
-        result = [{"title": "paper", "url": "https://cn.bing.com/academic", "snippet": ""}]
+    def test_search_web_dispatches_to_brave_first(self):
+        result = [{"title": "paper", "url": "https://search.brave.com/result", "snippet": ""}]
         with mock.patch.object(
-            self.online_verifier,
-            "search_bing_academic",
-            return_value=result,
-        ) as search_bing_academic, mock.patch.object(
             self.online_verifier,
             "search_brave",
-        ) as search_brave:
-            self.assertEqual(self.online_verifier.search_web("query", max_results=3), result)
-
-        search_bing_academic.assert_called_once_with("query", max_results=3)
-        search_brave.assert_not_called()
-
-    def test_search_web_falls_back_to_baidu_xueshu(self):
-        result = [{"title": "academic", "url": "https://xueshu.baidu.com/s", "snippet": ""}]
-        with mock.patch.object(
+            return_value=result,
+        ) as search_brave, mock.patch.object(
             self.online_verifier,
             "search_bing_academic",
+        ) as search_bing_academic:
+            self.assertEqual(self.online_verifier.search_web("query", max_results=3), result)
+
+        search_brave.assert_called_once_with("query", max_results=3)
+        search_bing_academic.assert_not_called()
+
+    def test_search_web_falls_back_to_bing_academic(self):
+        result = [{"title": "academic", "url": "https://cn.bing.com/academic", "snippet": ""}]
+        with mock.patch.object(
+            self.online_verifier,
+            "search_brave",
             return_value=[],
         ), mock.patch.object(
             self.online_verifier,
-            "search_baidu_xueshu",
+            "search_bing_academic",
             return_value=result,
-        ) as search_baidu_xueshu:
+        ) as search_bing_academic:
             self.assertEqual(self.online_verifier.search_web("query", max_results=3), result)
 
-        search_baidu_xueshu.assert_called_once_with("query", max_results=3)
+        search_bing_academic.assert_called_once_with("query", max_results=3)
 
     def test_search_web_multi_supplements_when_primary_source_is_weak(self):
         weak_result = {
@@ -297,7 +325,7 @@ class TestOnlineVerifierDomesticAcademic(unittest.TestCase):
         }
 
         def provider_results(provider, _query, max_results=5):
-            if provider == "baidu_xueshu":
+            if provider == "bing_cn":
                 return [academic_result]
             return []
 
@@ -318,7 +346,50 @@ class TestOnlineVerifierDomesticAcademic(unittest.TestCase):
             )
 
         self.assertEqual(results, [weak_result, academic_result])
-        self.assertEqual(provider_trace, ["bing_academic", "baidu_xueshu"])
+        self.assertEqual(provider_trace, ["bing_academic", "brave", "bing_cn"])
+
+    def test_scientific_numeric_claim_builds_academic_queries(self):
+        queries = self.online_verifier._build_search_queries("鸡蛋中含有超过1500种独特蛋白质")
+
+        self.assertIn('"chicken egg" "1500" proteins proteome', queries)
+        self.assertIn('"Egg White and Yolk Protein Atlas"', queries)
+        self.assertLessEqual(len(queries), 4)
+
+    def test_numeric_scientific_claim_requires_matching_number(self):
+        claim = {"claim": "鸡蛋中含有超过1500种独特蛋白质", "confidence": 50}
+        results = [
+            {
+                "title": "Egg White and Yolk Protein Atlas",
+                "url": "https://pubmed.ncbi.nlm.nih.gov/123456/",
+                "domain": "pubmed.ncbi.nlm.nih.gov",
+                "snippet": "The chicken egg atlas reports 1392 protein entries across egg white and yolk.",
+                "trusted": True,
+            }
+        ]
+
+        metrics = self.online_verifier._score_results(claim["claim"], results)
+        verdict, reason, confidence = self.online_verifier._online_verdict(claim, results, metrics)
+
+        self.assertTrue(metrics["numeric_claim"])
+        self.assertEqual(metrics["numeric_match_count"], 0)
+        self.assertGreater(metrics["numeric_conflict_count"], 0)
+        self.assertEqual(verdict, "相关资料未支持精确数字")
+        self.assertIn("数值", reason)
+        self.assertLessEqual(confidence, 58)
+
+    def test_english_academic_protein_result_is_relevant_to_chinese_claim(self):
+        claim = "鸡蛋中含有超过1500种独特蛋白质"
+        result = {
+            "title": "Egg White and Yolk Protein Atlas",
+            "url": "https://pubmed.ncbi.nlm.nih.gov/123456/",
+            "domain": "pubmed.ncbi.nlm.nih.gov",
+            "snippet": "A chicken egg proteome resource with protein entries.",
+            "trusted": True,
+        }
+
+        relevance = self.online_verifier._result_relevance(claim, result)
+
+        self.assertTrue(relevance["relevant"])
 
 
 if __name__ == "__main__":

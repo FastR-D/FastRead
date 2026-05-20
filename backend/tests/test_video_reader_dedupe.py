@@ -67,6 +67,18 @@ def _install_stubs():
     path_helper_mod.get_app_dir = _get_app_dir
     ffmpeg_mod.probe = lambda *_args, **_kwargs: {"format": {"duration": "0"}}
 
+    stub_names = [
+        "app",
+        "app.utils",
+        "PIL",
+        "PIL.Image",
+        "PIL.ImageDraw",
+        "PIL.ImageFont",
+        "ffmpeg",
+        "app.utils.logger",
+        "app.utils.path_helper",
+    ]
+    previous = {name: sys.modules.get(name) for name in stub_names}
     sys.modules.setdefault("app", app_mod)
     sys.modules.setdefault("app.utils", utils_pkg)
     sys.modules["PIL"] = pil_mod
@@ -76,18 +88,30 @@ def _install_stubs():
     sys.modules["ffmpeg"] = ffmpeg_mod
     sys.modules["app.utils.logger"] = logger_mod
     sys.modules["app.utils.path_helper"] = path_helper_mod
+    return previous
+
+
+def _restore_stubs(previous):
+    for name, module in previous.items():
+        if module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = module
 
 
 def _load_video_reader_module():
-    _install_stubs()
-    root = pathlib.Path(__file__).resolve().parents[1]
-    module_path = root / "app" / "utils" / "video_reader.py"
-    spec = importlib.util.spec_from_file_location("video_reader", module_path)
-    if spec is None or spec.loader is None:
-        raise ImportError("video_reader module spec not found")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    previous_modules = _install_stubs()
+    try:
+        root = pathlib.Path(__file__).resolve().parents[1]
+        module_path = root / "app" / "utils" / "video_reader.py"
+        spec = importlib.util.spec_from_file_location("video_reader", module_path)
+        if spec is None or spec.loader is None:
+            raise ImportError("video_reader module spec not found")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        _restore_stubs(previous_modules)
 
 
 video_reader_module = _load_video_reader_module()

@@ -286,8 +286,8 @@ backend/note_results/
 | `WHISPER_MODEL_SIZE` | Whisper 模型大小 | `tiny`、`base`、`small`、`medium` |
 | `NOTE_OUTPUT_DIR` | 笔记结果目录 | `note_results` |
 | `FFMPEG_BIN_PATH` | FFmpeg 可执行文件路径 | 留空则使用系统 PATH |
-| `ONLINE_VERIFY_SEARCH_PROVIDER` | 联网核验主搜索源 | `bing_academic`、`brave`、`bing_cn` |
-| `ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS` | 联网核验兜底搜索源 | `baidu_xueshu,baidu,bing_cn,brave` |
+| `ONLINE_VERIFY_SEARCH_PROVIDER` | 联网核验主搜索源 | `brave`、`bing_academic`、`bing_cn` |
+| `ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS` | 联网核验兜底搜索源 | `bing_academic,bing_cn,baidu` |
 | `BRAVE_SEARCH_API_KEY` | Brave Search API Key | 使用 Brave 搜索源时填写 |
 | `BRAVE_SEARCH_COUNTRY` | Brave 搜索国家/地区 | `CN` |
 | `BRAVE_SEARCH_LANG` | Brave 搜索语言 | `zh-hans` |

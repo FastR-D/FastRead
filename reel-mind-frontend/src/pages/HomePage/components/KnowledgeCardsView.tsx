@@ -150,7 +150,7 @@ function VerificationPanel({ taskId, insights }: { taskId?: string; insights: No
     try {
       const res = await verify_task_online({
         task_id: taskId,
-        max_claims: 5,
+        max_claims: Math.max(1, verification.claims.length),
         model_name: currentTask?.formData?.model_name,
         provider_id: currentTask?.formData?.provider_id,
       })

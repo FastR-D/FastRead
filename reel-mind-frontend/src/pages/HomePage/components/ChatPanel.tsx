@@ -74,7 +74,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
     [currentTask, tasks],
   )
 
-  // 检查索引状态，未索引时自动触发，indexing 时轮询
+  // 检查索引状态。索引只是增强能力，不能阻塞基础问答。
   useEffect(() => {
     if (scope === 'library') {
       setIndexStatus('indexed')
@@ -90,18 +90,11 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
         if (cancelled) return
         setIndexStatus(res.status)
 
-        if (res.status === 'idle') {
-          // 未索引，触发后台索引
-          await indexTask(taskId)
-          if (!cancelled) setIndexStatus('indexing')
-        }
-
-        // indexing 状态持续轮询
-        if (res.status === 'indexing' || res.status === 'idle') {
+        if (res.status === 'indexing') {
           timer = setTimeout(poll, 2000)
         }
       } catch {
-        if (!cancelled) setIndexStatus('failed')
+        if (!cancelled) setIndexStatus('idle')
       }
     }
 
@@ -209,46 +202,18 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
     [],
   )
 
-  if (indexStatus === null || indexStatus === 'indexing' || indexStatus === 'idle') {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-neutral-400">
-        <Loader2 className="h-6 w-6 animate-spin" />
-        <div className="text-center">
-          <p className="text-sm font-medium">正在索引笔记内容...</p>
-          <p className="mt-1 text-xs">首次使用需下载 Embedding 模型（约 80MB），请耐心等待</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (indexStatus === 'failed') {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-neutral-400">
-        <span className="text-sm">索引失败，请重试</span>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={async () => {
-            setIndexStatus('indexing')
-            try {
-              await indexTask(taskId)
-            } catch {
-              toast.error('索引请求失败')
-              setIndexStatus('failed')
-            }
-          }}
-        >
-          重新索引
-        </Button>
-      </div>
-    )
-  }
-
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden border-l bg-white">
       {/* 头部 */}
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
-        <span className="text-sm font-medium">AI 问答</span>
+        <div className="min-w-0">
+          <span className="text-sm font-medium">AI 问答</span>
+          {scope === 'task' && indexStatus !== 'indexed' && (
+            <span className="ml-2 text-xs text-amber-600">
+              {indexStatus === 'indexing' ? '索引构建中，基础问答可用' : '基础检索模式'}
+            </span>
+          )}
+        </div>
         <div className="flex items-center gap-1">
           <Button
             variant={scope === 'library' ? 'default' : 'ghost'}
@@ -288,6 +253,34 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
 
       {/* 消息列表 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {scope === 'task' && indexStatus !== 'indexed' && (
+          <div className="mx-3 mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                {indexStatus === 'indexing'
+                  ? '向量索引正在后台构建，当前仍可基于笔记内容提问。'
+                  : '当前使用基础检索，可直接提问；需要更准召回时再建立向量索引。'}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 shrink-0 border-amber-300 bg-white px-2 text-xs hover:bg-amber-100"
+                disabled={indexStatus === 'indexing'}
+                onClick={async () => {
+                  setIndexStatus('indexing')
+                  try {
+                    await indexTask(taskId)
+                  } catch {
+                    toast.error('索引请求失败')
+                    setIndexStatus('failed')
+                  }
+                }}
+              >
+                {indexStatus === 'indexing' ? '索引中' : '建立索引'}
+              </Button>
+            </div>
+          </div>
+        )}
         {messages.length === 0 && !loading ? (
           <div className="flex h-full items-center justify-center text-center text-sm text-neutral-400">
             <div>

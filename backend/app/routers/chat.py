@@ -1,6 +1,7 @@
 from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 from typing import Literal, Optional
+import os
 
 from app.services.chat_service import chat as chat_service
 from app.services.vector_store import VectorStoreManager
@@ -8,6 +9,7 @@ from app.utils.logger import get_logger
 from app.utils.response import ResponseWrapper as R
 
 logger = get_logger(__name__)
+CHAT_VECTOR_INDEX_ENABLED = os.getenv("CHAT_VECTOR_INDEX_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
 
 router = APIRouter()
 
@@ -39,8 +41,12 @@ def _do_index(task_id: str):
         _index_status[task_id] = "indexing"
         store = VectorStoreManager()
         store.index_task(task_id)
-        _index_status[task_id] = "indexed"
-        logger.info(f"索引完成: {task_id}")
+        if store.is_indexed(task_id):
+            _index_status[task_id] = "indexed"
+            logger.info(f"索引完成: {task_id}")
+        else:
+            _index_status[task_id] = "failed"
+            logger.warning(f"索引未生成有效 collection: {task_id}")
     except Exception as e:
         _index_status[task_id] = "failed"
         logger.error(f"索引失败: {task_id}, {e}")
@@ -49,14 +55,26 @@ def _do_index(task_id: str):
 @router.post("/chat/index")
 def index_task(data: IndexRequest, background_tasks: BackgroundTasks):
     """触发后台索引，立即返回。"""
+    if not CHAT_VECTOR_INDEX_ENABLED:
+        _index_status[data.task_id] = "disabled"
+        return R.success(
+            msg="向量索引默认关闭，当前使用基础检索",
+            data={"status": "disabled", "indexed": False},
+        )
+
     if _index_status.get(data.task_id) == "indexing":
         return R.success(msg="正在索引中")
 
-    # 如果已经索引过，直接返回
-    store = VectorStoreManager()
-    if store.is_indexed(data.task_id):
-        _index_status[data.task_id] = "indexed"
-        return R.success(msg="已完成索引")
+    # 如果已经索引过，直接返回；不可用时允许前端走基础检索模式。
+    try:
+        store = VectorStoreManager()
+        if store.is_indexed(data.task_id):
+            _index_status[data.task_id] = "indexed"
+            return R.success(msg="已完成索引")
+    except Exception as e:
+        _index_status[data.task_id] = "failed"
+        logger.warning(f"索引组件不可用，跳过向量索引: {e}")
+        return R.success(msg="索引组件不可用，已使用基础检索", data={"status": "failed"})
 
     _index_status[data.task_id] = "indexing"
     background_tasks.add_task(_do_index, data.task_id)
@@ -65,7 +83,10 @@ def index_task(data: IndexRequest, background_tasks: BackgroundTasks):
 
 @router.get("/chat/status")
 def chat_status(task_id: str):
-    """返回索引状态：idle / indexing / indexed / failed。"""
+    """返回索引状态：disabled / idle / indexing / indexed / failed。"""
+    if not CHAT_VECTOR_INDEX_ENABLED:
+        return R.success(data={"status": "disabled", "indexed": False})
+
     try:
         # 优先检查内存状态
         status = _index_status.get(task_id)

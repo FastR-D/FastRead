@@ -3,16 +3,16 @@ import os
 import re
 from typing import Optional
 
-from app.gpt.gpt_factory import GPTFactory
-from app.models.model_config import ModelConfig
-from app.services.provider import ProviderService
+from app.repositories.note_artifacts import NoteArtifactRepository
+from app.services.gpt_provider import GPTProvider
 from app.services.vector_store import VectorStoreManager
 from app.services.chat_tools import TOOLS, execute_tool
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
+ARTIFACTS = NoteArtifactRepository()
+CHAT_VECTOR_INDEX_ENABLED = os.getenv("CHAT_VECTOR_INDEX_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
 
 SYSTEM_PROMPT = """你是一个视频笔记问答助手。你拥有以下能力：
 
@@ -93,19 +93,6 @@ def _build_sources(chunks: list[dict]) -> list[dict]:
     return sources
 
 
-def _is_note_result_file(filename: str) -> bool:
-    if not filename.endswith(".json"):
-        return False
-    ignored_suffixes = (
-        ".status.json",
-        "_status.json",
-        "_transcript.json",
-        "_audio.json",
-        "_markdown.status.json",
-    )
-    return not any(filename.endswith(suffix) for suffix in ignored_suffixes)
-
-
 def _tokenize(text: str) -> list[str]:
     text = (text or "").lower()
     words = re.findall(r"[a-zA-Z0-9_]{2,}|[\u4e00-\u9fff]{2,}", text)
@@ -130,21 +117,12 @@ def _chunk_text(text: str, size: int = 520, overlap: int = 80) -> list[str]:
 
 
 def _load_library_chunks() -> list[dict]:
-    if not os.path.isdir(NOTE_OUTPUT_DIR):
-        return []
-
     chunks = []
-    for filename in os.listdir(NOTE_OUTPUT_DIR):
-        if not _is_note_result_file(filename):
-            continue
-
-        task_id = filename[:-5]
-        path = os.path.join(NOTE_OUTPUT_DIR, filename)
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                note_data = json.load(f)
-        except Exception as exc:
-            logger.warning(f"读取知识库笔记失败: {filename}, {exc}")
+    for result_file in ARTIFACTS.iter_result_files():
+        task_id = result_file.task_id
+        note_data = ARTIFACTS.read_result(task_id)
+        if not note_data:
+            logger.warning(f"读取知识库笔记失败: {result_file.path.name}")
             continue
 
         audio_meta = note_data.get("audio_meta") or {}
@@ -179,21 +157,79 @@ def _load_library_chunks() -> list[dict]:
     return chunks
 
 
-def _query_library(question: str, n_results: int = 8) -> list[dict]:
+def _load_task_data(task_id: str) -> Optional[dict]:
+    return ARTIFACTS.read_result(task_id)
+
+
+def _normalize_markdown(markdown) -> str:
+    if isinstance(markdown, list):
+        if not markdown:
+            return ""
+        latest = markdown[0] if isinstance(markdown[0], dict) else markdown[-1]
+        if isinstance(latest, dict):
+            return latest.get("content", "") or ""
+        return str(latest)
+    return markdown or ""
+
+
+def _load_task_chunks(task_id: str) -> list[dict]:
+    note_data = _load_task_data(task_id)
+    if not note_data:
+        return []
+
+    audio_meta = note_data.get("audio_meta") or {}
+    raw_info = audio_meta.get("raw_info") or {}
+    title = audio_meta.get("title") or task_id
+    markdown = _normalize_markdown(note_data.get("markdown"))
+    transcript = note_data.get("transcript") or {}
+    transcript_text = transcript.get("full_text") or ""
+    tags = raw_info.get("tags") if isinstance(raw_info.get("tags"), list) else []
+    meta_text = "\n".join(part for part in [
+        f"视频标题：{title}",
+        f"平台：{audio_meta.get('platform', '')}",
+        f"作者：{raw_info.get('uploader', '')}",
+        f"简介：{str(raw_info.get('description', ''))[:500]}" if raw_info.get("description") else "",
+        f"标签：{', '.join(str(tag) for tag in tags[:12])}" if tags else "",
+    ] if part.strip("：, "))
+
+    chunks = []
+    for source_type, source_text in (
+        ("meta", meta_text),
+        ("markdown", markdown),
+        ("transcript", transcript_text),
+    ):
+        for index, text in enumerate(_chunk_text(source_text)):
+            chunks.append({
+                "text": text,
+                "metadata": {
+                    "task_id": task_id,
+                    "title": title,
+                    "source_type": source_type,
+                    "chunk_index": index,
+                },
+            })
+    return chunks
+
+
+def _rank_chunks(chunks: list[dict], question: str, n_results: int) -> list[dict]:
     query_terms = _tokenize(question)
     if not query_terms:
-        return []
+        return chunks[:n_results]
     query_set = set(query_terms)
     ranked = []
-    for chunk in _load_library_chunks():
+    for chunk in chunks:
         text = chunk["text"]
         terms = _tokenize(text)
         if not terms:
             continue
-        title = chunk.get("metadata", {}).get("title", "")
+        meta = chunk.get("metadata", {})
+        title = meta.get("title", "")
+        source_type = meta.get("source_type", "")
         overlap = len(query_set & set(terms))
         title_overlap = len(query_set & set(_tokenize(title)))
         score = overlap * 3 + title_overlap * 5
+        if source_type == "meta":
+            score += 1
         lower_text = text.lower()
         for term in query_set:
             if term and term in lower_text:
@@ -205,19 +241,16 @@ def _query_library(question: str, n_results: int = 8) -> list[dict]:
     return [chunk for _, chunk in ranked[:n_results]]
 
 
-def _get_gpt(provider_id: str, model_name: str):
-    provider = ProviderService.get_provider_by_id(provider_id)
-    if not provider:
-        raise ValueError(f"未找到模型供应商: {provider_id}")
+def _query_task_fallback(task_id: str, question: str, n_results: int = 6) -> list[dict]:
+    return _rank_chunks(_load_task_chunks(task_id), question, n_results)
 
-    config = ModelConfig(
-        api_key=provider["api_key"],
-        base_url=provider["base_url"],
-        model_name=model_name,
-        provider=provider["type"],
-        name=provider["name"],
-    )
-    return GPTFactory.from_config(config)
+
+def _query_library(question: str, n_results: int = 8) -> list[dict]:
+    return _rank_chunks(_load_library_chunks(), question, n_results)
+
+
+def _get_gpt(provider_id: str, model_name: str):
+    return GPTProvider.create(provider_id=provider_id, model_name=model_name)
 
 
 def library_chat(
@@ -265,10 +298,18 @@ def chat(
     if not task_id:
         raise ValueError("当前视频问答需要 task_id")
 
-    vector_store = VectorStoreManager()
+    # 1. 检索初始上下文：默认使用笔记 JSON 关键词检索，避免 Chroma 首次下载 embedding 模型阻塞问答。
+    chunks = []
+    if CHAT_VECTOR_INDEX_ENABLED:
+        try:
+            vector_store = VectorStoreManager()
+            chunks = vector_store.query(task_id, question, n_results=6)
+        except Exception as exc:
+            logger.warning(f"向量检索不可用，降级为文件检索: task_id={task_id}, {exc}")
 
-    # 1. 检索初始上下文
-    chunks = vector_store.query(task_id, question, n_results=6)
+    if not chunks:
+        chunks = _query_task_fallback(task_id, question, n_results=6)
+
     context = _build_context(chunks) if chunks else "（未检索到相关内容，请使用工具查询）"
     sources = _build_sources(chunks) if chunks else []
 
@@ -289,12 +330,21 @@ def chat(
     # 4. Tool calling 循环（最多 3 轮）
     max_rounds = 3
     for round_i in range(max_rounds):
-        response = gpt.client.chat.completions.create(
-            model=gpt.model,
-            messages=messages,
-            tools=TOOLS,
-            temperature=0.7,
-        )
+        try:
+            response = gpt.client.chat.completions.create(
+                model=gpt.model,
+                messages=messages,
+                tools=TOOLS,
+                temperature=0.7,
+            )
+        except Exception as exc:
+            logger.warning(f"模型不支持工具调用或工具调用失败，退回普通问答: {exc}")
+            response = gpt.client.chat.completions.create(
+                model=gpt.model,
+                messages=messages,
+                temperature=0.7,
+            )
+            return {"answer": response.choices[0].message.content or "", "sources": sources}
 
         msg = response.choices[0].message
 

@@ -51,8 +51,8 @@ if not exist ".env" (
   >> ".env" echo GROQ_TRANSCRIBER_MODEL=whisper-large-v3-turbo
   >> ".env" echo.
   >> ".env" echo # Online verification search
-  >> ".env" echo ONLINE_VERIFY_SEARCH_PROVIDER=bing_academic
-  >> ".env" echo ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS=baidu_xueshu,baidu,bing_cn,brave
+  >> ".env" echo ONLINE_VERIFY_SEARCH_PROVIDER=brave
+  >> ".env" echo ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS=bing_academic,bing_cn,baidu
   >> ".env" echo BRAVE_SEARCH_API_KEY=your_brave_search_api_key
   >> ".env" echo BRAVE_SEARCH_COUNTRY=CN
   >> ".env" echo BRAVE_SEARCH_LANG=zh-hans
