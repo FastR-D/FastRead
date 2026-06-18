@@ -1,15 +1,11 @@
 import shutil
 from pathlib import Path
 
-from dotenv import load_dotenv
 import subprocess
 import os
 import uuid
-load_dotenv()
-api_path = os.getenv("API_BASE_URL", "http://localhost")
-BACKEND_PORT= os.getenv("BACKEND_PORT", 8483)
 
-BACKEND_BASE_URL = f"{api_path}:{BACKEND_PORT}"
+from app.core.settings import get_settings
 
 from typing import Optional
 def generate_screenshot(video_path: str, output_dir: str, timestamp: int, index: int) -> str:
@@ -49,21 +45,17 @@ def save_cover_to_static(local_cover_path: str, subfolder: Optional[str] = "cove
     :param subfolder: 子目录，默认是 cover，可以自定义
     :return: 前端访问路径，例如 /static/cover/xxx.jpg
     """
-    # 项目根目录
-    project_root = os.getcwd()
-
-    # static目录
-    static_dir = os.path.join(project_root, "static")
+    settings = get_settings()
 
     # 确定目标子目录
-    target_dir = os.path.join(static_dir, subfolder or "cover")
-    os.makedirs(target_dir, exist_ok=True)
+    target_dir = settings.static_dir / (subfolder or "cover")
+    target_dir.mkdir(parents=True, exist_ok=True)
 
     # 拷贝文件
     file_name = os.path.basename(local_cover_path)
-    target_path = os.path.join(target_dir, file_name)
+    target_path = target_dir / file_name
     shutil.copy2(local_cover_path, target_path)  # 保留原时间戳、权限
     image_relative_path = f"/static/{subfolder}/{file_name}".replace("\\", "/")
-    url_path = f"{BACKEND_BASE_URL.rstrip('/')}/{image_relative_path.lstrip('/')}"
+    url_path = f"{settings.backend_base_url.rstrip('/')}/{image_relative_path.lstrip('/')}"
     # 返回前端可访问的路径
     return url_path

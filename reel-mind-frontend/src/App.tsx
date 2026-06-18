@@ -1,4 +1,3 @@
-import './App.css'
 import { lazy, Suspense, useEffect } from 'react'
 import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom'
 import { useTaskPolling } from '@/hooks/useTaskPolling.ts'

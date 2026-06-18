@@ -217,6 +217,39 @@ backend\.venv\Scripts\python.exe -m pytest
 - 新增 `app.services.__path__`，让测试能加载真实 `app.services.verification` 子包。
 - 每次加载前清理 `app.services.verification*`，避免环境变量配置被子模块缓存导致用例串扰。
 
+## 2026-05-20 追加：online_verifier 第二轮优化
+
+本轮继续瘦身 `backend/app/services/online_verifier.py`，保持旧测试 patch 入口兼容：
+
+- 新增 `backend/app/services/verification/verdict.py`
+  - rule-based online verdict
+  - numeric verdict enforcement
+  - claim 汇总状态、分数、summary 计算
+- 新增 `backend/app/services/verification/search_orchestrator.py`
+  - `search_web_multi` 多查询、多 provider、补充搜索和 fallback 结果编排
+  - 支持注入 `search_with_provider_fn` / `provider_results_fn` / `relevance_fn`，用于兼容现有测试 patch
+- 新增 `backend/tests/test_verification_modules.py`
+  - 直接覆盖 query builder、numeric evidence、relevance、verdict、search orchestrator
+
+`online_verifier.py` 当前约 421 行，主要剩：
+
+- 对旧私有 helper 名称的兼容 wrapper。
+- provider dispatch wrapper，用于支持测试直接 patch `online_verifier.search_brave` / `_provider_results`。
+- `verify_claims_online` 主流程。
+
+本轮验证：
+
+```powershell
+backend\.venv\Scripts\python.exe -m pytest backend\tests\test_verification_modules.py
+# 5 passed
+
+backend\.venv\Scripts\python.exe -m pytest backend\tests\test_online_verifier_brave.py
+# 11 passed
+
+backend\.venv\Scripts\python.exe -m pytest
+# 74 passed
+```
+
 ## 当前关键行为约束
 
 这轮重构尽量保持 API 行为不变。
@@ -274,19 +307,19 @@ backend\.venv\Scripts\python.exe -m pytest
 - `backend/app/services/online_verifier.py`
 - 若干前端文件
 - `run.bat`
-- `run-docker.bat`
+- 旧 Docker 启动脚本（2026-06-04 入口收缩后已下线删除，默认只保留 `run.bat`）
 - `task/ReelMind_PRD_汇报版.md`
 
 如果下个对话继续改，先看 `git status --short`，不要假设所有改动都属于当前任务。
 
 ## 建议下一步
 
-`online_verifier.py` 已完成第一轮结构拆分。后续建议按风险从低到高继续：
+`online_verifier.py` 已完成两轮结构拆分。后续建议按风险从低到高继续：
 
 1. 把 `online_verifier.py` 里的兼容 wrapper 逐步减少，只保留被测试或外部调用确实依赖的导出。
-2. 把 `_online_verdict` 和 `_enforce_numeric_verdict` 抽到 `verification/verdict.py`，让主文件只保留流程编排。
-3. 补 `verification/*` 模块级单测，减少对 `online_verifier.py` 私有函数的测试耦合。
-4. 再考虑抽 `domain_rules.py`，统一维护红黑树、LeMay、蛋白质等领域特例。
+2. 把 `test_online_verifier_brave.py` 中对私有 helper 的断言逐步迁到 `test_verification_modules.py`。
+3. 再考虑抽 `domain_rules.py`，统一维护红黑树、LeMay、蛋白质等领域特例。
+4. 最后把 `verify_claims_online` 封成类或小服务，主模块只保留对外函数。
 
 每步都跑：
 
@@ -313,5 +346,5 @@ npm run build
    - note 路由瘦身
    - GPT provider 工厂
    - lifecycle side effects 拆分
-4. 当前验证是 `69 passed`，前端 build 通过但有既有 warning
-5. 下一步优先拆 `backend/app/services/online_verifier.py`
+4. 当前验证是 `74 passed`，前端 build 通过但有既有 warning
+5. 下一步优先减少 `online_verifier.py` 的兼容 wrapper，或抽 `domain_rules.py`

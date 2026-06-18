@@ -5,6 +5,8 @@ import { SUPPORTED_COOKIE_PLATFORMS, syncCookieToBackend } from '~/logic/cookies
 import { PLATFORM_LABELS } from '~/logic/platform'
 import type { DownloaderCookieStatus, Platform } from '~/logic/types'
 
+type CookiePlatform = Extract<Platform, 'douyin'>
+
 interface Row {
   cookie: string
   busy: boolean
@@ -21,7 +23,7 @@ function ensureRow(p: string) {
   return rows[p]
 }
 
-async function refreshOne(p: Exclude<Platform, 'local'>) {
+async function refreshOne(p: CookiePlatform) {
   const r = ensureRow(p)
   try {
     const [cookie, status] = await Promise.all([
@@ -42,7 +44,7 @@ async function refreshAll() {
   refreshing.value = false
 }
 
-async function syncFromBrowser(p: Exclude<Platform, 'local'>) {
+async function syncFromBrowser(p: CookiePlatform) {
   const r = ensureRow(p)
   r.busy = true
   r.status = { kind: 'idle', text: '从浏览器读取并同步…' }
@@ -55,7 +57,7 @@ async function syncFromBrowser(p: Exclude<Platform, 'local'>) {
   r.busy = false
 }
 
-async function saveManual(p: Exclude<Platform, 'local'>) {
+async function saveManual(p: CookiePlatform) {
   const r = ensureRow(p)
   r.busy = true
   r.status = { kind: 'idle', text: '保存中…' }

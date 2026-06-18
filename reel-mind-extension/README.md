@@ -1,54 +1,47 @@
 # Reel Mind 浏览器插件
 
-把 Reel Mind 的"视频链接 → Markdown 笔记"能力下沉到浏览器插件。当前为 P1 MVP（仅工具栏 popup）。
+当前扩展范围是 Cookie Sync MVP：工具栏 popup 读取浏览器里的抖音 Cookie，并同步到本地 Reel Mind 后端。
 
-## 当前状态（P1 MVP）
+## 当前状态（Cookie Sync MVP）
 
-- ✅ 工具栏图标 popup：自动读当前 tab URL，识别支持平台，触发笔记生成
-- ✅ 设置页：后端地址、供应商/模型、画质、截图/跳转/风格默认值
-- ✅ 任务进度可视化、Markdown 渲染、复制 / 下载 .md
-- ✅ chrome.storage.local 持久化设置和最近 30 个任务
-- ⏳ P2：视频页悬浮按钮 + 右键菜单 + 浏览器 cookie 直通
-- ⏳ P3：side panel + 思维导图（markmap）
-- ⏳ P4：RAG 问答
+- 工具栏 popup：读取当前标签页、展示后端 Cookie 状态、手动同步抖音 Cookie。
+- 设置持久化：`chrome.storage.local` 保存本地后端地址，默认 `http://127.0.0.1:3015`。
+- Manifest / Vite 构建产物只声明 popup，不声明 background、content script、options 或 side panel。
+- `src/background`、`src/contentScripts`、`src/options`、`src/sidepanel` 和部分高级组件仍保留为后续完整扩展草稿，不属于当前可发布产物。
 
 ## 开发
 
-依赖：node 20+ / pnpm 9+
+依赖：node 20+ / npm 11+
 
 ```bash
 cd reel-mind-extension
-pnpm install
-pnpm dev      # watch 模式，产物输出到 ./extension/
+npm install
+npm run dev      # watch 模式，产物输出到 ./extension/
 ```
+
+仓库根目录 `.npmrc` 已默认使用 `https://registry.npmmirror.com`。
 
 加载到 Chrome：
 
 1. `chrome://extensions/` → 打开右上"开发者模式"
 2. 点"加载已解压的扩展程序"，选 `reel-mind-extension/extension/` 目录
-3. 启动后端：推荐在仓库根目录运行 `docker compose up -d --build backend`
+3. 在仓库根目录运行唯一入口 `run.bat`，默认访问地址为 `http://127.0.0.1:3015`
 4. 浏览器打开抖音精选视频页，点工具栏 Reel Mind 图标
-5. 首次使用先打开"设置"，填后端地址 → 选供应商 + 模型
+5. 在 popup 里确认后端地址，然后同步抖音 Cookie
 
 ## 后端要求
 
 后端 `backend/main.py` 的 CORS 白名单已通过 regex 兼容 `chrome-extension://`、`moz-extension://` 与本地 web。无需新增任何 backend endpoint。
 
-### Docker 后端入口
+### 默认本地入口
 
-如果使用 Docker 启动整套服务：
-
-```powershell
-docker compose up -d --build
-```
-
-扩展设置页里的后端地址应填：
+第一阶段默认使用根目录 `run.bat` 启动，不要求 Docker。扩展设置页里的后端地址保持：
 
 ```text
 http://127.0.0.1:3015
 ```
 
-这是 Nginx 对外入口，扩展会请求：
+这是本地 web 入口，扩展会请求：
 
 ```text
 http://127.0.0.1:3015/api/...
@@ -60,35 +53,22 @@ http://127.0.0.1:3015/api/...
 Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 ```
 
-### 源码后端入口
-
-如果直接源码启动后端：
-
-```powershell
-cd backend
-$env:BACKEND_PORT="8493"
-python main.py
-```
-
-扩展设置页里的后端地址应填：
-
-```text
-http://127.0.0.1:8493
-```
-
 ## 构建发布
 
 ```bash
-pnpm build         # 产物 → ./extension/
-pnpm pack:zip      # 打包 → ./extension.zip （上传 Chrome Web Store）
-pnpm pack:crx      # 打包 → ./extension.crx
-pnpm pack:xpi      # 打包 → ./extension.xpi （Firefox）
+npm run typecheck  # 覆盖 Cookie Sync MVP 的真实 popup/manifest 构建面
+npm run build      # 产物 → ./extension/
+npm run pack:zip   # 打包 → ./extension.zip （上传 Chrome Web Store）
+npm run pack:crx   # 打包 → ./extension.crx
+npm run pack:xpi   # 打包 → ./extension.xpi （Firefox）
 ```
+
+完整扩展草稿的类型检查配置保留在 `tsconfig.full.json`。它会暴露 background / content / options / sidepanel 尚未补齐的类型、API、storage 契约，后续进入完整扩展阶段再修。
 
 ## 与桌面端的关系
 
-桌面 web 端（`reel-mind-frontend/`）继续负责：供应商/模型管理、转写器配置、笔记历史。
-插件**不**复刻这些管理界面，仅消费已配置好的供应商。
+桌面 web 端（`reel-mind-frontend/`）继续负责：供应商/模型管理、转写器配置、笔记历史和笔记生成。
+插件当前只负责把浏览器 Cookie 同步给本地后端。
 
 ## 致谢
 

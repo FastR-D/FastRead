@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import httpx
 
 from app.services.verification.constants import (
@@ -11,14 +10,15 @@ from app.services.verification import ai_judge
 from app.services.verification import numeric_evidence
 from app.services.verification import query_builder
 from app.services.verification import relevance
+from app.services.verification import search_orchestrator
 from app.services.verification import search_providers as search_provider_service
+from app.services.verification import verdict as verdict_service
 from app.services.verification.text_utils import (
     is_low_value_result as _text_is_low_value_result,
 )
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
-
 
 
 def _parse_duckduckgo_results(html: str, max_results: int) -> list[dict]:
@@ -94,35 +94,24 @@ def _quality_supplement_providers(used_providers: set[str] | None = None) -> lis
 
 
 def _result_key(item: dict) -> str:
-    return item.get("url") or f"{item.get('title', '')}|{item.get('snippet', '')}"
+    return search_orchestrator.result_key(item)
 
 
 def _split_relevant_results(items: list[dict], claim: str, seen_urls: set[str]) -> tuple[list[dict], list[dict]]:
-    relevant = []
-    fallback = []
-    for item in items:
-        key = _result_key(item)
-        if not key or key in seen_urls:
-            continue
-        seen_urls.add(key)
-        if claim and not _result_relevance(claim, item)["relevant"]:
-            fallback.append(item)
-            continue
-        relevant.append(item)
-    return relevant, fallback
+    return search_orchestrator.split_relevant_results(
+        items,
+        claim,
+        seen_urls,
+        relevance_fn=_result_relevance,
+    )
 
 
 def _needs_quality_supplement(results: list[dict], claim: str) -> bool:
-    if not claim:
-        return False
-    if not results:
-        return True
-    return len(results) < 2 or not any(result.get("trusted") for result in results)
+    return search_orchestrator.needs_quality_supplement(results, claim)
 
 
 def _record_provider(provider_trace: list[str] | None, provider: str) -> None:
-    if provider_trace is not None and provider and provider not in provider_trace:
-        provider_trace.append(provider)
+    search_orchestrator.record_provider(provider_trace, provider)
 
 
 def search_web_multi(
@@ -131,69 +120,15 @@ def search_web_multi(
     claim: str = "",
     provider_trace: list[str] | None = None,
 ) -> list[dict]:
-    seen_queries = set()
-    seen_urls = set()
-    results = []
-    fallback_results = []
-    failures = []
-    for query in queries:
-        query = (query or "").strip()
-        if not query or query in seen_queries:
-            continue
-        seen_queries.add(query)
-        logger.info(f"联网核验检索 query={query}")
-        used_providers = set()
-        try:
-            query_results, provider = _search_web_with_provider(query, max_results=max_results)
-            used_providers.add(provider)
-            _record_provider(provider_trace, provider)
-        except Exception as exc:
-            logger.warning(f"联网核验单条检索失败 query={query}: {exc}")
-            failures.append(exc)
-            continue
-
-        query_relevant, query_fallback = _split_relevant_results(query_results, claim, seen_urls)
-
-        if claim and not query_relevant:
-            for provider in _domestic_supplement_providers():
-                try:
-                    supplement_results = _provider_results(provider, query, max_results=max_results)
-                except Exception as exc:
-                    logger.warning(f"联网核验国内补充检索失败 provider={provider!r} query={query}: {exc}")
-                    continue
-                used_providers.add(provider)
-                _record_provider(provider_trace, provider)
-                logger.info(f"联网核验国内补充搜索源 {provider!r} 返回 {len(supplement_results)} 条 query={query}")
-                relevant, fallback = _split_relevant_results(supplement_results, claim, seen_urls)
-                query_relevant.extend(relevant)
-                query_fallback.extend(fallback)
-                if query_relevant:
-                    break
-
-        if claim and _needs_quality_supplement(query_relevant, claim):
-            for provider in _quality_supplement_providers(used_providers):
-                try:
-                    supplement_results = _provider_results(provider, query, max_results=max_results)
-                except Exception as exc:
-                    logger.warning(f"联网核验质量补充检索失败 provider={provider!r} query={query}: {exc}")
-                    continue
-                used_providers.add(provider)
-                _record_provider(provider_trace, provider)
-                logger.info(f"联网核验质量补充搜索源 {provider!r} 返回 {len(supplement_results)} 条 query={query}")
-                relevant, fallback = _split_relevant_results(supplement_results, claim, seen_urls)
-                query_relevant.extend(relevant)
-                query_fallback.extend(fallback)
-                if not _needs_quality_supplement(query_relevant, claim):
-                    break
-
-        fallback_results.extend(query_fallback)
-        for item in query_relevant:
-            results.append(item)
-            if len(results) >= max_results:
-                return results
-    if failures and len(failures) == len(seen_queries) and not results and not fallback_results:
-        raise failures[0]
-    return (results + fallback_results)[:max_results]
+    return search_orchestrator.search_web_multi(
+        queries,
+        max_results=max_results,
+        claim=claim,
+        provider_trace=provider_trace,
+        search_with_provider_fn=lambda query, limit: _search_web_with_provider(query, max_results=limit),
+        provider_results_fn=lambda provider, query, limit: _provider_results(provider, query, max_results=limit),
+        relevance_fn=_result_relevance,
+    )
 
 
 def search_duckduckgo(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list[dict]:
@@ -309,46 +244,7 @@ def _score_results(claim: str, results: list[dict]) -> dict:
 
 
 def _online_verdict(claim: dict, results: list[dict], metrics: dict) -> tuple[str, str, int]:
-    if not results:
-        return (
-            "未找到外部证据",
-            "联网检索没有返回可用结果，不能据此判断该主张是否属实。",
-            min(int(claim.get("confidence", 50)), 45),
-        )
-
-    coverage = metrics["coverage"]
-    trusted_count = metrics["trusted_count"]
-    top_overlap = metrics["top_overlap"]
-    if metrics.get("numeric_claim") and metrics.get("numeric_match_count", 0) <= 0:
-        if metrics.get("numeric_conflict_count", 0) > 0:
-            return (
-                "相关资料未支持精确数字",
-                "检索到相关资料，但可比数字与主张中的数值、范围或单位不一致；不能直接视为外部佐证。",
-                min(max(int(claim.get("confidence", 50)), 45), 58),
-            )
-        return (
-            "精确数字仍待核实",
-            "检索结果与主题相关，但没有命中能支持该数字、范围或单位的明确证据。",
-            min(max(int(claim.get("confidence", 50)), 45), 60),
-        )
-
-    if trusted_count > 0 and coverage >= 0.35:
-        return (
-            "找到权威相关资料",
-            "检索结果中存在权威来源，且与主张有较高文本相关度；仍需用户打开来源确认细节。",
-            max(int(claim.get("confidence", 50)), 78),
-        )
-    if coverage >= 0.4 or top_overlap >= 5:
-        return (
-            "找到相关资料",
-            "检索结果与主张主题相关，但来源权威性或证据强度不足，不能直接视为已证实。",
-            max(int(claim.get("confidence", 50)), 68),
-        )
-    return (
-        "证据仍不足",
-        "检索结果较少或相关度偏低，当前仍应保持核实状态。",
-        min(max(int(claim.get("confidence", 50)), 50), 62),
-    )
+    return verdict_service.online_verdict(claim, results, metrics)
 
 
 def _json_from_ai_text(text: str) -> dict:
@@ -394,22 +290,7 @@ def _enforce_numeric_verdict(
     confidence: int,
     metrics: dict,
 ) -> tuple[str, str, int]:
-    if not metrics.get("numeric_claim") or metrics.get("numeric_match_count", 0) > 0:
-        return verdict, reason, confidence
-    if verdict not in {"找到权威相关资料", "找到相关资料", "AI 判断有外部佐证"}:
-        return verdict, reason, confidence
-
-    if metrics.get("numeric_conflict_count", 0) > 0:
-        return (
-            "相关资料未支持精确数字",
-            "检索结果与主题相关，但可比数字与主张中的数值、范围或单位不一致；不能当作已证实。",
-            min(max(int(claim.get("confidence", 50)), 45), 58),
-        )
-    return (
-        "精确数字仍待核实",
-        "检索结果与主题相关，但没有明确支持主张中数字、范围或单位的证据。",
-        min(max(int(claim.get("confidence", 50)), 45), 60),
-    )
+    return verdict_service.enforce_numeric_verdict(claim, verdict, reason, confidence, metrics)
 
 
 def verify_claims_online(
@@ -517,57 +398,21 @@ def verify_claims_online(
             if _is_network_unavailable_error(exc):
                 break
 
-    checked_claims = [claim for claim in claims if claim.get("online", {}).get("checked")]
-    supported_count = sum(
-        1
-        for claim in checked_claims
-        if claim.get("online", {}).get("verdict") in {"找到权威相关资料", "找到相关资料", "AI 判断有外部佐证"}
-    )
-    refuted_count = sum(
-        1
-        for claim in checked_claims
-        if claim.get("online", {}).get("verdict") == "AI 判断存在反证"
-    )
-    insufficient_count = sum(
-        1
-        for claim in claims
-        if claim.get("verdict") in {
-            "证据不足",
-            "缺少来源",
-            "需重点核实",
-            "证据仍不足",
-            "未找到外部证据",
-            "精确数字仍待核实",
-            "相关资料未支持精确数字",
-        }
-    )
-
-    base_score = int(verification.get("overall", {}).get("score") or 50)
-    next_score = base_score + supported_count * 7
-    next_score = max(0, min(100, next_score))
-    status = "联网核验完成" if checked else "保持离线核验"
-    if checked and insufficient_count > supported_count:
-        status = "仍需核实"
-    if checked and supported_count >= max(1, checked // 2) and insufficient_count <= supported_count:
-        status = "找到外部佐证"
+    summary = verdict_service.summarize_claims(verification, checked)
 
     verification["external_check"] = checked > 0
     verification["online_error"] = "; ".join(errors[:3])
     verification["claim_counts"] = {
         **(verification.get("claim_counts") or {}),
         "online_checked": checked,
-        "online_supported": supported_count,
-        "online_refuted": refuted_count,
+        "online_supported": summary["supported_count"],
+        "online_refuted": summary["refuted_count"],
     }
     verification["overall"] = {
         **(verification.get("overall") or {}),
-        "status": status,
-        "score": next_score,
-        "summary": (
-            f"已联网核验 {checked} 条主张，找到 {supported_count} 条外部佐证、{refuted_count} 条反证。"
-            if checked
-            else "联网核验未完成，当前结果仍基于离线文本证据判断。"
-        ),
+        "status": summary["status"],
+        "score": summary["score"],
+        "summary": summary["summary"],
         "note": "联网核验基于搜索结果标题、摘要和来源域名做证据扫描，不等同于人工事实核查。",
     }
     verification["claims"] = claims

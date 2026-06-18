@@ -1,7 +1,7 @@
 import { useWebExtensionStorage } from '~/composables/useWebExtensionStorage'
 import browser from 'webextension-polyfill'
-import type { Settings } from './types'
-import { DEFAULT_BACKEND_URL, DEFAULT_SETTINGS, LEGACY_SETTINGS_KEY, SETTINGS_KEY } from './constants'
+import type { Settings, TaskRecord } from './types'
+import { DEFAULT_BACKEND_URL, DEFAULT_SETTINGS, LEGACY_SETTINGS_KEY, MAX_TASKS, SETTINGS_KEY, TASKS_KEY } from './constants'
 
 export { DEFAULT_BACKEND_URL, DEFAULT_SETTINGS }
 
@@ -20,3 +20,20 @@ export const { data: settings, dataReady: settingsReady } = useWebExtensionStora
     }),
   },
 )
+
+export const { data: tasks, dataReady: tasksReady } = useWebExtensionStorage<TaskRecord[]>(
+  TASKS_KEY,
+  [],
+  {
+    mergeDefaults: stored => Array.isArray(stored) ? stored : [],
+  },
+)
+
+export function upsertTask(record: TaskRecord) {
+  const idx = tasks.value.findIndex(t => t.taskId === record.taskId)
+  if (idx >= 0)
+    tasks.value.splice(idx, 1, { ...tasks.value[idx], ...record })
+  else
+    tasks.value.unshift(record)
+  tasks.value = tasks.value.slice(0, MAX_TASKS)
+}

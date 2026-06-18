@@ -6,10 +6,10 @@ Components can be shared in all views.
 
 ## Local Backend
 
-For normal local testing, start the project from the repository root with Docker:
+For normal local testing, start the project from the repository root with the single local entry:
 
 ```powershell
-docker compose up -d --build
+.\run.bat
 ```
 
 Use this backend URL in extension settings:

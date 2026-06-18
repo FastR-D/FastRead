@@ -44,9 +44,18 @@ def test_cache_paths_round_trip(tmp_path):
 def test_delete_task_files_removes_task_artifacts_only(tmp_path):
     repo = NoteArtifactRepository(tmp_path)
     repo.write_result("task-a", {"markdown": "hello"})
+    repo.write_status("task-a", TaskStatus.SUCCESS, "done")
     repo.write_transcript_cache("task-a", {"full_text": "cached", "segments": []})
+    repo.write_audio_cache("task-a", {"title": "audio"})
+    repo.write_markdown_cache("task-a", "# Note")
     repo.write_result("task-b", {"markdown": "keep"})
+    repo.write_result("task-a-sibling", {"markdown": "keep-prefix"})
 
-    assert repo.delete_task_files("task-a") == 2
+    assert repo.delete_task_files("task-a") == 5
     assert repo.read_result("task-a") is None
+    assert repo.read_status("task-a") is None
+    assert repo.read_transcript_cache("task-a") is None
+    assert repo.read_audio_cache("task-a") is None
+    assert not repo.markdown_cache_path("task-a").exists()
     assert repo.read_result("task-b") == {"markdown": "keep"}
+    assert repo.read_result("task-a-sibling") == {"markdown": "keep-prefix"}

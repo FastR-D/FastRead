@@ -33,7 +33,7 @@ export default function AboutPage() {
             <Badge variant="secondary">Douyin Jingxuan</Badge>
             <Badge variant="secondary">React</Badge>
             <Badge variant="secondary">FastAPI</Badge>
-            <Badge variant="secondary">Docker Compose</Badge>
+            <Badge variant="secondary">Local Entry</Badge>
             <Badge variant="secondary">MVP</Badge>
           </div>
         </div>
@@ -121,12 +121,12 @@ export default function AboutPage() {
           <div className="mx-auto max-w-3xl space-y-6">
             <Card>
               <CardContent className="pt-6">
-                <h3 className="mb-3 text-xl font-semibold">Docker Compose</h3>
+                <h3 className="mb-3 text-xl font-semibold">唯一启动入口</h3>
                 <div className="bg-muted rounded-md p-4 font-mono text-sm">
-                  docker compose up -d --build
+                  run.bat
                 </div>
                 <p className="mt-3 text-sm text-muted-foreground">
-                  前端通过 Nginx 对外暴露，端口以当前仓库的 <code>.env</code> 为准。
+                  从仓库根目录启动本地后端和前端；状态检查和停止服务分别使用 <code>run.bat --status</code> 与 <code>run.bat --stop</code>。
                 </p>
               </CardContent>
             </Card>

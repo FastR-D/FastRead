@@ -3,10 +3,12 @@ from pathlib import Path
 from typing import Optional, Dict
 from datetime import datetime, timezone
 
+from app.core.settings import get_settings
+
 
 class CookieConfigManager:
-    def __init__(self, filepath: str = "config/downloader.json"):
-        self.path = Path(filepath)
+    def __init__(self, filepath: str | Path | None = None):
+        self.path = Path(filepath) if filepath is not None else get_settings().cookie_config_path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         if not self.path.exists():
             self._write({})

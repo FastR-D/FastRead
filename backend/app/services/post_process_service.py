@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from typing import List, Optional
 
+from app.core.settings import get_settings
 from app.models.audio_model import AudioDownloadResult
 from app.utils.logger import get_logger
 from app.utils.note_helper import prepend_source_link, replace_content_markers
@@ -19,8 +20,9 @@ class PostProcessService:
         image_output_dir: str | None = None,
         image_base_url: str | None = None,
     ):
-        self.image_output_dir = image_output_dir or os.getenv("OUT_DIR", "./static/screenshots")
-        self.image_base_url = image_base_url or os.getenv("IMAGE_BASE_URL", "/static/screenshots")
+        settings = get_settings()
+        self.image_output_dir = image_output_dir or settings.screenshot_output_dir
+        self.image_base_url = image_base_url or settings.image_base_url
 
     def process(
         self,

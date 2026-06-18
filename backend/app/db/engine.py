@@ -1,12 +1,12 @@
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
-from dotenv import load_dotenv
 
-load_dotenv()
+from app.core.settings import get_settings
 
 # 默认 SQLite，如果想换 PostgreSQL 或 MySQL，可以直接改 .env
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///reel_mind.db")
+settings = get_settings()
+DATABASE_URL = settings.database_url
 
 # SQLite 需要特定连接参数，其他数据库不需要
 engine_args = {}
@@ -16,14 +16,14 @@ if DATABASE_URL.startswith("sqlite"):
 _pool_args = {}
 if not DATABASE_URL.startswith("sqlite"):
     _pool_args = {
-        "pool_size": int(os.getenv("DB_POOL_SIZE", "10")),
-        "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "20")),
+        "pool_size": settings.db_pool_size,
+        "max_overflow": settings.db_max_overflow,
         "pool_pre_ping": True,
     }
 
 engine = create_engine(
     DATABASE_URL,
-    echo=os.getenv("SQLALCHEMY_ECHO", "false").lower() == "true",
+    echo=settings.sqlalchemy_echo,
     **engine_args,
     **_pool_args,
 )

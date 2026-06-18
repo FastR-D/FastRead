@@ -18,7 +18,6 @@
   <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="FastAPI" />
   <img src="https://img.shields.io/badge/extension-Vue%203-42b883" alt="Vue" />
   <img src="https://img.shields.io/badge/AI-OpenAI%20%7C%20DeepSeek%20%7C%20Qwen-ff69b4" alt="AI Providers" />
-  <img src="https://img.shields.io/badge/Docker-ready-2496ed" alt="Docker" />
 </p>
 
 ---
@@ -76,43 +75,26 @@ Reel Mind 当前版本已经收口为抖音精选知识视频演示版，重点�
 | 浏览器扩展 | Vue 3、Vite、WebExtension MV3、UnoCSS |
 | 桌面端预留 | Tauri 2 |
 | AI 与转写 | OpenAI Compatible API、DeepSeek、Qwen、faster-whisper、bcut、Groq |
-| 部署 | Docker Compose、Nginx |
+| 部署 | 本地 Windows 启动脚本、可选 Docker Compose/Nginx |
 
 ## 快速开始
 
-### Windows 快速入口
+### 给非技术人员
 
-Windows 辅助脚本统一放在 `scripts/windows/`：
+Windows 上只保留根目录一个入口：
 
 ```text
-check.bat   启动前体检 Docker、端口和磁盘空间
-start.bat   构建并启动整套 Docker demo
-status.bat  查看服务状态和健康检查
-stop.bat    停止服务
-dev.bat     源码开发启动入口
+run.bat           启动本地后端和前端
+run.bat --status  查看服务状态和健康检查
+run.bat --stop    停止本地前后端进程
+run.bat --check   检查本地依赖
 ```
 
-第一次启动前只需要安装并打开 Docker Desktop。详细说明见 [部署说明](./docs/deployment.md)。
+第一次启动前需要准备好 `backend\.venv` 和 `reel-mind-frontend\node_modules`。详细说明见 [笨蛋部署说明](./DEPLOYMENT.md)。
 
-### 方式一：Docker 启动整套服务（推荐）
+### 方式一：本地脚本启动（推荐）
 
-Docker 是最接近开箱即用的启动方式。Windows 用户可以双击 `scripts/windows/start.bat`；需要强制重建镜像时，在终端执行：
-
-```powershell
-.\scripts\windows\start.bat --rebuild
-```
-
-也可以直接使用 Docker Compose：
-
-```powershell
-docker compose up -d --build
-```
-
-脚本会自动：
-
-- 检查 Docker Desktop 是否可用
-- 启动后端、前端和 Nginx
-- 通过健康检查后打开浏览器
+Windows 用户优先双击根目录的 `run.bat`。这是唯一保留的本地入口，默认不需要 Docker。
 
 默认访问地址：
 
@@ -120,7 +102,79 @@ docker compose up -d --build
 http://127.0.0.1:3015/
 ```
 
-Docker 模式下，后端不直接暴露到宿主机；统一通过 Nginx 入口访问：
+后端 API：
+
+```text
+http://127.0.0.1:8483/api/sys_check
+http://127.0.0.1:8483/api/sys_health
+```
+
+如果只想启动但不自动打开浏览器：
+
+```powershell
+.\run.bat --no-open
+```
+
+脚本会自动：
+
+- 读取或创建本地 `.env`
+- 检查后端虚拟环境和前端依赖
+- 启动后端和前端开发服务
+- 通过健康检查后打开浏览器
+
+首次运行前如果依赖不存在，先安装：
+
+#### 准备后端
+
+```powershell
+cd backend
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+cd ..
+```
+
+#### 准备前端
+
+```powershell
+cd reel-mind-frontend
+corepack enable
+pnpm install
+cd ..
+```
+
+### 方式二：手动源码开发启动
+
+如果需要分别调试后端或前端，可以手动启动。默认仍建议使用和 `run.bat` 一致的本地端口：
+
+- 后端：`http://127.0.0.1:8483`
+- 前端：`http://127.0.0.1:3015`
+
+启动后端：
+
+```powershell
+cd backend
+.\.venv\Scripts\python.exe main.py
+```
+
+启动前端：
+
+```powershell
+cd reel-mind-frontend
+$env:VITE_API_BASE_URL="/api"
+pnpm run dev -- --host 0.0.0.0 --port 3015
+```
+
+后端根路径不是页面入口，直接访问 `http://127.0.0.1:8483` 返回 `{"detail":"Not Found"}` 属于正常现象。
+
+### 可选：Docker 部署路径
+
+Docker 仅作为可选部署或高级演示路径保留，不再是默认推荐启动方式。确实需要容器部署时，直接使用 Docker Compose：
+
+```powershell
+docker compose up -d --build
+```
+
+Docker 模式下，后端通过 Nginx 的 `3015` 端口访问：
 
 ```text
 Web:      http://127.0.0.1:3015/
@@ -135,20 +189,7 @@ docker compose ps
 docker compose logs --tail=80 backend
 ```
 
-只重建后端：
-
-```powershell
-docker compose up -d --build backend
-```
-
-容器内后端健康检查：
-
-```powershell
-docker compose exec -T backend curl -sS http://127.0.0.1:8483/api/sys_check
-docker compose exec -T backend curl -sS http://127.0.0.1:8483/api/sys_health
-```
-
-停止服务：
+停止 Docker 服务：
 
 ```powershell
 docker compose down
@@ -160,56 +201,6 @@ docker compose down
 docker compose down
 docker compose up -d --build
 ```
-
-### 方式二：源码开发启动
-
-准备环境：
-
-- Python 3.11
-- Node.js 20+
-- FFmpeg
-- pnpm
-
-复制环境变量：
-
-```powershell
-Copy-Item .env.example .env
-```
-
-如果使用 Windows 本地脚本，`scripts/windows/dev.bat` 会启动源码开发环境。这个脚本不会创建虚拟环境或安装前端依赖；首次运行前需要先完成下面的依赖安装。
-
-启动后端：
-
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-$env:BACKEND_PORT="8493"
-.\.venv\Scripts\python.exe main.py
-```
-
-后端健康检查：
-
-```text
-http://127.0.0.1:8493/api/sys_check
-```
-
-启动前端：
-
-```powershell
-cd reel-mind-frontend
-pnpm install
-$env:VITE_API_BASE_URL="http://127.0.0.1:8493/api"
-pnpm dev -- --host 127.0.0.1 --port 3016 --strictPort
-```
-
-开发访问地址：
-
-```text
-http://127.0.0.1:3016/
-```
-
-后端根路径不是页面入口，直接访问 `http://127.0.0.1:8493` 返回 `{"detail":"Not Found"}` 属于正常现象。
 
 ## 测试
 
@@ -231,10 +222,10 @@ backend\.venv\Scripts\python.exe -m pytest
 
 ```powershell
 cd reel-mind-frontend
-pnpm build
+pnpm run build
 
 cd ..\reel-mind-extension
-pnpm build
+pnpm run build
 ```
 
 ## 使用流程
@@ -278,10 +269,10 @@ backend/note_results/
 
 | 变量 | 说明 | 示例 |
 | --- | --- | --- |
-| `APP_PORT` | Docker/Nginx 对外端口 | `3015` |
+| `APP_PORT` | 可选 Docker/Nginx 对外端口 | `3015` |
 | `BACKEND_HOST` | 后端监听地址 | `0.0.0.0` |
 | `BACKEND_PORT` | 后端服务端口 | `8483` |
-| `VITE_API_BASE_URL` | 前端请求后端 API 地址 | `/api` 或 `http://127.0.0.1:8493/api` |
+| `VITE_API_BASE_URL` | 前端请求后端 API 地址 | `/api` 或 `http://127.0.0.1:8483/api` |
 | `TRANSCRIBER_TYPE` | 转写器类型 | `bcut`、`fast-whisper`、`groq` |
 | `WHISPER_MODEL_SIZE` | Whisper 模型大小 | `tiny`、`base`、`small`、`medium` |
 | `NOTE_OUTPUT_DIR` | 笔记结果目录 | `note_results` |
@@ -337,7 +328,7 @@ reel-mind-extension/extension/
 抖音详情接口依赖有效 Cookie。如果视频详情为空、提示需要登录或下载失败，优先检查：
 
 ```text
-http://127.0.0.1:8493/api/downloader_cookie_status/douyin
+http://127.0.0.1:8483/api/downloader_cookie_status/douyin
 ```
 
 推荐同步方式：
@@ -354,7 +345,7 @@ http://127.0.0.1:8493/api/downloader_cookie_status/douyin
 检查前端是否指向了正确后端：
 
 ```powershell
-$env:VITE_API_BASE_URL="http://127.0.0.1:8493/api"
+$env:VITE_API_BASE_URL="http://127.0.0.1:8483/api"
 ```
 
 修改后需要重启前端服务，并在浏览器中按 `Ctrl + F5` 强制刷新。
@@ -372,7 +363,7 @@ $env:VITE_API_BASE_URL="http://127.0.0.1:8493/api"
 
 部分知识视频主要依赖画面文字或字幕，音频里没有完整讲解。当前后端会把标题、文案、描述和话题标签合并进上下文，但画面文字较多的视频仍需要后续增强 OCR 或视频理解能力。
 
-### Docker 服务启动后无法访问
+### 可选 Docker 服务启动后无法访问
 
 确认端口没有被占用，并查看服务状态：
 
@@ -395,12 +386,15 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 ├── reel-mind-frontend/     # React Web 前端
 ├── reel-mind-extension/    # 浏览器扩展
 ├── doc/                   # 文档图片和产品资料
-├── docs/                  # 部署和发布文档
 ├── nginx/                 # Docker 反向代理配置
-├── scripts/windows/       # Windows 启动、检查、状态脚本
+├── readme/                # 阶段交接与补充文档
+├── task/                  # PRD 汇报版和使用指南
 ├── docker-compose.yml     # Docker Compose 部署
-├── docker-compose.gpu.yml # GPU 后端部署选项
-└── pytest.ini             # 后端 pytest 配置
+├── OPEN_ME_FIRST.md       # 给非技术人员的最短说明
+├── run.bat                # 唯一 Windows 本地入口：启动/检查/状态/停止
+├── pytest.ini             # 后端 pytest 配置
+├── DEPLOYMENT.md          # 面向非技术人员的部署说明
+└── README-usage.md        # 当前 demo 的详细使用说明
 ```
 
 ## 路线图
@@ -423,10 +417,12 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 
 ## 相关文档
 
+- [PRD 技术汇报版](./task/ReelMind_PRD_汇报版.md)
+- [产品使用指南](./task/ReelMind_使用指南.md)
+- [详细使用说明](./README-usage.md)
 - [贡献指南](./CONTRIBUTING.md)
-- [部署说明](./docs/deployment.md)
 - [更新日志](./CHANGELOG.md)
-- [发布说明](./docs/releasing.md)
+- [发布说明](./RELEASING.md)
 
 ## 许可证
 

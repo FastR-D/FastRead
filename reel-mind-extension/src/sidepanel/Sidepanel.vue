@@ -88,6 +88,10 @@ function downloadMarkdown() {
   URL.revokeObjectURL(url)
 }
 
+function taskTitle(task: TaskRecord) {
+  return (task.result?.audio_meta as { title?: string } | undefined)?.title || task.videoUrl
+}
+
 const activeTitle = computed(() =>
   (activeTask.value?.result?.audio_meta as { title?: string } | undefined)?.title || activeTask.value?.videoUrl || '')
 
@@ -141,7 +145,7 @@ onUnmounted(() => {
           @click="selectTask(t.taskId)"
         >
           <span class="truncate flex-1" :title="t.videoUrl">
-            {{ (t.result?.audio_meta as { title?: string } | undefined)?.title || t.videoUrl }}
+            {{ taskTitle(t) }}
           </span>
           <span class="text-gray-400 shrink-0">{{ STAGE_LABELS[t.status] || t.status }}</span>
         </li>
@@ -231,7 +235,7 @@ onUnmounted(() => {
         <MarkdownView
           v-if="isDone && activeTask.result?.markdown && viewMode === 'markdown'"
           :markdown="activeTask.result.markdown"
-          :title="(activeTask.result.audio_meta as { title?: string } | undefined)?.title"
+          :title="activeTitle"
           :hide-actions="true"
         />
         <MindMap

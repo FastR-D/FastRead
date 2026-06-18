@@ -2,11 +2,13 @@ import os
 import platform
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
+from app.core.settings import get_settings
 from app.utils.response import ResponseWrapper as R
 from app.utils.logger import get_logger
+from app.utils.local_access import require_local_request
 from app.utils.path_helper import get_model_dir
 
 from app.services.cookie_manager import CookieConfigManager
@@ -14,6 +16,7 @@ from app.services.transcriber_config_manager import TranscriberConfigManager
 from ffmpeg_helper import ensure_ffmpeg_or_raise
 
 logger = get_logger(__name__)
+settings = get_settings()
 
 router = APIRouter()
 cookie_manager = CookieConfigManager()
@@ -26,7 +29,7 @@ class CookieUpdateRequest(BaseModel):
 
 
 @router.get("/get_downloader_cookie/{platform}")
-def get_cookie(platform: str):
+def get_cookie(platform: str, _: None = Depends(require_local_request)):
     cookie = cookie_manager.get(platform)
     if not cookie:
         return R.success(msg='未找到Cookies')
@@ -36,12 +39,12 @@ def get_cookie(platform: str):
 
 
 @router.get("/downloader_cookie_status/{platform}")
-def get_cookie_status(platform: str):
+def get_cookie_status(platform: str, _: None = Depends(require_local_request)):
     return R.success(data=cookie_manager.status(platform))
 
 
 @router.post("/update_downloader_cookie")
-def update_cookie(data: CookieUpdateRequest):
+def update_cookie(data: CookieUpdateRequest, _: None = Depends(require_local_request)):
     cookie_manager.set(data.platform, data.cookie)
     return R.success(
 
@@ -76,7 +79,7 @@ def get_transcriber_config():
 
 
 @router.post("/transcriber_config")
-def update_transcriber_config(data: TranscriberConfigRequest):
+def update_transcriber_config(data: TranscriberConfigRequest, _: None = Depends(require_local_request)):
     config = transcriber_config_manager.update_config(
         transcriber_type=data.transcriber_type,
         whisper_model_size=data.whisper_model_size,
@@ -198,7 +201,11 @@ def _do_download_mlx_whisper(model_size: str):
 
 
 @router.post("/transcriber_download")
-def download_transcriber_model(data: ModelDownloadRequest, background_tasks: BackgroundTasks):
+def download_transcriber_model(
+    data: ModelDownloadRequest,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(require_local_request),
+):
     """触发后台下载指定的 whisper 模型。"""
     if data.model_size not in WHISPER_MODEL_SIZES:
         return R.error(msg=f"不支持的模型大小: {data.model_size}")
@@ -267,7 +274,7 @@ async def deploy_status():
         ffmpeg_ok = False
     
     return R.success(data={
-        "backend": {"status": "running", "port": int(os.getenv("BACKEND_PORT", 8483))},
+        "backend": {"status": "running", "port": settings.backend_port},
         "cuda": cuda_info,
         "whisper": {"model_size": model_size, "transcriber_type": transcriber_type},
         "ffmpeg": {"available": ffmpeg_ok},

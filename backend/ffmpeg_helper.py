@@ -2,16 +2,17 @@ import os
 import shutil
 import subprocess
 import logging
-from dotenv import load_dotenv
+
+from app.core.settings import get_settings
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
 def check_ffmpeg_exists() -> bool:
     """
     检查 ffmpeg 是否可用。优先使用 FFMPEG_BIN_PATH 环境变量指定的路径。
     """
-    ffmpeg_bin_path = os.getenv("FFMPEG_BIN_PATH")
+    settings = get_settings()
+    ffmpeg_bin_path = str(settings.ffmpeg_bin_path) if settings.ffmpeg_bin_path else ""
     logger.info(f"FFMPEG_BIN_PATH: {ffmpeg_bin_path}")
     if ffmpeg_bin_path:
         if os.path.isfile(ffmpeg_bin_path):
@@ -36,7 +37,7 @@ def check_ffmpeg_exists() -> bool:
                 import imageio_ffmpeg
 
                 bundled_ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
-                runtime_dir = os.path.abspath(os.path.join(os.getcwd(), ".runtime", "ffmpeg"))
+                runtime_dir = str(settings.ffmpeg_runtime_dir)
                 os.makedirs(runtime_dir, exist_ok=True)
                 runtime_ffmpeg = os.path.join(runtime_dir, "ffmpeg.exe")
                 if not os.path.exists(runtime_ffmpeg):

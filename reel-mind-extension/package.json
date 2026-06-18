@@ -3,7 +3,7 @@
   "displayName": "Reel Mind Cookie Sync",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@9.7.1",
+  "packageManager": "npm@11.12.1",
   "description": "Capture Douyin cookies and sync them to the local Reel Mind backend.",
   "scripts": {
     "dev": "npm run clear && cross-env NODE_ENV=development run-p dev:prepare dev:web",
@@ -23,7 +23,7 @@
     "lint": "eslint --cache .",
     "test": "vitest test",
     "test:e2e": "playwright test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit --project tsconfig.json"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^2.27.0",
@@ -61,6 +61,7 @@
     "vitest": "^2.0.5",
     "vue": "^3.4.38",
     "vue-demi": "^0.14.10",
+    "vue-tsc": "^2.0.29",
     "web-ext": "^8.2.0",
     "webext-bridge": "^6.0.1",
     "webextension-polyfill": "^0.12.0"

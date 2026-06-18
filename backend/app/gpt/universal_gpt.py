@@ -16,6 +16,15 @@ from datetime import timedelta
 from typing import List
 
 
+def _default_checkpoint_dir() -> Path:
+    try:
+        from app.core.settings import get_settings
+
+        return get_settings().note_output_dir
+    except Exception:
+        return Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
+
+
 class UniversalGPT(GPT):
     def __init__(self, client, model: str, temperature: float = 0.7):
         self.client = client
@@ -24,7 +33,7 @@ class UniversalGPT(GPT):
         self.screenshot = False
         self.link = False
         self.max_request_bytes = int(os.getenv("OPENAI_MAX_REQUEST_BYTES", str(45 * 1024 * 1024)))
-        self.checkpoint_dir = Path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
+        self.checkpoint_dir = _default_checkpoint_dir()
         self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         # 初始化时缓存重试配置，避免每次请求重复读取环境变量
         self._max_retry_attempts = max(1, int(os.getenv("OPENAI_RETRY_ATTEMPTS", "3")))

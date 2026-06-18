@@ -1,8 +1,8 @@
 ARG PYTHON_BASE_IMAGE=mirror.gcr.io/library/python:3.11-slim
 FROM ${PYTHON_BASE_IMAGE}
 
-ARG APT_MIRROR=deb.debian.org
-ARG PIP_INDEX=https://pypi.org/simple
+ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
+ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
 
 RUN rm -f /etc/apt/sources.list && \
     rm -rf /etc/apt/sources.list.d/* && \

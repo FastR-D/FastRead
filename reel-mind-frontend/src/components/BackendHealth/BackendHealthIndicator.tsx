@@ -12,10 +12,18 @@ type Health = 'green' | 'yellow' | 'red' | 'unknown'
 const HEALTH_POLL_MS = 5000
 const SYS_HEALTH_PATH = '/api/sys_health'
 
-function backendBase(): string {
-  // 与 services/request.ts 用的一致
+function joinApiPath(base: string, path: string): string {
+  const normalizedBase = base.replace(/\/$/, '')
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  if (normalizedBase.endsWith('/api') && normalizedPath.startsWith('/api/')) {
+    return `${normalizedBase}${normalizedPath.slice(4)}`
+  }
+  return `${normalizedBase}${normalizedPath}`
+}
+
+function backendHealthUrl(): string {
   const fromEnv = (import.meta as any).env?.VITE_API_BASE_URL as string | undefined
-  return (fromEnv ?? '').replace(/\/$/, '')
+  return joinApiPath(fromEnv ?? '', SYS_HEALTH_PATH)
 }
 
 const BackendHealthIndicator = () => {
@@ -31,7 +39,7 @@ const BackendHealthIndicator = () => {
 
     async function ping() {
       try {
-        const res = await fetch(`${backendBase()}${SYS_HEALTH_PATH}`)
+        const res = await fetch(backendHealthUrl())
         const ok = res.ok
         if (!mounted) return
         if (ok) {

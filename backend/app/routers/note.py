@@ -1,21 +1,26 @@
 # app/routers/note.py
+import ipaddress
 import os
+import socket
 import uuid
 from typing import Optional
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from pydantic import BaseModel, field_validator, model_validator
 
+from app.core.settings import get_settings
 from app.enmus.exception import NoteErrorEnum
 from app.enmus.note_enums import DownloadQuality
 from app.exceptions.note import NoteError
 from app.repositories.note_artifacts import NoteArtifactRepository
 from app.services.note import logger
+from app.utils.local_access import require_local_request
 from app.services.note_task_service import NoteTaskService
 from app.utils.response import ResponseWrapper as R
 from app.validators.video_url_validator import SUPPORTED_PLATFORMS, is_supported_video_url
 from fastapi import Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 import httpx
 
 # from app.services.downloader import download_raw_audio
@@ -82,10 +87,60 @@ class VideoRequest(BaseModel):
         return self
 
 
-NOTE_OUTPUT_DIR = os.getenv("NOTE_OUTPUT_DIR", "note_results")
-UPLOAD_DIR = "uploads"
-ARTIFACTS = NoteArtifactRepository(NOTE_OUTPUT_DIR)
+settings = get_settings()
+UPLOAD_DIR = settings.uploads_dir
+UPLOADS_PATH = settings.uploads_path
+MAX_UPLOAD_BYTES = settings.max_upload_bytes
+MAX_IMAGE_PROXY_BYTES = settings.max_image_proxy_bytes
+IO_CHUNK_SIZE = 1024 * 1024
+ALLOWED_UPLOAD_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".gif",
+    ".txt", ".md", ".pdf",
+}
+ALLOWED_IMAGE_PROXY_HOSTS = settings.image_proxy_allowed_hosts
+ARTIFACTS = NoteArtifactRepository(settings.note_output_dir)
 NOTE_TASKS = NoteTaskService(ARTIFACTS)
+
+
+def _safe_upload_extension(filename: str) -> str:
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="不支持的文件类型")
+    return ext
+
+
+def _assert_content_length_within_limit(headers, max_bytes: int) -> None:
+    content_length = headers.get("Content-Length")
+    if not content_length:
+        return
+    try:
+        length = int(content_length)
+    except ValueError:
+        return
+    if length > max_bytes:
+        raise HTTPException(status_code=413, detail="文件过大")
+
+
+def _assert_public_image_url(raw_url: str) -> str:
+    parsed = urlparse(raw_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise HTTPException(status_code=400, detail="图片地址必须是 http/https URL")
+
+    host = parsed.hostname.lower()
+    if ALLOWED_IMAGE_PROXY_HOSTS and host not in ALLOWED_IMAGE_PROXY_HOSTS:
+        raise HTTPException(status_code=403, detail="图片域名不在允许列表")
+
+    try:
+        addresses = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail="图片域名无法解析")
+
+    for address in addresses:
+        ip = ipaddress.ip_address(address[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+            raise HTTPException(status_code=403, detail="不允许代理内网或本机地址")
+
+    return raw_url
 
 
 def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
@@ -157,15 +212,31 @@ def verify_task_online(data: OnlineVerificationRequest):
 
 
 @router.post("/upload")
-async def upload(file: UploadFile = File(...)):
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    file_location = os.path.join(UPLOAD_DIR, file.filename)
+async def upload(_: None = Depends(require_local_request), file: UploadFile = File(...)):
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    ext = _safe_upload_extension(file.filename or "")
+    safe_name = f"{uuid.uuid4().hex}{ext}"
+    file_location = UPLOAD_DIR / safe_name
+    temp_location = file_location.with_suffix(f"{file_location.suffix}.part")
+    total = 0
 
-    with open(file_location, "wb+") as f:
-        f.write(await file.read())
+    try:
+        with open(temp_location, "wb") as f:
+            while True:
+                chunk = await file.read(IO_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=413, detail="文件过大")
+                f.write(chunk)
+        os.replace(temp_location, file_location)
+    except Exception:
+        if temp_location.exists():
+            temp_location.unlink()
+        raise
 
-    # 假设你静态目录挂载了 /uploads
-    return R.success({"url": f"/uploads/{file.filename}"})
+    return R.success({"url": f"{UPLOADS_PATH.rstrip('/')}/{safe_name}"})
 
 
 @router.post("/generate_note")
@@ -207,6 +278,7 @@ def get_task_status(task_id: str):
 
 @router.get("/image_proxy")
 async def image_proxy(request: Request, url: str):
+    safe_url = _assert_public_image_url(url)
     headers = {
         "Referer": "https://www.douyin.com/",
         "User-Agent": request.headers.get("User-Agent", ""),
@@ -214,19 +286,30 @@ async def image_proxy(request: Request, url: str):
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, headers=headers)
+            async with client.stream("GET", safe_url, headers=headers, follow_redirects=False) as resp:
+                if resp.status_code != 200:
+                    raise HTTPException(status_code=resp.status_code, detail="图片获取失败")
 
-            if resp.status_code != 200:
-                raise HTTPException(status_code=resp.status_code, detail="图片获取失败")
+                content_type = resp.headers.get("Content-Type", "image/jpeg")
+                if not content_type.lower().startswith("image/"):
+                    raise HTTPException(status_code=415, detail="代理目标不是图片")
 
-            content_type = resp.headers.get("Content-Type", "image/jpeg")
-            return StreamingResponse(
-                resp.aiter_bytes(),
+                _assert_content_length_within_limit(resp.headers, MAX_IMAGE_PROXY_BYTES)
+                body = bytearray()
+                async for chunk in resp.aiter_bytes(IO_CHUNK_SIZE):
+                    body.extend(chunk)
+                    if len(body) > MAX_IMAGE_PROXY_BYTES:
+                        raise HTTPException(status_code=413, detail="图片过大")
+
+            return Response(
+                content=bytes(body),
                 media_type=content_type,
                 headers={
                     "Cache-Control": "public, max-age=86400",  #  缓存一天
                     "Content-Type": content_type,
                 }
             )
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=502, detail=str(e))

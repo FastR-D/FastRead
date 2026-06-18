@@ -3,12 +3,14 @@ import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+from app.core.settings import get_settings
+
 
 class TranscriberConfigManager:
     """管理转写器配置，存储在 JSON 文件中，支持前端动态修改。"""
 
-    def __init__(self, filepath: str = "config/transcriber.json"):
-        self.path = Path(filepath)
+    def __init__(self, filepath: str | Path | None = None):
+        self.path = Path(filepath) if filepath is not None else get_settings().transcriber_config_path
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def _read(self) -> Dict[str, Any]:

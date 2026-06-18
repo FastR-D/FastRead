@@ -2,18 +2,18 @@ import os
 import sys
 from pathlib import Path
 
+from app.core.settings import get_settings
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 
 
 def get_data_dir():
     if getattr(sys, 'frozen', False):
-
         base_dir = os.path.dirname(sys.executable)
+        data_path = os.path.join(base_dir, "data")
     else:
+        data_path = str(get_settings().data_dir)
 
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../data"))
-
-    data_path = os.path.join(base_dir, "data")
     os.makedirs(data_path, exist_ok=True)
     return data_path
 

@@ -2,13 +2,14 @@ import os
 import re
 from typing import Optional
 
+from app.core.settings import get_settings
 from app.repositories.note_artifacts import NoteArtifactRepository
 from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 ARTIFACTS = NoteArtifactRepository()
-VECTOR_DB_DIR = os.getenv("VECTOR_DB_DIR", "vector_db")
+VECTOR_DB_DIR = get_settings().vector_db_dir
 
 
 def _chunk_markdown(markdown: str) -> list[dict]:
@@ -111,9 +112,9 @@ class VectorStoreManager:
                 "如需启用，请运行：backend\\.venv\\Scripts\\python.exe -m pip install chromadb"
             ) from exc
 
-        os.makedirs(VECTOR_DB_DIR, exist_ok=True)
+        VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
         self._client = chromadb.PersistentClient(
-            path=VECTOR_DB_DIR,
+            path=str(VECTOR_DB_DIR),
             settings=Settings(anonymized_telemetry=False),
         )
 

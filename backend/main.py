@@ -6,8 +6,8 @@ from fastapi import FastAPI
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.staticfiles import StaticFiles
-from dotenv import load_dotenv
 
+from app.core.settings import get_settings
 from app.db.init_db import init_db
 from app.db.provider_dao import seed_default_providers
 from app.exceptions.exception_handlers import register_exception_handlers
@@ -20,22 +20,8 @@ from events import register_handler
 from ffmpeg_helper import ensure_ffmpeg_or_raise
 
 logger = get_logger(__name__)
-load_dotenv()
-
-# 读取 .env 中的路径
-static_path = os.getenv('STATIC', '/static')
-out_dir = os.getenv('OUT_DIR', './static/screenshots')
-
-# 自动创建本地目录（static 和 static/screenshots）
-static_dir = "static"
-uploads_dir = "uploads"
-if not os.path.exists(static_dir):
-    os.makedirs(static_dir)
-if not os.path.exists(uploads_dir):
-    os.makedirs(uploads_dir)
-
-if not os.path.exists(out_dir):
-    os.makedirs(out_dir)
+settings = get_settings()
+settings.ensure_runtime_dirs()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -68,8 +54,8 @@ app.add_middleware(
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 register_exception_handlers(app)
-app.mount(static_path, StaticFiles(directory=static_dir), name="static")
-app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
+app.mount(settings.static_path, StaticFiles(directory=settings.static_dir), name="static")
+app.mount(settings.uploads_path, StaticFiles(directory=settings.uploads_dir), name="uploads")
 
 
 
@@ -80,7 +66,7 @@ app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("BACKEND_PORT", 8483))
-    host = os.getenv("BACKEND_HOST", "0.0.0.0")
+    port = settings.backend_port
+    host = settings.backend_host
     logger.info(f"Starting server on {host}:{port}")
     uvicorn.run(app, host=host, port=port, reload=False)

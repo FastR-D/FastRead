@@ -83,6 +83,19 @@ def _install_stubs():
 
 
 def _load_universal_gpt_class():
+    stub_names = [
+        "app",
+        "app.gpt",
+        "app.models",
+        "app.gpt.base",
+        "app.gpt.prompt_builder",
+        "app.gpt.prompt",
+        "app.gpt.utils",
+        "app.gpt.request_chunker",
+        "app.models.gpt_model",
+        "app.models.transcriber_model",
+    ]
+    previous_modules = {name: sys.modules.get(name) for name in stub_names}
     _install_stubs()
     root = pathlib.Path(__file__).resolve().parents[1]
     module_path = root / "app" / "gpt" / "universal_gpt.py"
@@ -90,8 +103,15 @@ def _load_universal_gpt_class():
     if spec is None or spec.loader is None:
         raise ImportError("universal_gpt module spec not found")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.UniversalGPT
+    try:
+        spec.loader.exec_module(module)
+        return module.UniversalGPT
+    finally:
+        for name, previous in previous_modules.items():
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
 
 
 UniversalGPT = _load_universal_gpt_class()

@@ -1,9 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.services.model import ModelService
+from app.utils.local_access import require_local_request
 from app.utils.response import ResponseWrapper as R
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_local_request)])
 modelService = ModelService()
 class CreateModelRequest(BaseModel):
     provider_id: str

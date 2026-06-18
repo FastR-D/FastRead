@@ -2,19 +2,16 @@ import os
 import re
 from urllib.parse import quote
 from markdown_pdf import MarkdownPdf, Section
-from dotenv import load_dotenv
 
-load_dotenv()
+from app.core.settings import get_settings
 
 # 项目根路径（无论你在哪里运行）
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# 从 .env 获取 DATA_DIR，相对于 BASE_DIR 解析
-DATA_DIR_NAME = os.getenv("DATA_DIR", "data")
-DATA_DIR = os.path.join(BASE_DIR, DATA_DIR_NAME)
-SAVE_PATH = os.path.join(DATA_DIR, "note_output")
-IMAGE_BASE_URL = os.getenv("IMAGE_BASE_URL")
-STATIC_BASE = os.path.join(BASE_DIR, IMAGE_BASE_URL)
+settings = get_settings()
+DATA_DIR = str(settings.data_dir)
+SAVE_PATH = str(settings.export_output_dir)
+IMAGE_BASE_URL = settings.image_base_url
+STATIC_BASE = str(settings.static_dir)
 
 
 class ExportUtils:
@@ -282,4 +279,3 @@ if __name__ == '__main__':
 - 积极的激励比惩罚更能驱动行为改变。
 
 通过这次实验，团队不仅解决了餐具堆积的问题，还为未来更复杂的行为管理系统奠定了基础。 ''',)
-

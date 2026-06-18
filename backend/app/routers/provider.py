@@ -1,14 +1,15 @@
 from typing import Optional
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from app.exceptions.provider import ProviderError
 from app.models.model_config import ModelConfig
 from app.services.model import ModelService
 from app.utils.response import ResponseWrapper as R
+from app.utils.local_access import require_local_request
 from app.services.provider import ProviderService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_local_request)])
 
 #  新增 type 字段
 class ProviderRequest(BaseModel):

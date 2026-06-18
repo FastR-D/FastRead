@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Optional
+from datetime import datetime
+import time
+from typing import Callable, Optional, Protocol
 
 from app.db.video_task_dao import (
     delete_task_by_task_id,
@@ -13,6 +15,7 @@ from app.db.video_task_dao import (
 )
 from app.enmus.note_enums import DownloadQuality
 from app.enmus.task_status_enums import TaskStatus
+from app.models.task_snapshot import TaskSnapshot
 from app.repositories.note_artifacts import NoteArtifactRepository
 from app.services.error_classifier import classify_generation_error
 from app.services.insight_extractor import build_insights
@@ -25,11 +28,33 @@ from app.utils.url_parser import extract_video_id
 logger = get_logger(__name__)
 
 
+class VectorStoreLifecycle(Protocol):
+    def index_task(self, task_id: str) -> None:
+        ...
+
+    def delete_index(self, task_id: str) -> None:
+        ...
+
+
+VectorStoreFactory = Callable[[], VectorStoreLifecycle]
+
+
+def _default_vector_store_factory() -> VectorStoreLifecycle:
+    from app.services.vector_store import VectorStoreManager
+
+    return VectorStoreManager()
+
+
 class NoteTaskService:
     """Application service for note task lifecycle operations."""
 
-    def __init__(self, artifacts: NoteArtifactRepository | None = None):
+    def __init__(
+        self,
+        artifacts: NoteArtifactRepository | None = None,
+        vector_store_factory: VectorStoreFactory | None = None,
+    ):
         self.artifacts = artifacts or NoteArtifactRepository()
+        self._vector_store_factory = vector_store_factory or _default_vector_store_factory
 
     def update_status(
         self,
@@ -133,8 +158,7 @@ class NoteTaskService:
     def delete_task_artifacts(self, task_id: str) -> int:
         deleted_files = self.artifacts.delete_task_files(task_id)
         try:
-            from app.services.vector_store import VectorStoreManager
-            VectorStoreManager().delete_index(task_id)
+            self._vector_store_factory().delete_index(task_id)
         except Exception as exc:
             logger.warning(f"删除向量索引失败（不影响任务删除）: {exc}")
         return deleted_files
@@ -199,13 +223,13 @@ class NoteTaskService:
         if not self.artifacts.output_dir_exists() and not db_tasks:
             return []
 
-        tasks = []
+        snapshots = []
         seen_task_ids = set()
         for db_task in db_tasks:
             task_id = db_task["task_id"]
             seen_task_ids.add(task_id)
             result = self.artifacts.read_result(task_id) or {}
-            tasks.append(self._build_db_task_payload(db_task, result))
+            snapshots.append(self._build_db_task_snapshot(db_task, result))
 
         if self.artifacts.output_dir_exists():
             for result_file in self.artifacts.iter_result_files():
@@ -214,34 +238,29 @@ class NoteTaskService:
                     continue
                 result = self.artifacts.read_result(task_id)
                 if result:
-                    tasks.append(self._build_file_task_payload(task_id, result, result_file.modified_at))
+                    snapshots.append(self._build_file_task_snapshot(task_id, result, result_file.modified_at))
 
-        tasks.sort(key=lambda item: item["createdAt"], reverse=True)
-        return tasks
+        snapshots.sort(key=lambda item: item.created_at, reverse=True)
+        return [snapshot.to_list_payload() for snapshot in snapshots]
 
     def get_task_status(self, task_id: str) -> dict:
         status_content = self.artifacts.read_status(task_id)
         if status_content:
-            return self._status_payload_from_status_file(task_id, status_content)
+            return self._snapshot_from_status_file(task_id, status_content).to_status_payload()
 
         result_content = self.artifacts.read_result(task_id)
         if result_content:
-            return {
-                "status": TaskStatus.SUCCESS.value,
-                "result": self.attach_note_insights(result_content),
-                "task_id": task_id,
-            }
+            return self._snapshot_from_result(task_id, result_content).to_status_payload()
 
-        return {
-            "status": TaskStatus.PENDING.value,
-            "message": "任务排队中",
-            "task_id": task_id,
-        }
+        return TaskSnapshot(
+            id=task_id,
+            status=TaskStatus.PENDING.value,
+            message="任务排队中",
+        ).to_status_payload()
 
     def index_task(self, task_id: str) -> None:
         try:
-            from app.services.vector_store import VectorStoreManager
-            VectorStoreManager().index_task(task_id)
+            self._vector_store_factory().index_task(task_id)
         except Exception as exc:
             logger.warning(f"向量索引失败（不影响笔记）: {exc}")
 
@@ -310,6 +329,12 @@ class NoteTaskService:
     def created_at_to_timestamp(value) -> float:
         if not value:
             return 0
+        if isinstance(value, (int, float)):
+            return float(value)
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                return float(time.mktime(value.timetuple()) + value.microsecond / 1_000_000)
+            return value.timestamp()
         try:
             return value.timestamp()
         except Exception:
@@ -330,75 +355,100 @@ class NoteTaskService:
         ]
         return "\n\n".join(str(part) for part in parts if str(part).strip())
 
-    def _build_db_task_payload(self, db_task: dict, result: dict) -> dict:
+    def _build_db_task_snapshot(self, db_task: dict, result: dict) -> TaskSnapshot:
         task_id = db_task["task_id"]
         markdown = result.get("markdown") or ""
         audio_meta = result.get("audio_meta") or {}
+        transcript = result.get("transcript")
         status_payload = self.artifacts.read_status_or_success(task_id)
-        return {
-            "id": task_id,
-            "status": status_payload.get("status"),
-            "message": status_payload.get("message", ""),
-            "error": status_payload.get("error"),
-            "markdown": markdown,
-            "insights": self.get_note_insights(result),
-            "audioMeta": audio_meta,
-            "createdAt": self.created_at_to_timestamp(db_task.get("created_at")),
-            "videoUrl": db_task.get("video_url") or self.extract_source_url(markdown),
-            "collection": {
+        created_at = self.created_at_to_timestamp(db_task.get("created_at"))
+        updated_at = self.created_at_to_timestamp(db_task.get("updated_at")) or created_at
+        result_payload = self.attach_note_insights(result) if result else None
+        return TaskSnapshot(
+            id=task_id,
+            status=status_payload.get("status"),
+            message=status_payload.get("message", ""),
+            error=status_payload.get("error"),
+            result=result_payload,
+            markdown=markdown,
+            insights=self.get_note_insights(result),
+            audio_meta=audio_meta,
+            transcript=transcript,
+            created_at=created_at,
+            updated_at=updated_at,
+            video_url=db_task.get("video_url") or self.extract_source_url(markdown),
+            collection={
                 "folder": db_task.get("collection_folder") or "默认收藏夹",
                 "tags": self.parse_collection_tags(db_task.get("collection_tags")),
                 "note": db_task.get("collection_note") or "",
             },
-            "title": db_task.get("title") or audio_meta.get("title") or "",
-            "coverUrl": db_task.get("cover_url") or audio_meta.get("cover_url") or "",
-        }
+            title=db_task.get("title") or audio_meta.get("title") or "",
+            cover_url=db_task.get("cover_url") or audio_meta.get("cover_url") or "",
+        )
 
-    def _build_file_task_payload(self, task_id: str, result: dict, modified_at: float) -> dict:
+    def _build_file_task_snapshot(self, task_id: str, result: dict, modified_at: float) -> TaskSnapshot:
         markdown = result.get("markdown") or ""
         audio_meta = result.get("audio_meta") or {}
+        transcript = result.get("transcript")
         status_payload = self.artifacts.read_status_or_success(task_id)
-        return {
-            "id": task_id,
-            "status": status_payload.get("status"),
-            "message": status_payload.get("message", ""),
-            "error": status_payload.get("error"),
-            "markdown": markdown,
-            "insights": self.get_note_insights(result),
-            "audioMeta": audio_meta,
-            "createdAt": modified_at,
-            "videoUrl": self.extract_source_url(markdown),
-        }
+        result_payload = self.attach_note_insights(result) if result else None
+        return TaskSnapshot(
+            id=task_id,
+            status=status_payload.get("status"),
+            message=status_payload.get("message", ""),
+            error=status_payload.get("error"),
+            result=result_payload,
+            markdown=markdown,
+            insights=self.get_note_insights(result),
+            audio_meta=audio_meta,
+            transcript=transcript,
+            created_at=modified_at,
+            updated_at=modified_at,
+            video_url=self.extract_source_url(markdown),
+            title=audio_meta.get("title") or "",
+            cover_url=audio_meta.get("cover_url") or "",
+        )
 
-    def _status_payload_from_status_file(self, task_id: str, status_content: dict) -> dict:
+    def _snapshot_from_result(self, task_id: str, result_content: dict, message: str = "") -> TaskSnapshot:
+        result = self.attach_note_insights(result_content)
+        return TaskSnapshot(
+            id=task_id,
+            status=TaskStatus.SUCCESS.value,
+            message=message,
+            result=result,
+            markdown=result.get("markdown") or "",
+            insights=result.get("insights"),
+            audio_meta=result.get("audio_meta") or {},
+            transcript=result.get("transcript"),
+            video_url=self.extract_source_url(result.get("markdown") or ""),
+            title=(result.get("audio_meta") or {}).get("title") or "",
+            cover_url=(result.get("audio_meta") or {}).get("cover_url") or "",
+        )
+
+    def _snapshot_from_status_file(self, task_id: str, status_content: dict) -> TaskSnapshot:
         status = status_content.get("status")
         message = status_content.get("message", "")
 
         if status == TaskStatus.SUCCESS.value:
             result_content = self.artifacts.read_result(task_id)
             if result_content:
-                return {
-                    "status": status,
-                    "result": self.attach_note_insights(result_content),
-                    "message": message,
-                    "task_id": task_id,
-                }
-            return {
-                "status": TaskStatus.PENDING.value,
-                "message": "任务完成，但结果文件未找到",
-                "task_id": task_id,
-            }
+                return self._snapshot_from_result(task_id, result_content, message=message)
+            return TaskSnapshot(
+                id=task_id,
+                status=TaskStatus.PENDING.value,
+                message="任务完成，但结果文件未找到",
+            )
 
         if status == TaskStatus.FAILED.value:
-            return {
-                "status": status,
-                "message": message,
-                "error": status_content.get("error") or classify_generation_error(message),
-                "task_id": task_id,
-            }
+            return TaskSnapshot(
+                id=task_id,
+                status=status,
+                message=message,
+                error=status_content.get("error") or classify_generation_error(message),
+            )
 
-        return {
-            "status": status,
-            "message": message,
-            "task_id": task_id,
-        }
+        return TaskSnapshot(
+            id=task_id,
+            status=status,
+            message=message,
+        )

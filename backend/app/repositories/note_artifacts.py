@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Optional, Union
 
+from app.core.settings import get_settings
 from app.enmus.task_status_enums import TaskStatus
 from app.services.error_classifier import classify_generation_error
 from app.utils.logger import get_logger
@@ -31,7 +32,7 @@ class NoteArtifactRepository:
     """Centralized filesystem access for note generation artifacts."""
 
     def __init__(self, output_dir: str | Path | None = None):
-        self.output_dir = Path(output_dir or os.getenv("NOTE_OUTPUT_DIR", "note_results"))
+        self.output_dir = Path(output_dir) if output_dir is not None else get_settings().note_output_dir
 
     def ensure_output_dir(self) -> None:
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -142,9 +143,16 @@ class NoteArtifactRepository:
 
         deleted = 0
         resolved_output_dir = self.output_dir.resolve()
-        for path in self.output_dir.glob(f"{task_id}*"):
+        candidate_paths = [
+            self.result_path(task_id),
+            self.status_path(task_id),
+            self.transcript_cache_path(task_id),
+            self.audio_cache_path(task_id),
+            self.markdown_cache_path(task_id),
+        ]
+        for path in candidate_paths:
             try:
-                if path.is_file() and path.resolve().parent == resolved_output_dir:
+                if path.exists() and path.is_file() and path.resolve().parent == resolved_output_dir:
                     path.unlink()
                     deleted += 1
             except Exception as exc:

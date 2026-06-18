@@ -219,6 +219,41 @@ const emptyTranscript = (): Transcript => ({
   segments: [],
 })
 
+const EMPTY_AUDIO_META: AudioMeta = {
+  cover_url: '',
+  duration: 0,
+  file_path: '',
+  platform: '',
+  raw_info: null,
+  title: '',
+  video_id: '',
+}
+
+const isEmptyTranscript = (transcript?: Transcript) =>
+  !transcript ||
+  (!transcript.full_text &&
+    !transcript.language &&
+    !transcript.raw &&
+    (!transcript.segments || transcript.segments.length === 0))
+
+const isEmptyAudioMeta = (audioMeta?: AudioMeta) =>
+  !audioMeta ||
+  (!audioMeta.cover_url &&
+    !audioMeta.duration &&
+    !audioMeta.file_path &&
+    !audioMeta.platform &&
+    !audioMeta.raw_info &&
+    !audioMeta.title &&
+    !audioMeta.video_id)
+
+const hasSuccessSnapshotContent = (data: Partial<Omit<Task, 'id' | 'createdAt'>>) =>
+  Boolean(
+    data.markdown ||
+      !isEmptyTranscript(data.transcript) ||
+      !isEmptyAudioMeta(data.audioMeta) ||
+      data.insights
+  )
+
 export const useTaskStore = create<TaskStore>()(
   persist(
     (set, get) => ({
@@ -273,18 +308,13 @@ export const useTaskStore = create<TaskStore>()(
                 ...(task.collection || {}),
                 tags: Array.isArray(task.collection?.tags) ? task.collection.tags : [],
               },
-              transcript: emptyTranscript(),
-              createdAt: task.createdAt
-                ? new Date(Number(task.createdAt) * 1000).toISOString()
-                : new Date().toISOString(),
+              transcript: task.transcript || emptyTranscript(),
+              createdAt: task.createdAt || new Date().toISOString(),
               audioMeta: {
-                cover_url: task.audioMeta?.cover_url || '',
-                duration: task.audioMeta?.duration || 0,
-                file_path: task.audioMeta?.file_path || '',
+                ...EMPTY_AUDIO_META,
+                ...(task.audioMeta || {}),
                 platform: task.audioMeta?.platform || 'douyin',
-                raw_info: task.audioMeta?.raw_info || null,
                 title: task.audioMeta?.title || '未命名知识卡片',
-                video_id: task.audioMeta?.video_id || '',
               },
               insights: task.insights,
               message: task.message || '',
@@ -323,7 +353,13 @@ export const useTaskStore = create<TaskStore>()(
           tasks: state.tasks.map(task => {
             if (task.id !== id) return task
 
-            if (task.status === 'SUCCESS' && data.status === 'SUCCESS') return task
+            if (
+              task.status === 'SUCCESS' &&
+              data.status === 'SUCCESS' &&
+              !hasSuccessSnapshotContent(data)
+            ) {
+              return task
+            }
 
             if (typeof data.markdown === 'string') {
               const prev = task.markdown

@@ -21,21 +21,24 @@
     "skipLibCheck": true
   },
   "include": [
-    "src/global.d.ts",
+    "*.d.ts",
+    "src/auto-imports.d.ts",
     "src/env.ts",
+    "src/global.d.ts",
     "src/manifest.ts",
-    "src/popup/**/*.ts",
-    "src/popup/**/*.vue",
+    "src/composables/useWebExtensionStorage.ts",
     "src/logic/api.ts",
+    "src/logic/common-setup.ts",
     "src/logic/constants.ts",
     "src/logic/cookies.ts",
     "src/logic/storage.ts",
     "src/logic/types.ts",
-    "src/logic/common-setup.ts",
-    "src/composables/**/*.ts",
+    "src/popup/**/*.ts",
+    "src/popup/**/*.vue",
     "src/styles/**/*.ts",
     "scripts/**/*.ts",
-    "vite.config.mts"
+    "*.config.ts",
+    "*.config.mts"
   ],
   "exclude": ["dist", "node_modules", "extension"]
 }

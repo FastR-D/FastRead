@@ -77,7 +77,7 @@ onMounted(async () => {
     <section class="section-card">
       <h2 class="font-semibold">后端地址</h2>
       <div class="flex gap-2">
-        <input v-model="settings.backendUrl" class="input flex-1" placeholder="http://localhost:8483">
+        <input v-model="settings.backendUrl" class="input flex-1" placeholder="http://127.0.0.1:3015">
         <button class="btn-secondary" @click="testConnection">测试连通</button>
         <button class="btn-secondary" :disabled="loading" @click="refresh">
           {{ loading ? '加载中…' : '刷新' }}
@@ -95,7 +95,7 @@ onMounted(async () => {
         {{ status.text }}
       </div>
       <p class="text-xs text-gray-500">
-        默认 http://localhost:8483 — 需要在该地址先跑起 Reel Mind 后端
+        默认 http://127.0.0.1:3015；请先在项目根目录运行 run.bat
       </p>
     </section>
 
