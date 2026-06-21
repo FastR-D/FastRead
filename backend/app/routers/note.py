@@ -44,9 +44,36 @@ class CollectionUpdateRequest(BaseModel):
 
 class OnlineVerificationRequest(BaseModel):
     task_id: str
-    max_claims: int = 8
+    max_claims: int = 50
     model_name: Optional[str] = None
     provider_id: Optional[str] = None
+
+
+class VerificationTaskRequest(BaseModel):
+    goal: str = "verify"
+    input_mode: str = "text"
+    text: Optional[str] = ""
+    url: Optional[str] = ""
+    task_id: Optional[str] = None
+    max_claims: int = 50
+    verification_depth: str = "deep"
+    source_policy: str = "authoritative"
+    model_name: Optional[str] = None
+    provider_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def validate_verification_input(self):
+        if not (self.text or self.url or self.task_id):
+            raise ValueError("请提供待核实文本、URL 或已有任务 ID")
+        self.max_claims = max(1, min(int(self.max_claims or 50), 50))
+        self.goal = "verify"
+        self.verification_depth = self.verification_depth or "deep"
+        self.source_policy = self.source_policy or "authoritative"
+        return self
+
+
+class VerificationRerunRequest(BaseModel):
+    retry_failed_only: bool = True
 
 
 class VideoRequest(BaseModel):
@@ -209,6 +236,55 @@ def verify_task_online(data: OnlineVerificationRequest):
     except Exception as e:
         logger.error(f"联网核验失败 (task_id={data.task_id}): {e}", exc_info=True)
         return R.error(msg=f"联网核验失败: {e}")
+
+
+@router.post("/verification_tasks")
+def create_verification_task(data: VerificationTaskRequest, background_tasks: BackgroundTasks):
+    try:
+        created = NOTE_TASKS.create_verification_task(
+            text=data.text or "",
+            url=data.url or "",
+            source_task_id=data.task_id,
+            max_claims=data.max_claims,
+            verification_depth=data.verification_depth,
+            source_policy=data.source_policy,
+            model_name=data.model_name,
+            provider_id=data.provider_id,
+        )
+        background_tasks.add_task(NOTE_TASKS.execute_verification_task, created["task_id"])
+        return R.success(created)
+    except Exception as e:
+        logger.error(f"创建联网核实任务失败: {e}", exc_info=True)
+        return R.error(msg=f"创建联网核实任务失败: {e}")
+
+
+@router.get("/verification_tasks")
+def list_verification_tasks():
+    return R.success(NOTE_TASKS.list_verification_tasks())
+
+
+@router.get("/verification_tasks/{task_id}")
+def get_verification_task(task_id: str):
+    return R.success(NOTE_TASKS.get_verification_task(task_id))
+
+
+@router.post("/verification_tasks/{task_id}/rerun")
+def rerun_verification_task(task_id: str, data: VerificationRerunRequest | None = None):
+    result = NOTE_TASKS.rerun_verification_task(
+        task_id,
+        retry_failed_only=True if data is None else data.retry_failed_only,
+    )
+    if not result["ok"]:
+        return R.error(msg=result["message"], code=result["code"])
+    return R.success(result["data"])
+
+
+@router.post("/verification_tasks/{task_id}/claims/{claim_id}/rerun")
+def rerun_verification_claim(task_id: str, claim_id: str):
+    result = NOTE_TASKS.rerun_verification_claim(task_id, claim_id)
+    if not result["ok"]:
+        return R.error(msg=result["message"], code=result["code"])
+    return R.success(result["data"])
 
 
 @router.post("/upload")

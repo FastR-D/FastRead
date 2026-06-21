@@ -5,11 +5,11 @@
 <h1 align="center">Reel Mind</h1>
 
 <p align="center">
-  <strong>把知识视频变成可复习、可搜索、可追问、可核验的 AI 笔记</strong>
+  <strong>把文本、URL 和视频内容变成可审计的联网核验报告</strong>
 </p>
 
 <p align="center">
-  把短视频变成可沉淀的知识，支持视频解析、音频转写、AI 总结、Markdown 笔记、思维导图、知识卡片、联网核验、收藏回看和上下文问答。
+  Reel Mind 当前以事实核验为第一能力：主张原子化、多源联网检索、正文/PDF 抓取、信源验真、证据抽取、规则判定和可追溯审计。
 </p>
 
 <p align="center">
@@ -38,19 +38,27 @@
 
 ## 项目亮点
 
-Reel Mind 当前版本已经收口为抖音精选知识视频演示版，重点验证从视频链接到知识资产的完整闭环。
+Reel Mind 已转向 verification-first。旧的笔记、思维导图、知识卡片和问答仍作为辅助产物保留，但 P0 是回答：
 
-我们做了一款面向**知识型短视频学习者、内容整理者和对信息可信度敏感的用户**，在**刷到有价值但真假难辨、难以复习的知识视频**场景下，通过**视频链接一键生成 AI 笔记、知识卡片、思维导图，并对关键主张进行联网核验**，带来**既能快速吸收知识，又能判断内容可信度的安心学习体验**的产物。
+```text
+这句话到底有没有可靠联网证据支持？
+```
 
-- **一键生成知识笔记**：输入抖音精选视频链接，自动解析视频信息、下载音频、转写内容并生成结构化 Markdown。
-- **思维导图视图**：从笔记中提取专用 `## 思维导图` 章节，使用 Markmap 渲染可视化知识结构。
-- **知识卡片与内容评分**：从笔记、转写和视频元信息中提取核心结论、操作步骤、风险提醒和行动清单，并给出信息密度、可信度、可执行性评分。
-- **联网核验**：从视频笔记中抽取数据陈述、因果判断、高风险建议等可核验主张，结合学术/国内/Brave 等搜索源和 AI 判断，提示外部佐证、反证或证据不足。
-- **收藏与回看**：支持收藏夹、标签和备注，生成记录会持久化到后端，刷新或重启后仍可恢复。
-- **AI 上下文问答**：支持基于当前任务的视频元信息、转写文本和笔记内容追问，也支持跨视频知识库问答。
-- **多模型供应商**：支持 OpenAI 兼容接口、DeepSeek、Qwen 等模型供应商配置。
-- **转写兜底策略**：支持 bcut、fast-whisper、Groq、MLX Whisper 等转写方式，并在低质量 ASR 场景下合并视频元信息。
-- **浏览器扩展辅助**：扩展提供 Cookie 同步、页面入口、弹窗和侧边栏能力，降低抖音登录态配置成本。
+当前核验链路：
+
+```text
+输入文本/URL/已有任务 -> 主张原子化 -> 多查询检索 -> 正文/PDF 抓取 -> 信源验真 -> 证据抽取 -> 规则判定 -> 审计报告
+```
+
+- **主张原子化**：从输入文本、URL 正文或已有视频任务中提取可核验的 atomic claims。
+- **多源联网检索**：支持 Brave、Bing Academic、Bing CN、Baidu 等搜索源和质量补充检索。
+- **正文证据优先**：搜索摘要只作为召回线索；`supported` 必须来自抓取到的网页/PDF 正文证据。
+- **信源验真**：输出来源等级、canonical URL、publisher、author、published date、content hash、independence group、redirect chain 和风险标记。
+- **反操纵防线**：识别伪权威域名、canonical/redirect 异常、提示词注入、内容农场、榜单软文、复制转载和缺失来源身份。
+- **可恢复任务**：持久化 claim 级中间产物，rerun 默认只重试失败或未完成的 web 阶段。
+- **缓存与审计**：SERP、snapshot、evidence 缓存会记录 hit/miss，方便复查任务为什么得到某个结论。
+- **规则判定**：最终 verdict 来自规则证据矩阵，不允许 LLM 自由判断覆盖证据。
+- **旧功能保留**：Markdown、思维导图、知识卡片、收藏和问答仍可作为核验前后的辅助工作区。
 
 ## 界面预览
 
@@ -230,21 +238,24 @@ pnpm run build
 
 ## 使用流程
 
+### 联网核验优先流程
+
 1. 打开 Web 前端。
-2. 在「视频链接」中输入抖音精选链接，例如：
+2. 输入待核实文本、URL 或选择已有任务。
+3. 点击发起联网核实。
+4. 等待任务完成主张提取、检索、抓取、证据抽取和交叉判定。
+5. 在报告中查看整体状态、claim verdict、confidence、正文证据、来源等级、风险标记和 audit。
+6. 对失败或不完整的任务点击 rerun；默认只重试失败/未完成 web 阶段。
+
+### 旧视频笔记流程
+
+视频输入仍可使用，例如：
 
 ```text
 https://www.douyin.com/jingxuan?modal_id=7633777410067926322
 ```
 
-3. 在设置页确认模型供应商和模型已经配置。
-4. 可选填写收藏夹、标签和收藏备注。
-5. 点击「生成笔记」。
-6. 等待任务完成解析、下载、转写和总结。
-7. 在「我的收藏」中回看历史笔记。
-8. 切换「Markdown / 思维导图 / 知识卡片 / AI 问答」视图继续复习。
-9. 在知识卡片视图查看信息密度、可信度、可执行性评分。
-10. 点击「联网核验」对关键主张进行外部资料核验，查看来源、佐证、反证或证据不足提示。
+生成后可继续从旧笔记发起联网核实。旧 Markdown、思维导图、知识卡片和 AI 问答是 secondary artifacts，不能替代联网核验报告。
 
 生成结果默认写入：
 
@@ -261,6 +272,10 @@ backend/note_results/
 {task_id}_transcript.json
 {task_id}_markdown.md
 {task_id}_markdown.status.json
+_verification/{task_id}/claims/{claim_id}.json
+_verification/_cache/serp/*.json
+_verification/_cache/snapshot/*.json
+_verification/_cache/evidence/*.json
 ```
 
 ## 配置说明
@@ -275,13 +290,14 @@ backend/note_results/
 | `VITE_API_BASE_URL` | 前端请求后端 API 地址 | `/api` 或 `http://127.0.0.1:8483/api` |
 | `TRANSCRIBER_TYPE` | 转写器类型 | `bcut`、`fast-whisper`、`groq` |
 | `WHISPER_MODEL_SIZE` | Whisper 模型大小 | `tiny`、`base`、`small`、`medium` |
-| `NOTE_OUTPUT_DIR` | 笔记结果目录 | `note_results` |
+| `NOTE_OUTPUT_DIR` | 任务结果、核验产物和缓存目录 | `note_results` |
 | `FFMPEG_BIN_PATH` | FFmpeg 可执行文件路径 | 留空则使用系统 PATH |
 | `ONLINE_VERIFY_SEARCH_PROVIDER` | 联网核验主搜索源 | `brave`、`bing_academic`、`bing_cn` |
 | `ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS` | 联网核验兜底搜索源 | `bing_academic,bing_cn,baidu` |
 | `BRAVE_SEARCH_API_KEY` | Brave Search API Key | 使用 Brave 搜索源时填写 |
 | `BRAVE_SEARCH_COUNTRY` | Brave 搜索国家/地区 | `CN` |
 | `BRAVE_SEARCH_LANG` | Brave 搜索语言 | `zh-hans` |
+| `BRAVE_SEARCH_UI_LANG` | Brave 搜索界面语言 | `zh-CN` |
 
 推荐开发期使用：
 
@@ -298,7 +314,7 @@ backend/models/whisper/whisper-tiny
 
 ## 浏览器扩展
 
-扩展目录位于 `reel-mind-extension/`，用于同步抖音 Cookie、提供 popup、设置页和视频页入口。
+扩展目录位于 `reel-mind-extension/`。当前可发布范围是 verification-first popup：从当前标签页 URL 或粘贴文本创建 ReelMind 联网核实任务，并打开 Web 工作台报告。
 
 安装依赖：
 
@@ -325,13 +341,25 @@ pnpm build
 reel-mind-extension/extension/
 ```
 
-抖音详情接口依赖有效 Cookie。如果视频详情为空、提示需要登录或下载失败，优先检查：
+当前 manifest 只声明 popup；`background`、`contentScripts`、`options` 和 `sidepanel` 仍是后续完整扩展草稿，不属于当前发布产物。扩展默认连接：
+
+```text
+http://127.0.0.1:8483
+```
+
+创建任务接口：
+
+```text
+POST http://127.0.0.1:8483/api/verification_tasks
+```
+
+抖音 Cookie 同步已降级为输入诊断，供旧视频链路排障。抖音详情接口依赖有效 Cookie；如果视频详情为空、提示需要登录或下载失败，优先检查：
 
 ```text
 http://127.0.0.1:8483/api/downloader_cookie_status/douyin
 ```
 
-推荐同步方式：
+诊断同步方式：
 
 1. 在浏览器中打开抖音精选并登录。
 2. 打开 Reel Mind 浏览器扩展。
@@ -399,21 +427,20 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 
 ## 路线图
 
-- [x] 抖音精选链接输入与视频元信息解析
-- [x] 音频下载、转写和 AI 总结闭环
-- [x] 收藏夹、标签、备注与历史回看
-- [x] Markdown 笔记和专用思维导图展示
-- [x] 基于当前笔记上下文的 AI 问答
-- [x] 知识卡片、信息密度、可信度、可执行性评分
-- [x] 离线主张抽取与联网核验
-- [x] 跨视频知识库问答 MVP
-- [x] 浏览器扩展 Cookie 同步入口
-- [ ] 删除任务时统一清理数据库、结果文件、转写缓存和向量索引
-- [ ] 生成失败原因分类与用户可读提示
-- [ ] Markdown、图片、PDF、Word 等导出体验完善
-- [ ] 针对画面文字知识视频增强截图 OCR 或视频理解
-- [ ] 联网核验支持按单条主张重新核验和人工标注
-- [ ] 更完整的端到端回归测试
+- [x] Verification-first 任务 API
+- [x] Claim 级中间产物持久化
+- [x] SERP、snapshot、evidence 缓存和 cache audit
+- [x] 来源等级、独立性、canonical、content hash 和 redirect chain audit
+- [x] 伪权威、canonical/redirect 异常、prompt injection、内容农场和复制转载风险
+- [x] GEO/language differential retrieval 骨架和 `geo_disagreement`
+- [x] 旧视频笔记、Markdown、思维导图、知识卡片、收藏和问答兼容保留
+- [ ] Source registry 外置为可维护文件或表
+- [ ] 更强 publisher/author/date 抽取与来源身份评分
+- [ ] PDF page offsets 和证据定位增强
+- [ ] 单 claim / 单 stage 更细粒度 rerun
+- [ ] 前端报告强化筛选：高风险、证据不足、refuted、data void、domain、source tier
+- [ ] 浏览器扩展完全转为「用 ReelMind 联网核实此内容」
+- [ ] 更完整的端到端核验回归测试
 
 ## 相关文档
 

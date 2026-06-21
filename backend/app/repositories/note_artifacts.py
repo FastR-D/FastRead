@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator, Optional, Union
@@ -19,6 +20,7 @@ IGNORED_RESULT_SUFFIXES = (
     "_audio.json",
     "_markdown.status.json",
 )
+VERIFICATION_CACHE_KINDS = {"serp", "snapshot", "evidence"}
 
 
 @dataclass(frozen=True)
@@ -54,6 +56,18 @@ class NoteArtifactRepository:
 
     def markdown_cache_path(self, task_id: str) -> Path:
         return self.output_dir / f"{task_id}_markdown.md"
+
+    def verification_task_dir(self, task_id: str) -> Path:
+        return self.output_dir / "_verification" / task_id
+
+    def verification_claim_path(self, task_id: str, claim_id: str) -> Path:
+        return self.verification_task_dir(task_id) / "claims" / f"{claim_id}.json"
+
+    def verification_cache_path(self, kind: str, key: str) -> Path:
+        if kind not in VERIFICATION_CACHE_KINDS:
+            raise ValueError(f"Unsupported verification cache kind: {kind}")
+        safe_key = "".join(ch for ch in key if ch.isalnum() or ch in {"-", "_"})
+        return self.output_dir / "_verification" / "_cache" / kind / f"{safe_key}.json"
 
     def result_exists(self, task_id: str) -> bool:
         return self.result_path(task_id).exists()
@@ -125,6 +139,22 @@ class NoteArtifactRepository:
         target.write_text(markdown, encoding="utf-8")
         return target
 
+    def read_verification_claim_artifact(self, task_id: str, claim_id: str) -> Optional[dict]:
+        return self._read_json(self.verification_claim_path(task_id, claim_id))
+
+    def write_verification_claim_artifact(self, task_id: str, claim_id: str, payload: dict) -> Path:
+        target = self.verification_claim_path(task_id, claim_id)
+        self._write_json(target, payload)
+        return target
+
+    def read_verification_cache(self, kind: str, key: str) -> Optional[dict]:
+        return self._read_json(self.verification_cache_path(kind, key))
+
+    def write_verification_cache(self, kind: str, key: str, payload: dict) -> Path:
+        target = self.verification_cache_path(kind, key)
+        self._write_json(target, payload)
+        return target
+
     def iter_result_files(self) -> Iterator[NoteResultFile]:
         if not self.output_dir.exists():
             return
@@ -157,6 +187,17 @@ class NoteArtifactRepository:
                     deleted += 1
             except Exception as exc:
                 logger.warning(f"删除任务文件失败 ({path}): {exc}")
+        verification_dir = self.verification_task_dir(task_id)
+        try:
+            if (
+                verification_dir.exists()
+                and verification_dir.is_dir()
+                and verification_dir.resolve().parent == (resolved_output_dir / "_verification").resolve()
+            ):
+                shutil.rmtree(verification_dir)
+                deleted += 1
+        except Exception as exc:
+            logger.warning(f"删除核验任务产物失败 ({verification_dir}): {exc}")
         return deleted
 
     def _read_json(self, path: Path) -> Optional[dict]:
@@ -171,6 +212,7 @@ class NoteArtifactRepository:
 
     def _write_json(self, path: Path, payload: dict) -> None:
         self.ensure_output_dir()
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
 

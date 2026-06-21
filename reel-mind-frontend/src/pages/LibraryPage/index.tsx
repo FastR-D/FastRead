@@ -3,19 +3,17 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertCircle,
   BookOpen,
-  BookMarked,
-  Bot,
   Check,
   ChevronDown,
   Circle,
   Grid2X2,
-  GraduationCap,
-  Lightbulb,
   List,
   Loader2,
   Plus,
   Search,
+  SearchCheck,
   Settings,
+  ShieldCheck,
   Tags,
   Trash2,
 } from 'lucide-react'
@@ -44,15 +42,18 @@ function coverUrl(task: Task) {
 }
 
 function getNotebookTitle(task: Task) {
-  return task.audioMeta?.title || task.collection?.note || '未命名视频笔记'
+  return task.audioMeta?.title || task.formData?.video_url || task.collection?.note || '联网核实任务'
 }
 
 function getSourceCount(task: Task) {
-  const transcriptCount = task.transcript?.segments?.length || 0
-  const cardCount = task.insights?.cards?.length || 0
-  if (transcriptCount > 0) return transcriptCount
-  if (cardCount > 0) return cardCount
-  return task.status === 'SUCCESS' ? 1 : 0
+  const verification = task.insights?.verification
+  const claimSourceUrls = new Set(
+    (verification?.claims || [])
+      .flatMap(claim => claim.online?.sources || [])
+      .map(source => source.canonical_url || source.url)
+      .filter(Boolean)
+  )
+  return verification?.sources?.length || claimSourceUrls.size
 }
 
 function formatDate(value?: string) {
@@ -70,8 +71,42 @@ function formatDate(value?: string) {
 
 function statusLabel(task: Task) {
   if (task.status === 'SUCCESS') return '已完成'
-  if (task.status === 'FAILED') return '生成失败'
-  return '生成中'
+  if (task.status === 'FAILED') return '核实失败'
+  return '核实中'
+}
+
+const verdictLabel: Record<string, string> = {
+  supported: '支持',
+  refuted: '反证',
+  mixed: '混合',
+  insufficient: '证据不足',
+  data_void: '数据空缺',
+  source_risk: '信源风险',
+}
+
+const verdictTone: Record<string, string> = {
+  supported: 'bg-emerald-50 text-emerald-700',
+  refuted: 'bg-red-50 text-red-700',
+  mixed: 'bg-amber-50 text-amber-700',
+  insufficient: 'bg-slate-100 text-slate-600',
+  data_void: 'bg-orange-50 text-orange-700',
+  source_risk: 'bg-red-50 text-red-700',
+}
+
+function VerdictMark({ task }: { task: Task }) {
+  const verification = task.insights?.verification
+  const status = verification?.overall?.status
+  if (!status) return <StatusMark task={task} />
+
+  return (
+    <span className={cn('inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs', verdictTone[status] || 'bg-slate-100 text-slate-600')}>
+      <ShieldCheck className="h-3 w-3" />
+      {verdictLabel[status] || status}
+      <span className="font-mono opacity-70">
+        {verification.claim_counts?.online_supported ?? 0}/{verification.claim_counts?.online_refuted ?? 0}/{verification.claim_counts?.total ?? 0}
+      </span>
+    </span>
+  )
 }
 
 function StatusMark({ task }: { task: Task }) {
@@ -101,84 +136,20 @@ function StatusMark({ task }: { task: Task }) {
 
 function FlatPattern({ index }: { index: number }) {
   const palettes = [
-    'bg-[#ece8f0] text-[#17151d]',
-    'bg-[#eef0fb] text-[#171b2d]',
-    'bg-[#dff2f5] text-[#10262d]',
-    'bg-[#f4ece7] text-[#241915]',
-    'bg-[#f0f3e8] text-[#1f2619]',
-    'bg-[#f2eaf3] text-[#231724]',
+    'bg-slate-50 text-slate-700',
+    'bg-emerald-50 text-emerald-800',
+    'bg-blue-50 text-blue-800',
+    'bg-amber-50 text-amber-800',
+    'bg-red-50 text-red-800',
+    'bg-neutral-50 text-neutral-800',
   ]
-  const Icon = [BookOpen, Lightbulb, Bot, GraduationCap, BookMarked, Circle][index % 6]
+  const Icon = [SearchCheck, ShieldCheck, AlertCircle, Check, BookOpen, Circle][index % 6]
   return (
     <div className={cn('absolute inset-0', palettes[index % palettes.length])}>
-      <Icon className="absolute left-8 top-7 h-10 w-10 opacity-70" />
-      <div className="absolute bottom-6 right-7 h-24 w-24 rounded-full border border-black/10" />
-      <div className="absolute right-24 top-10 h-8 w-20 rounded-full border border-black/10" />
-      <div className="absolute bottom-12 left-10 h-2 w-32 rounded-full bg-black/10" />
-    </div>
-  )
-}
-
-function FeaturedNotebookCard({
-  task,
-  index,
-  onOpen,
-  onDelete,
-}: {
-  task: Task
-  index: number
-  onOpen: (taskId: string) => void
-  onDelete: (task: Task) => void
-}) {
-  const image = coverUrl(task)
-
-  return (
-    <div
-      className="group relative h-[168px] overflow-hidden rounded-lg text-left shadow-sm outline-none transition hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary"
-    >
-      <button
-        type="button"
-        onClick={() => onOpen(task.id)}
-        className="absolute inset-0 z-10"
-        aria-label={`打开笔记本：${getNotebookTitle(task)}`}
-      />
-      {image ? (
-        <img
-          src={image}
-          alt=""
-          referrerPolicy="no-referrer"
-          className="absolute inset-0 h-full w-full object-cover transition duration-300 group-hover:scale-[1.03]"
-        />
-      ) : (
-        <FlatPattern index={index} />
-      )}
-      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/10" />
-      <button
-        type="button"
-        onClick={() => onDelete(task)}
-        className="absolute right-3 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-white opacity-0 transition hover:bg-rose-600 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-white group-hover:opacity-100"
-        aria-label={`删除笔记本：${getNotebookTitle(task)}`}
-        title="删除"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
-      <div className="pointer-events-none relative z-10 flex h-full flex-col justify-end p-5 text-white">
-        <div className="mb-3 flex items-center gap-2 text-sm text-white/85">
-          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/90 text-primary">
-            <BookOpen className="h-4 w-4" />
-          </span>
-          <span className="truncate">{task.collection?.folder || '默认收藏夹'}</span>
-        </div>
-        <h3 className="line-clamp-2 text-xl font-medium leading-snug">{getNotebookTitle(task)}</h3>
-        <div className="mt-3 flex items-center justify-between gap-3 text-sm text-white/85">
-          <span className="truncate">
-            {formatDate(task.createdAt)} · {getSourceCount(task)} 个来源
-          </span>
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20">
-            <BookOpen className="h-4 w-4" />
-          </span>
-        </div>
-      </div>
+      <Icon className="absolute left-7 top-6 h-9 w-9 opacity-70" />
+      <div className="absolute bottom-6 right-7 h-20 w-20 rounded-sm border border-black/10" />
+      <div className="absolute right-24 top-10 h-7 w-24 rounded-sm border border-black/10" />
+      <div className="absolute bottom-12 left-10 h-1.5 w-32 rounded-sm bg-black/10" />
     </div>
   )
 }
@@ -198,7 +169,7 @@ function RecentNotebookCard({
 }) {
   const image = coverUrl(task)
   const tags = task.collection?.tags || []
-  const NotebookIcon = [BookOpen, Lightbulb, Bot, GraduationCap, BookMarked, Circle][index % 6]
+  const NotebookIcon = [SearchCheck, ShieldCheck, AlertCircle, Check, BookOpen, Circle][index % 6]
 
   if (viewMode === 'list') {
     return (
@@ -224,12 +195,12 @@ function RecentNotebookCard({
             </div>
           </div>
         </button>
-        <StatusMark task={task} />
+        <VerdictMark task={task} />
         <button
           type="button"
           onClick={() => onDelete(task)}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-rose-50 hover:text-rose-600 focus-visible:ring-2 focus-visible:ring-rose-500"
-          aria-label={`删除笔记本：${getNotebookTitle(task)}`}
+          aria-label={`删除核验任务：${getNotebookTitle(task)}`}
           title="删除"
         >
           <Trash2 className="h-4 w-4" />
@@ -246,7 +217,7 @@ function RecentNotebookCard({
         type="button"
         onClick={() => onOpen(task.id)}
         className="absolute inset-0 z-10"
-        aria-label={`打开笔记本：${getNotebookTitle(task)}`}
+        aria-label={`打开核验任务：${getNotebookTitle(task)}`}
       />
       {image ? (
         <>
@@ -270,7 +241,7 @@ function RecentNotebookCard({
             ? 'bg-black/35 text-white hover:bg-rose-600 focus-visible:ring-white'
             : 'bg-white/75 text-neutral-600 hover:bg-rose-50 hover:text-rose-600 focus-visible:ring-rose-500'
         )}
-        aria-label={`删除笔记本：${getNotebookTitle(task)}`}
+        aria-label={`删除核验任务：${getNotebookTitle(task)}`}
         title="删除"
       >
         <Trash2 className="h-4 w-4" />
@@ -308,7 +279,7 @@ function NewNotebookCard({ onCreate }: { onCreate: () => void }) {
       <span className="flex h-16 w-16 items-center justify-center rounded-full bg-[#eef1ff] text-primary">
         <Plus className="h-7 w-7" />
       </span>
-      <span className="mt-4 text-lg font-medium">新建笔记本</span>
+      <span className="mt-4 text-lg font-medium">开始联网核实</span>
     </button>
   )
 }
@@ -320,7 +291,7 @@ export default function LibraryPage() {
   const removeTask = useTaskStore(state => state.removeTask)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<LibraryFilter>('all')
-  const [viewMode, setViewMode] = useState<ViewMode>('grid')
+  const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null)
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null)
 
@@ -335,6 +306,8 @@ export default function LibraryPage() {
     return sortedTasks.filter(task => {
       const target = [
         getNotebookTitle(task),
+        task.formData?.video_url,
+        task.insights?.verification?.overall?.status,
         task.collection?.folder,
         ...(task.collection?.tags || []),
         task.collection?.note,
@@ -347,16 +320,21 @@ export default function LibraryPage() {
   }, [query, sortedTasks])
 
   const visibleTasks = useMemo(() => {
+    if (filter === 'mine') {
+      return searchedTasks.filter(task => {
+        const verification = task.insights?.verification
+        return (
+          task.status === 'FAILED' ||
+          Boolean(verification?.risk_flags?.length) ||
+          ['refuted', 'mixed', 'insufficient', 'data_void', 'source_risk'].includes(verification?.overall?.status || '')
+        )
+      })
+    }
     if (filter === 'featured') {
-      return searchedTasks.filter(task => task.status === 'SUCCESS' && task.insights?.cards?.length)
+      return searchedTasks.filter(task => task.status === 'SUCCESS' && task.insights?.verification)
     }
     return searchedTasks
   }, [filter, searchedTasks])
-
-  const featuredTasks = useMemo(
-    () => sortedTasks.filter(task => task.status === 'SUCCESS').slice(0, 4),
-    [sortedTasks]
-  )
 
   const openTask = (taskId: string) => {
     setCurrentTask(taskId)
@@ -383,9 +361,9 @@ export default function LibraryPage() {
   }
 
   const tabs: Array<{ id: LibraryFilter; label: string }> = [
-    { id: 'all', label: '全部' },
-    { id: 'mine', label: '我的笔记本' },
-    { id: 'featured', label: '精选笔记本' },
+    { id: 'all', label: '全部核验' },
+    { id: 'mine', label: '需复核' },
+    { id: 'featured', label: '已完成' },
   ]
 
   return (
@@ -409,7 +387,7 @@ export default function LibraryPage() {
             className="inline-flex h-10 items-center gap-2 rounded-full bg-black px-5 text-sm font-medium text-white transition hover:bg-neutral-800"
           >
             <Plus className="h-4 w-4" />
-            新建
+            开始核实
           </button>
         </div>
       </header>
@@ -440,7 +418,7 @@ export default function LibraryPage() {
               <input
                 value={query}
                 onChange={event => setQuery(event.target.value)}
-                placeholder="搜索笔记本"
+                placeholder="搜索核验任务"
                 className="w-40 bg-transparent text-sm outline-none placeholder:text-neutral-400"
               />
             </div>
@@ -472,35 +450,9 @@ export default function LibraryPage() {
           </div>
         </section>
 
-        {featuredTasks.length > 0 && filter !== 'featured' && !query.trim() && (
-          <section>
-            <div className="mb-5 flex items-end justify-between">
-              <h1 className="text-3xl font-medium tracking-normal">精选笔记本</h1>
-              <button
-                type="button"
-                onClick={() => setFilter('featured')}
-                className="rounded-full border border-neutral-200 px-5 py-2 text-sm font-medium hover:bg-neutral-50"
-              >
-                查看全部
-              </button>
-            </div>
-            <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
-              {featuredTasks.map((task, index) => (
-                <FeaturedNotebookCard
-                  key={task.id}
-                  task={task}
-                  index={index}
-                  onOpen={openTask}
-                  onDelete={setTaskToDelete}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
         <section>
           <h2 className="mb-5 text-3xl font-medium tracking-normal">
-            {query.trim() ? '搜索结果' : '最近打开过的笔记本'}
+            {query.trim() ? '搜索结果' : '最近核验任务'}
           </h2>
           {viewMode === 'grid' ? (
             <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
@@ -534,9 +486,9 @@ export default function LibraryPage() {
 
           {visibleTasks.length === 0 && (
             <div className="mt-6 rounded-lg border border-dashed border-neutral-300 py-16 text-center">
-              <BookOpen className="mx-auto h-10 w-10 text-neutral-300" />
-              <p className="mt-4 text-base font-medium text-neutral-800">还没有匹配的笔记本</p>
-              <p className="mt-2 text-sm text-neutral-500">新建一个视频笔记，生成后会出现在这里。</p>
+              <SearchCheck className="mx-auto h-10 w-10 text-neutral-300" />
+              <p className="mt-4 text-base font-medium text-neutral-800">还没有匹配的核验任务</p>
+              <p className="mt-2 text-sm text-neutral-500">发起一次联网核实，报告和证据源会出现在这里。</p>
             </div>
           )}
         </section>
@@ -545,9 +497,9 @@ export default function LibraryPage() {
       <Dialog open={Boolean(taskToDelete)} onOpenChange={open => !open && setTaskToDelete(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>删除这条笔记？</DialogTitle>
+            <DialogTitle>删除这条核验任务？</DialogTitle>
             <DialogDescription>
-              将删除「{taskToDelete ? getNotebookTitle(taskToDelete) : ''}」以及对应的本地结果和知识库索引，此操作不可撤销。
+              将删除「{taskToDelete ? getNotebookTitle(taskToDelete) : ''}」以及对应的本地核验报告和证据索引，此操作不可撤销。
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>

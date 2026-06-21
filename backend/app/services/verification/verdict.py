@@ -91,12 +91,23 @@ def summarize_claims(verification: dict, checked: int) -> dict:
     supported_count = sum(
         1
         for claim in checked_claims
-        if claim.get("online", {}).get("verdict") in SUPPORTED_ONLINE_VERDICTS
+        if (
+            claim.get("online", {}).get("verdict") in SUPPORTED_ONLINE_VERDICTS
+            or claim.get("online", {}).get("status") == "supported"
+        )
     )
     refuted_count = sum(
         1
         for claim in checked_claims
-        if claim.get("online", {}).get("verdict") == "AI 判断存在反证"
+        if (
+            claim.get("online", {}).get("verdict") == "AI 判断存在反证"
+            or claim.get("online", {}).get("status") == "refuted"
+        )
+    )
+    mixed_count = sum(
+        1
+        for claim in checked_claims
+        if claim.get("online", {}).get("status") == "mixed"
     )
     insufficient_count = sum(
         1
@@ -115,10 +126,11 @@ def summarize_claims(verification: dict, checked: int) -> dict:
     return {
         "supported_count": supported_count,
         "refuted_count": refuted_count,
+        "mixed_count": mixed_count,
         "score": next_score,
         "status": status,
         "summary": (
-            f"已联网核验 {checked} 条主张，找到 {supported_count} 条外部佐证、{refuted_count} 条反证。"
+            f"已联网核验 {checked} 条主张，找到 {supported_count} 条外部佐证、{refuted_count} 条反证、{mixed_count} 条混合/冲突证据。"
             if checked
             else "联网核验未完成，当前结果仍基于离线文本证据判断。"
         ),

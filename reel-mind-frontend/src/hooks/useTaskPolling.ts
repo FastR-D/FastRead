@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useTaskStore } from '@/store/taskStore'
+import type { Task } from '@/store/taskStore'
 import { get_task_status } from '@/services/note.ts'
 import toast from 'react-hot-toast'
 
@@ -64,37 +65,43 @@ export const useTaskPolling = (interval = 3000) => {
           try {
             const res = await get_task_status(task.id)
             const { status } = res
+            const latestTask = tasksRef.current.find(item => item.id === task.id) || task
 
             retryStateRef.current.delete(task.id)
 
+            const result = res.result
             const hasSuccessContent = Boolean(
-              res.result?.markdown || res.result?.transcript || res.result?.audioMeta || res.result?.insights
+              result?.markdown || result?.transcript || result?.audioMeta || result?.insights
             )
 
-            if (status && (status !== task.status || (status === 'SUCCESS' && hasSuccessContent))) {
+            const messageChanged = res.message !== latestTask.message
+
+            if (status && (status !== latestTask.status || messageChanged || (status === 'SUCCESS' && hasSuccessContent))) {
               if (status === 'SUCCESS') {
-                const { markdown, transcript, audioMeta, insights } = res.result || {}
-                if (task.status !== 'SUCCESS') {
+                if (latestTask.status !== 'SUCCESS') {
                   toast.success('笔记生成成功')
                 }
-                updateTaskContent(task.id, {
+                const next: Partial<Omit<Task, 'id' | 'createdAt'>> = {
                   status,
-                  markdown,
-                  transcript,
-                  audioMeta,
-                  insights,
                   message: undefined,
                   error: undefined,
-                })
+                }
+                if (result && 'markdown' in result) next.markdown = result.markdown
+                if (result && 'transcript' in result) next.transcript = result.transcript
+                if (result && 'audioMeta' in result) next.audioMeta = result.audioMeta
+                if (result && 'insights' in result) next.insights = result.insights
+                updateTaskContent(latestTask.id, next)
               } else if (status === 'FAILED') {
-                updateTaskContent(task.id, {
+                updateTaskContent(latestTask.id, {
                   status,
                   message: res.message,
                   error: res.error,
                 })
-                console.warn(`⚠️ 任务 ${task.id} 失败`, res.error || res.message)
+                console.warn(`⚠️ 任务 ${latestTask.id} 失败`, res.error || res.message)
               } else {
-                updateTaskContent(task.id, { status })
+                const next: Partial<Omit<Task, 'id' | 'createdAt'>> = { status }
+                if (res.message !== undefined) next.message = res.message
+                updateTaskContent(latestTask.id, next)
               }
             }
           } catch (e) {

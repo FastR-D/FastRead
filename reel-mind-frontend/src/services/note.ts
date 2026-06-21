@@ -154,8 +154,8 @@ export const normalizeTaskSnapshot = (payload: unknown): TaskSnapshot | null => 
     insights,
     audioMeta,
     transcript,
-    createdAt: normalizeTimestamp(raw.createdAt),
-    updatedAt: normalizeTimestamp(raw.updatedAt),
+    createdAt: normalizeTimestamp(raw.createdAt ?? (raw as any).created_at),
+    updatedAt: normalizeTimestamp(raw.updatedAt ?? (raw as any).updated_at),
     videoUrl: raw.videoUrl,
     collection: raw.collection,
     title: raw.title,
@@ -247,6 +247,33 @@ export const verify_task_online = async (data: {
   provider_id?: string
 }) => {
   return await request.post('/verify_task_online', data, { timeout: 600000 })
+}
+
+export const create_verification_task = async (data: {
+  text?: string
+  url?: string
+  task_id?: string
+  max_claims?: number
+  verification_depth?: string
+  source_policy?: string
+  model_name?: string
+  provider_id?: string
+}) => {
+  return await request.post('/verification_tasks', {
+    goal: 'verify',
+    verification_depth: 'deep',
+    source_policy: 'authoritative',
+    max_claims: 50,
+    ...data,
+  }, { timeout: 600000 })
+}
+
+export const rerun_verification_task = async (task_id: string, retry_failed_only = true) => {
+  return await request.post(`/verification_tasks/${task_id}/rerun`, { retry_failed_only }, { timeout: 600000 })
+}
+
+export const rerun_verification_claim = async (task_id: string, claim_id: string) => {
+  return await request.post(`/verification_tasks/${task_id}/claims/${claim_id}/rerun`, {}, { timeout: 600000 })
 }
 
 export const get_task_status = async (task_id: string): Promise<TaskSnapshot> => {

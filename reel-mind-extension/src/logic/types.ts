@@ -9,6 +9,12 @@ export type TaskStatus =
   | 'SUMMARIZING'
   | 'FORMATTING'
   | 'SAVING'
+  | 'EXTRACTING_CLAIMS'
+  | 'SEARCHING_WEB'
+  | 'FETCHING_SOURCES'
+  | 'EVALUATING_EVIDENCE'
+  | 'WRITING_REPORT'
+  | 'RUNNING'
   | 'SUCCESS'
   | 'FAILED'
 
@@ -52,6 +58,23 @@ export interface DownloaderCookieStatus {
   warning_message?: string
 }
 
+export interface VerificationTaskCreated {
+  task_id: string
+  status: string
+  input: {
+    goal: 'verify'
+    input_mode: 'text' | 'url'
+    text?: string
+    url?: string
+    source_task_id?: string
+    verification_depth: string
+    source_policy: string
+    max_claims: number
+    model_name?: string
+    provider_id?: string
+  }
+}
+
 export interface Provider {
   id: string
   name: string
@@ -83,13 +106,16 @@ export interface TaskResult {
   markdown?: string
   audio_meta?: Record<string, unknown>
   audioMeta?: Record<string, unknown>
+  insights?: Record<string, unknown>
+  verification_result?: Record<string, unknown>
   [key: string]: unknown
 }
 
 export interface TaskRecord {
   taskId: string
-  videoUrl: string
-  platform: Platform
+  input: string
+  inputMode: 'text' | 'url'
+  platform?: Platform | 'verification'
   status: TaskStatus
   message?: string
   result?: TaskResult

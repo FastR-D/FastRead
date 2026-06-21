@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Navigate, Routes, Route, useNavigate, useSearchParams } from 'react-router-dom'
 import { useTaskPolling } from '@/hooks/useTaskPolling.ts'
 import { useCheckBackend } from '@/hooks/useCheckBackend.ts'
 import { systemCheck } from '@/services/system.ts'
@@ -36,6 +36,26 @@ const DownloaderForm = lazy(() => import('@/components/Form/DownloaderForm/Form.
 const TranscriberPage = lazy(() => import('@/pages/SettingPage/transcriber.tsx'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
+function TaskDeepLinkHandler() {
+  const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
+  const tasks = useTaskStore(state => state.tasks)
+  const setCurrentTask = useTaskStore(state => state.setCurrentTask)
+  const taskId = searchParams.get('task_id')
+
+  useEffect(() => {
+    if (!taskId)
+      return
+    if (!tasks.some(task => task.id === taskId))
+      return
+
+    setCurrentTask(taskId)
+    navigate('/workspace', { replace: true })
+  }, [navigate, setCurrentTask, taskId, tasks])
+
+  return null
+}
+
 function App() {
   useTaskPolling(3000) // 每 3 秒轮询一次
   const { loading, initialized } = useCheckBackend()
@@ -65,6 +85,7 @@ function App() {
       <StartupBanner />
       <BackendHealthIndicator />
       <BrowserRouter>
+        <TaskDeepLinkHandler />
         <Suspense fallback={<div className="flex h-screen items-center justify-center">加载中…</div>}>
           <Routes>
             <Route path="/onboarding" element={<Onboarding />} />

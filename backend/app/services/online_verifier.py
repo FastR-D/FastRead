@@ -7,7 +7,9 @@ from app.services.verification.constants import (
     SEARCH_PROVIDER,
 )
 from app.services.verification import ai_judge
+from app.services.verification import adjudication
 from app.services.verification import numeric_evidence
+from app.services.verification import pipeline as verification_pipeline
 from app.services.verification import query_builder
 from app.services.verification import relevance
 from app.services.verification import search_orchestrator
@@ -295,100 +297,142 @@ def _enforce_numeric_verdict(
 
 def verify_claims_online(
     verification: dict,
-    max_claims: int = 8,
+    max_claims: int = 50,
     model_name: str | None = None,
     provider_id: str | None = None,
     context: str = "",
+    stage_callback: verification_pipeline.StageCallback | None = None,
+    reuse_claim_results: dict[str, dict] | None = None,
+    cache: verification_pipeline.VerificationCache | None = None,
+    enable_geo_compare: bool = False,
 ) -> dict:
-    """Enrich offline claim verification with optional web search evidence."""
+    """Enrich offline claim verification with deep body-evidence verification."""
     claims = list(verification.get("claims") or [])
     if not claims:
         verification["external_check"] = True
         verification["online_error"] = ""
         return verification
 
-    selected = sorted(claims, key=lambda item: item.get("priority", 0), reverse=True)[:max_claims]
+    selected = verification_pipeline.claim_pipeline.sort_claims_by_verification_risk(
+        claims,
+        max(1, min(int(max_claims or 50), 50)),
+    )
     by_claim = {item.get("claim"): item for item in claims}
     checked = 0
     errors = []
     ai_verifier = None
-    try:
-        ai_verifier = _get_ai_verifier(model_name, provider_id)
-    except Exception as exc:
-        logger.warning(f"AI 核验模型初始化失败，将使用普通搜索核验: {exc}")
-    context_profile = _ai_build_context_profile(ai_verifier, context) if ai_verifier else {}
+    if model_name and provider_id:
+        try:
+            ai_verifier = _get_ai_verifier(model_name, provider_id)
+        except Exception as exc:
+            logger.warning(f"AI 核验模型初始化失败，将使用规则证据矩阵核验: {exc}")
+    context_profile = {}
+    if ai_verifier:
+        try:
+            context_profile = _ai_build_context_profile(ai_verifier, context)
+        except Exception as exc:
+            logger.warning(f"AI 上下文画像失败，将使用规则检索 query: {exc}")
+            ai_verifier = None
     if not ai_verifier:
-        logger.info("联网核验未启用 AI 判断：请求未提供模型，且未找到可用默认模型")
+        logger.info("联网核验未启用 AI 结构化辅助：最终结论仍由规则证据矩阵决定")
 
-    for claim in selected:
+    aggregate_sources = []
+    aggregate_evidence = []
+    aggregate_risk_flags = set()
+    for index, claim in enumerate(selected):
         claim_text = claim.get("claim") or ""
         if not claim_text:
             continue
         try:
-            queries = (
-                _ai_build_queries(ai_verifier, claim_text, context_profile=context_profile, context=context)
-                if ai_verifier
-                else _build_search_queries(claim_text)
-            )
-            query = queries[0] if queries else _build_search_query(claim_text)
-            search_providers = []
-            raw_results = search_web_multi(
-                queries or [query],
-                max_results=DEFAULT_MAX_RESULTS,
-                claim=claim_text,
-                provider_trace=search_providers,
-            )
-            results = _filter_relevant_results(claim_text, raw_results)
-            metrics = _score_results(claim_text, results)
-            ai_result = None
-            if ai_verifier and raw_results:
-                ai_result = _ai_judge_claim(
-                    ai_verifier,
-                    claim_text,
-                    raw_results,
-                    context_profile=context_profile,
-                    context=context,
-                )
-                results = ai_result["sources"]
-                metrics = _score_results(claim_text, results)
-                verdict, reason, confidence = _ai_verdict_to_display(claim, ai_result)
+            reused_from_artifact = False
+            pipeline_result = (reuse_claim_results or {}).get(claim_text)
+            if pipeline_result:
+                reused_from_artifact = True
+                queries = pipeline_result.get("audit", {}).get("queries") or _build_search_queries(claim_text)
             else:
-                verdict, reason, confidence = _online_verdict(claim, results, metrics)
-            verdict, reason, confidence = _enforce_numeric_verdict(
-                claim,
-                verdict,
-                reason,
-                confidence,
-                metrics,
-            )
+                try:
+                    queries = (
+                        _ai_build_queries(ai_verifier, claim_text, context_profile=context_profile, context=context)
+                        if ai_verifier
+                        else _build_search_queries(claim_text)
+                    )
+                except Exception as exc:
+                    logger.warning(f"AI query 构建失败，将使用规则 query: {exc}")
+                    queries = _build_search_queries(claim_text)
+                query = queries[0] if queries else _build_search_query(claim_text)
+                pipeline_result = verification_pipeline.verify_claim(
+                    claim_text,
+                    index=index,
+                    queries=queries or [query],
+                    search_fn=lambda built_queries, limit, pipeline_claim, trace: search_web_multi(
+                        built_queries,
+                        max_results=limit,
+                        claim=pipeline_claim,
+                        provider_trace=trace,
+                    ),
+                    max_results=DEFAULT_MAX_RESULTS,
+                    context=context,
+                    stage_callback=stage_callback,
+                    cache=cache,
+                    enable_geo_compare=enable_geo_compare,
+                )
+            query = queries[0] if queries else _build_search_query(claim_text)
             target = by_claim.get(claim_text)
             if not target:
                 continue
+            status = pipeline_result["verdict"]
+            display_verdict = adjudication.legacy_display(status)
+            audit = dict(pipeline_result.get("audit", {}))
+            if reused_from_artifact:
+                audit["reused_from_claim_artifact"] = True
+            metrics = {
+                "coverage": 0,
+                "trusted_count": sum(
+                    1 for source in pipeline_result.get("sources", []) if source.get("trust_tier") in {"A", "B"}
+                ),
+                "top_overlap": 0,
+                **(audit.get("evidence_counts") or {}),
+                "independent_authoritative_sources": audit.get(
+                    "independent_authoritative_sources",
+                    0,
+                ),
+            }
             target["online"] = {
                 "checked": True,
                 "query": query,
                 "queries": queries or [query],
-                "verdict": verdict,
-                "reason": reason,
-                "confidence": confidence,
+                "status": status,
+                "verdict": display_verdict,
+                "reason": pipeline_result["reason"],
+                "confidence": pipeline_result["confidence"],
                 "metrics": metrics,
-                "sources": results,
-                "search_providers": search_providers,
-                "ai_checked": bool(ai_result),
-                "raw_result_count": len(raw_results),
-                "filtered_result_count": len(results),
+                "sources": pipeline_result.get("sources", []),
+                "evidence": pipeline_result.get("evidence", []),
+                "risk_flags": pipeline_result.get("risk_flags", []),
+                "audit": audit,
+                "search_providers": audit.get("search_providers", []),
+                "ai_checked": bool(ai_verifier) and not reused_from_artifact,
+                "raw_result_count": audit.get("raw_result_count", 0),
+                "filtered_result_count": len(pipeline_result.get("sources", [])),
+                "claim_id": pipeline_result.get("claim_id"),
+                "atomic_claim": pipeline_result.get("atomic_claim"),
+                "claim_facts": pipeline_result.get("claim_facts"),
             }
+            aggregate_sources.extend(pipeline_result.get("sources", []))
+            aggregate_evidence.extend(pipeline_result.get("evidence", []))
+            aggregate_risk_flags.update(pipeline_result.get("risk_flags", []))
             logger.info(
-                "联网核验完成 claim=%s ai=%s raw=%s useful=%s verdict=%s",
+                "联网核验完成 claim=%s ai=%s raw=%s sources=%s verdict=%s",
                 claim_text[:80],
-                bool(ai_result),
-                len(raw_results),
-                len(results),
-                verdict,
+                bool(ai_verifier) and not reused_from_artifact,
+                audit.get("raw_result_count", 0),
+                len(pipeline_result.get("sources", [])),
+                status,
             )
-            target["verdict"] = verdict
-            target["reason"] = reason
-            target["confidence"] = confidence
+            target["verdict"] = display_verdict
+            target["reason"] = pipeline_result["reason"]
+            target["confidence"] = pipeline_result["confidence"]
+            target["machine_verdict"] = status
             checked += 1
         except Exception as exc:
             logger.warning(f"联网核验失败: {claim_text[:60]} {exc}")
@@ -407,13 +451,32 @@ def verify_claims_online(
         "online_checked": checked,
         "online_supported": summary["supported_count"],
         "online_refuted": summary["refuted_count"],
+        "online_mixed": summary["mixed_count"],
     }
+    verification["sources"] = aggregate_sources
+    verification["evidence"] = aggregate_evidence
+    verification["risk_flags"] = sorted(aggregate_risk_flags)
     verification["overall"] = {
         **(verification.get("overall") or {}),
         "status": summary["status"],
         "score": summary["score"],
         "summary": summary["summary"],
-        "note": "联网核验基于搜索结果标题、摘要和来源域名做证据扫描，不等同于人工事实核查。",
+        "note": "联网核验基于网页/PDF正文、来源分级、独立性和交叉证据；搜索摘要只作为召回线索，不能单独支持主张。",
+    }
+    verification["result"] = {
+        "input": {"context_chars": len(context or "")},
+        "overall": verification["overall"],
+        "claim_counts": verification["claim_counts"],
+        "claims": claims,
+        "sources": aggregate_sources,
+        "evidence": aggregate_evidence,
+        "risk_flags": sorted(aggregate_risk_flags),
+        "audit": {
+            "version": 2,
+            "depth": "deep",
+            "source_policy": "authoritative",
+            "search_summary_policy": "recall_only_never_supported",
+        },
     }
     verification["claims"] = claims
     return verification

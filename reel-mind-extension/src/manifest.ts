@@ -18,9 +18,9 @@ export async function getManifest() {
   // can also be conditional based on your need
   const manifest: ManifestWithBrowserSettings = {
     manifest_version: 3,
-    name: 'Reel Mind Cookie Sync',
+    name: 'ReelMind Verification',
     version: pkg.version,
-    description: 'Capture Douyin cookies and sync them to the local Reel Mind backend.',
+    description: 'Start ReelMind online verification tasks from the current page or selected text.',
     action: {
       default_icon: {
         16: 'assets/icon-16.png',
@@ -52,7 +52,7 @@ export async function getManifest() {
     },
     browser_specific_settings: {
       gecko: {
-        id: 'reel-mind-cookie-sync@local',
+        id: 'reelmind-verification@local',
       },
     },
   }

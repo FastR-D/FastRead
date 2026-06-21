@@ -12,7 +12,7 @@ interface TaskFailureViewProps {
 }
 
 const TaskFailureView: FC<TaskFailureViewProps> = ({
-  title = '笔记生成失败',
+  title = '联网核实失败',
   message = '请检查后台或稍后再试',
   retryHint,
   rawMessage,
@@ -20,7 +20,7 @@ const TaskFailureView: FC<TaskFailureViewProps> = ({
   onRetry,
 }) => {
   return (
-    <div className="flex min-h-full w-full items-center justify-center px-6">
+    <div className="flex min-h-full w-full items-center justify-center bg-slate-50/40 px-6">
       <div className="w-full max-w-md">
         <div className="flex items-start gap-3">
           <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-red-200 bg-red-50 text-red-500">

@@ -1,11 +1,19 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Copy, Download, BrainCircuit, MessageSquare, SquareStack } from 'lucide-react'
+import {
+  BrainCircuit,
+  Copy,
+  Download,
+  FileText,
+  MessageSquare,
+  SearchCheck,
+  ShieldCheck,
+  SquareStack,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Badge } from '@/components/ui/badge'
 
 interface VersionNote {
   ver_id: string
@@ -14,9 +22,20 @@ interface VersionNote {
   created_at?: string
 }
 
+interface VerificationSnapshot {
+  overall?: { status?: string }
+  claim_counts?: {
+    total?: number
+    online_supported?: number
+    online_refuted?: number
+    online_checked?: number
+  }
+}
+
 interface NoteHeaderProps {
   currentTask?: {
     markdown: VersionNote[] | string
+    insights?: { verification?: VerificationSnapshot }
   }
   isMultiVersion: boolean
   currentVerId: string
@@ -31,8 +50,17 @@ interface NoteHeaderProps {
   setShowTranscribe: (show: boolean) => void
   showChat?: false | 'half' | 'full'
   setShowChat?: (mode: false | 'half' | 'full') => void
-  viewMode: 'map' | 'preview' | 'cards'
-  setViewMode: (mode: 'map' | 'preview' | 'cards') => void
+  viewMode: 'verify' | 'map' | 'preview' | 'cards'
+  setViewMode: (mode: 'verify' | 'map' | 'preview' | 'cards') => void
+}
+
+const VERDICT_TONE: Record<string, string> = {
+  supported: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  refuted: 'bg-red-50 text-red-700 border-red-200',
+  mixed: 'bg-amber-50 text-amber-700 border-amber-200',
+  insufficient: 'bg-slate-100 text-slate-600 border-slate-200',
+  data_void: 'bg-orange-50 text-orange-700 border-orange-200',
+  source_risk: 'bg-red-50 text-red-700 border-red-200',
 }
 
 export function MarkdownHeader({
@@ -74,32 +102,60 @@ export function MarkdownHeader({
     if (!date) return ''
     const d = typeof date === 'string' ? new Date(date) : date
     if (isNaN(d.getTime())) return ''
-    return d
-      .toLocaleString('zh-CN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      })
-      .replace(/\//g, '-')
+    const pad = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
 
+  const verdict = currentTask?.insights?.verification
+  const verdictStatus = verdict?.overall?.status
+  const verdictCounts = verdict?.claim_counts
+  const verdictTone = verdictStatus ? VERDICT_TONE[verdictStatus] || 'bg-slate-100 text-slate-600 border-slate-200' : ''
+
+  const viewBtn = (
+    active: boolean,
+    onClick: () => void,
+    icon: React.ReactNode,
+    label: string,
+    tip: string,
+    primary = false,
+  ) => (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            onClick={onClick}
+            className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium transition ${
+              active
+                ? primary
+                  ? 'bg-slate-900 text-white hover:bg-slate-700'
+                  : 'bg-slate-100 text-slate-900 hover:bg-slate-200'
+                : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            {icon}
+            <span>{label}</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>{tip}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+
   return (
-    <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b bg-white/95 px-4 py-2 backdrop-blur-sm">
-      {/* 左侧区域：版本 + 标签 + 创建时间 */}
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="sticky top-0 z-10 flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-2">
+      {/* 左侧：版本 + 元数据 + 判定 */}
+      <div className="flex flex-wrap items-center gap-2">
         {isMultiVersion && (
           <Select value={currentVerId} onValueChange={setCurrentVerId}>
-            <SelectTrigger className="h-8 w-[160px] text-sm">
-              <div className="flex items-center">
+            <SelectTrigger className="h-7 w-[140px] text-xs">
+              <div className="flex items-center font-mono">
                 {(() => {
                   const currentIndex = currentTask?.markdown.findIndex(v => v.ver_id === currentVerId)
                   return currentIndex !== -1 ? `版本（${currentVerId.slice(-6)}）` : ''
                 })()}
               </div>
             </SelectTrigger>
-
             <SelectContent>
               {(currentTask?.markdown || []).map(v => {
                 const shortId = v.ver_id.slice(-6)
@@ -113,60 +169,113 @@ export function MarkdownHeader({
           </Select>
         )}
 
-        <Badge variant="secondary" className="bg-pink-100 text-pink-700 hover:bg-pink-200">
-          {modelName}
-        </Badge>
-        <Badge variant="secondary" className="bg-cyan-100 text-cyan-700 hover:bg-cyan-200">
-          {styleName}
-        </Badge>
+        {modelName && (
+          <span className="inline-flex items-center rounded-sm border border-slate-200 bg-slate-50 px-1.5 py-0.5 font-mono text-[11px] text-slate-600">
+            {modelName}
+          </span>
+        )}
+        {styleName && (
+          <span className="inline-flex items-center rounded-sm border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-600">
+            {styleName}
+          </span>
+        )}
 
         {createAt && (
-          <div className="text-muted-foreground text-sm">创建时间: {formatDate(createAt)}</div>
+          <span className="font-mono text-[11px] text-slate-400">{formatDate(createAt)}</span>
+        )}
+
+        {verdictStatus && (
+          <span className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[11px] font-medium ${verdictTone}`}>
+            <ShieldCheck className="h-3 w-3" />
+            {verdictStatus}
+            {verdictCounts && (
+              <span className="font-mono opacity-70">
+                ({verdictCounts.online_supported ?? 0}/{verdictCounts.online_refuted ?? 0}/{verdictCounts.total ?? 0})
+              </span>
+            )}
+          </span>
         )}
       </div>
 
-      {/* 右侧操作按钮 */}
+      {/* 右侧：视图切换 + 工具操作 */}
       <div className="flex items-center gap-1">
+        {/* 视图切换：联网核实为主，其余次级 */}
+        {viewBtn(
+          viewMode === 'verify',
+          () => setViewMode('verify'),
+          <SearchCheck className="h-3.5 w-3.5" />,
+          '联网核实',
+          '联网核实报告',
+          true,
+        )}
+        {viewBtn(
+          viewMode === 'preview',
+          () => setViewMode('preview'),
+          <FileText className="h-3.5 w-3.5" />,
+          'Markdown',
+          'Markdown 笔记',
+        )}
+        {viewBtn(
+          viewMode === 'map',
+          () => setViewMode(viewMode === 'map' ? 'preview' : 'map'),
+          <BrainCircuit className="h-3.5 w-3.5" />,
+          '导图',
+          '思维导图',
+        )}
+        {viewBtn(
+          viewMode === 'cards',
+          () => setViewMode(viewMode === 'cards' ? 'preview' : 'cards'),
+          <SquareStack className="h-3.5 w-3.5" />,
+          '卡片',
+          '知识卡片',
+        )}
+
+        <div className="mx-1 h-5 w-px bg-slate-200" />
+
+        {/* 工具操作 */}
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
-                onClick={() => {
-                  setViewMode(viewMode == 'preview' ? 'map' : 'preview')
-                }}
-                variant="ghost"
+                onClick={() => setShowTranscribe(!showTranscribe)}
+                variant={showTranscribe ? 'secondary' : 'ghost'}
                 size="sm"
-                className="h-8 px-2"
+                className="h-8 px-2 text-xs"
               >
-                <BrainCircuit className="mr-1.5 h-4 w-4" />
-                <span className="text-sm">{viewMode == 'preview' ? '思维导图' : 'markdown'}</span>
+                <span>原文参照</span>
               </Button>
             </TooltipTrigger>
-            <TooltipContent>思维导图</TooltipContent>
+            <TooltipContent>打开转写文本</TooltipContent>
           </Tooltip>
         </TooltipProvider>
+
+        {setShowChat && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  onClick={() => setShowChat(showChat ? false : 'half')}
+                  variant={showChat ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-8 px-2 text-xs"
+                >
+                  <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
+                  <span>AI 问答</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>基于笔记内容的 AI 问答</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+
+        <div className="mx-1 h-5 w-px bg-slate-200" />
+
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button
-                onClick={() => setViewMode(viewMode === 'cards' ? 'preview' : 'cards')}
-                variant={viewMode === 'cards' ? 'default' : 'ghost'}
-                size="sm"
-                className="h-8 px-2"
-              >
-                <SquareStack className="mr-1.5 h-4 w-4" />
-                <span className="text-sm">知识卡片</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>知识卡片</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button onClick={handleCopy} variant="ghost" size="sm" className="h-8 px-2">
-                <Copy className="mr-1.5 h-4 w-4" />
-                <span className="text-sm">{copied ? '已复制' : '复制'}</span>
+              <Button onClick={handleCopy} variant="ghost" size="sm" className="h-8 px-2 text-xs">
+                <Copy className="mr-1.5 h-3.5 w-3.5" />
+                <span>{copied ? '已复制' : '复制'}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>复制内容</TooltipContent>
@@ -176,50 +285,14 @@ export function MarkdownHeader({
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button onClick={onDownload} variant="ghost" size="sm" className="h-8 px-2">
-                <Download className="mr-1.5 h-4 w-4" />
-                <span className="text-sm">导出 Markdown</span>
+              <Button onClick={onDownload} variant="ghost" size="sm" className="h-8 px-2 text-xs">
+                <Download className="mr-1.5 h-3.5 w-3.5" />
+                <span>导出</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent>下载为 Markdown 文件</TooltipContent>
           </Tooltip>
         </TooltipProvider>
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={() => {
-                  setShowTranscribe(!showTranscribe)
-                }}
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2"
-              >
-                {/*<Download className="mr-1.5 h-4 w-4" />*/}
-                <span className="text-sm">原文参照</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>原文参照</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-        {setShowChat && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  onClick={() => setShowChat(showChat ? false : 'half')}
-                  variant={showChat ? 'default' : 'ghost'}
-                  size="sm"
-                  className="h-8 px-2"
-                >
-                  <MessageSquare className="mr-1.5 h-4 w-4" />
-                  <span className="text-sm">AI 问答</span>
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>基于笔记内容的 AI 问答</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
       </div>
     </div>
   )

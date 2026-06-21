@@ -1,20 +1,20 @@
 import React, { FC } from 'react'
 import {
   BookOpenText,
-  ArrowRight,
-  Bookmark,
+  ChevronRight,
+  Copy,
+  Download,
   FileText,
   MessageSquareText,
-  PanelLeft,
-  PanelRight,
   Plus,
-  ScrollText,
+  SearchCheck,
   Settings,
-  Sparkles,
+  ShieldCheck,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ScrollArea } from '@/components/ui/scroll-area.tsx'
 import { useTaskStore } from '@/store/taskStore'
+import type { TaskStatus } from '@/store/taskStore'
 import logo from '@/assets/icon.png'
 
 interface IProps {
@@ -22,7 +22,7 @@ interface IProps {
   Preview: React.ReactNode
 }
 
-type WorkspaceViewMode = 'preview' | 'map' | 'cards'
+type WorkspaceViewMode = 'verify' | 'preview' | 'map' | 'cards'
 type ChatMode = false | 'half' | 'full'
 
 function emitWorkspaceCommand(command: {
@@ -34,81 +34,99 @@ function emitWorkspaceCommand(command: {
   window.dispatchEvent(new CustomEvent('reelmind:workspace-command', { detail: command }))
 }
 
-function formatDate(value?: string) {
-  if (!value) return '尚未创建'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return '尚未创建'
-  return date
-    .toLocaleDateString('zh-CN', {
-      month: 'long',
-      day: 'numeric',
-    })
-    .replace(/\s/g, '')
+const STATUS_META: Record<string, { label: string; tone: string; dot: string }> = {
+  PENDING: { label: '排队中', tone: 'bg-slate-100 text-slate-600', dot: 'bg-slate-400' },
+  PARSING: { label: '解析输入', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  DOWNLOADING: { label: '抓取原文', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  TRANSCRIBING: { label: '转写中', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  SUMMARIZING: { label: '摘要中', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  FORMATTING: { label: '排版中', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  SAVING: { label: '保存中', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  EXTRACTING_CLAIMS: { label: '提取主张', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  SEARCHING_WEB: { label: '联网检索', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  FETCHING_SOURCES: { label: '抓取信源', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  EVALUATING_EVIDENCE: { label: '评估证据', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  WRITING_REPORT: { label: '生成报告', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  RUNNING: { label: '运行中', tone: 'bg-blue-50 text-blue-700', dot: 'bg-blue-500' },
+  SUCCESS: { label: '已完成', tone: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
+  FAILED: { label: '失败', tone: 'bg-red-50 text-red-700', dot: 'bg-red-500' },
 }
 
-const featureCards = [
-  {
-    title: '阅读笔记',
-    desc: '查看结构化 Markdown',
-    icon: BookOpenText,
-    tone: 'border-sky-200 bg-sky-50 text-sky-800',
-    command: { viewMode: 'preview' as const, chat: false as const },
-  },
-  {
-    title: 'AI 对话',
-    desc: '围绕当前视频追问',
-    icon: MessageSquareText,
-    tone: 'border-violet-200 bg-violet-50 text-violet-800',
-    command: { viewMode: 'preview' as const, chat: 'half' as const },
-  },
-]
+function statusMeta(status?: TaskStatus | string) {
+  return STATUS_META[status || 'PENDING'] || STATUS_META.PENDING
+}
 
-const utilityCards = [
-  {
-    title: '原文参照',
-    desc: '打开转写文本',
-    icon: ScrollText,
-    command: { viewMode: 'preview' as const, transcribe: 'toggle' as const },
-  },
-  {
-    title: '导出 Markdown',
-    desc: '保存当前版本',
-    icon: FileText,
-    command: { action: 'download' as const },
-  },
-]
+function formatTimestamp(value?: string) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function relativeTime(value?: string) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const diff = Date.now() - date.getTime()
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} 小时前`
+  const day = Math.floor(hr / 24)
+  if (day < 30) return `${day} 天前`
+  return formatTimestamp(value)
+}
+
+function shortId(id?: string) {
+  if (!id) return '—'
+  return id.length > 12 ? `${id.slice(0, 8)}…${id.slice(-4)}` : id
+}
 
 const HomeLayout: FC<IProps> = ({ NoteForm, Preview }) => {
   const currentTask = useTaskStore(state => state.getCurrentTask())
+  const tasks = useTaskStore(state => state.tasks)
+  const setCurrentTask = useTaskStore(state => state.setCurrentTask)
+
+  const status = currentTask?.status || 'PENDING'
+  const meta = statusMeta(status)
+  const verification = currentTask?.insights?.verification
+  const counts = verification?.claim_counts
+  const recentCases = tasks.slice(0, 6)
+  const isActive = !['SUCCESS', 'FAILED', undefined].includes(status as any)
 
   return (
-    <div className="h-screen overflow-hidden bg-[#f6f7f4] text-slate-900">
-      <div className="grid h-full grid-cols-[336px_minmax(0,1fr)_316px] gap-px bg-slate-200/80">
-        <aside className="flex min-h-0 flex-col bg-[#fbfbf8]">
-          <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 px-5">
-            <Link to="/" className="flex items-center gap-3">
-              <img src={logo} alt="Reel Mind" className="h-9 w-9 rounded-md" />
-              <div>
-                <div className="text-xl font-semibold leading-tight tracking-normal">Reel Mind</div>
-                <div className="text-xs text-slate-500">视频来源</div>
+    <div className="h-screen overflow-hidden bg-slate-100 text-slate-900">
+      <div className="grid h-full grid-cols-1 grid-rows-[auto_minmax(0,1fr)] gap-px bg-slate-200 lg:grid-cols-[320px_minmax(0,1fr)] lg:grid-rows-1 xl:grid-cols-[340px_minmax(0,1fr)_324px]">
+        {/* ───────── 左侧：核实输入 ───────── */}
+        <aside className="flex max-h-[46vh] min-h-0 flex-col bg-white lg:max-h-none">
+          <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 px-4">
+            <Link to="/" className="flex items-center gap-2.5">
+              <img src={logo} alt="Reel Mind" className="h-7 w-7 rounded-sm" />
+              <div className="leading-tight">
+                <div className="text-[15px] font-semibold tracking-tight">Reel Mind</div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-400">
+                  Verification Workbench
+                </div>
               </div>
             </Link>
             <Link
               to="/settings"
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-sm text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
               title="设置"
             >
               <Settings className="h-4 w-4" />
             </Link>
           </header>
 
-          <div className="border-b border-slate-200 px-5 py-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-700">
-              <PanelLeft className="h-4 w-4 text-primary" />
-              添加视频链接
+          <div className="shrink-0 border-b border-slate-200 bg-slate-50/60 px-4 py-3">
+            <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+              <SearchCheck className="h-3.5 w-3.5 text-slate-700" />
+              核实输入
             </div>
-            <p className="text-xs leading-5 text-slate-500">
-              粘贴抖音精选、B站或快手链接，生成后会进入中间工作区，并同步到主页笔记本库。
+            <p className="mt-1.5 text-xs leading-5 text-slate-500">
+              粘贴网页 URL 或待核实文本，系统将抓取原文、分级信源并生成可审计证据报告。
             </p>
           </div>
 
@@ -117,141 +135,227 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview }) => {
           </ScrollArea>
         </aside>
 
+        {/* ───────── 中间：核实工作区 ───────── */}
         <main className="flex min-h-0 flex-col bg-white">
-          <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 px-6">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                <Sparkles className="h-3.5 w-3.5" />
-                Workspace
+          <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-slate-200 px-5">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  联网核实
+                </div>
+                <h1 className="mt-0.5 truncate text-[15px] font-semibold tracking-tight text-slate-900">
+                  {currentTask?.audioMeta?.title || currentTask?.formData?.video_url || '新核实会话'}
+                </h1>
               </div>
-              <h1 className="mt-1 truncate text-lg font-semibold tracking-normal">
-                {currentTask?.audioMeta?.title || '新视频笔记'}
-              </h1>
+              {currentTask && (
+                <span
+                  className={`inline-flex shrink-0 items-center gap-1.5 rounded-sm px-2 py-0.5 text-[11px] font-medium ${meta.tone}`}
+                  title={status}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${meta.dot} ${isActive ? 'animate-pulse' : ''}`} />
+                  {meta.label}
+                </span>
+              )}
             </div>
-            <div className="flex items-center gap-2">
+
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                onClick={() => emitWorkspaceCommand({ viewMode: 'verify', chat: false })}
+                className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm bg-slate-900 px-3 text-xs font-semibold text-white transition hover:bg-slate-700"
+              >
+                <SearchCheck className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">核实报告</span>
+              </button>
+              <div className="mx-1 h-5 w-px bg-slate-200" />
               <button
                 type="button"
                 onClick={() => emitWorkspaceCommand({ viewMode: 'preview', chat: false })}
-                className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
               >
-                <BookOpenText className="h-4 w-4" />
-                笔记
+                <BookOpenText className="h-3.5 w-3.5" />
+                <span className="hidden xl:inline">Markdown</span>
               </button>
               <button
                 type="button"
                 onClick={() => emitWorkspaceCommand({ viewMode: 'preview', chat: 'full' })}
-                className="inline-flex h-9 cursor-pointer items-center gap-2 rounded-md bg-slate-950 px-3 text-sm font-medium text-white transition hover:bg-slate-800"
+                className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
               >
-                <MessageSquareText className="h-4 w-4" />
-                对话
+                <MessageSquareText className="h-3.5 w-3.5" />
+                <span className="hidden xl:inline">对话</span>
               </button>
             </div>
           </header>
           <section className="min-h-0 flex-1 overflow-hidden bg-white">{Preview}</section>
         </main>
 
-        <aside className="flex min-h-0 flex-col bg-[#fbfbf8]">
-          <header className="flex h-16 shrink-0 items-center justify-between border-b border-slate-200 px-5">
-            <div>
-              <div className="text-base font-semibold">功能卡片</div>
-              <div className="text-xs text-slate-500">{formatDate(currentTask?.createdAt)} · 当前笔记</div>
+        {/* ───────── 右侧：核实会话 / 审计 ───────── */}
+        <aside className="hidden min-h-0 flex-col bg-white xl:flex">
+          <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 px-4">
+            <div className="leading-tight">
+              <div className="text-[13px] font-semibold tracking-tight text-slate-800">核实会话</div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.14em] text-slate-400">
+                Case Audit
+              </div>
             </div>
-            <PanelRight className="h-4 w-4 text-slate-400" />
+            <button
+              type="button"
+              onClick={() => setCurrentTask(null)}
+              className="inline-flex h-7 cursor-pointer items-center gap-1 rounded-sm border border-slate-200 px-2 text-[11px] font-medium text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+              title="清空当前会话并回到新核实"
+            >
+              <Plus className="h-3 w-3" />
+              新建
+            </button>
           </header>
 
-          <div className="flex min-h-0 flex-1 flex-col gap-6 p-4">
-              <section className="shrink-0">
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-slate-800">工作模式</h2>
-                  <span className="text-xs text-slate-400">切换中间区</span>
+          <ScrollArea className="min-h-0 flex-1">
+            <div className="flex flex-col gap-4 p-4">
+              {/* 当前会话元数据 */}
+              <section>
+                <div className="mb-2 flex items-center justify-between">
+                  <h2 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    当前会话
+                  </h2>
+                  {currentTask && (
+                    <span className={`inline-flex items-center gap-1 rounded-sm px-1.5 py-0.5 text-[10px] font-medium ${meta.tone}`}>
+                      <span className={`h-1.5 w-1.5 rounded-full ${meta.dot}`} />
+                      {meta.label}
+                    </span>
+                  )}
                 </div>
-                <div className="grid gap-3">
-                  {featureCards.map(card => {
-                    const Icon = card.icon
-                    return (
-                      <button
-                        key={card.title}
-                        type="button"
-                        onClick={() => emitWorkspaceCommand(card.command)}
-                        className={`group flex min-h-20 cursor-pointer items-center gap-3 rounded-lg border px-3 py-3 text-left transition hover:-translate-y-0.5 hover:shadow-sm ${card.tone}`}
-                      >
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-white/80">
-                          <Icon className="h-5 w-5" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-semibold">{card.title}</span>
-                          <span className="mt-1 block truncate text-xs opacity-75">{card.desc}</span>
-                        </span>
-                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/70 opacity-70 transition group-hover:translate-x-0.5 group-hover:opacity-100">
-                          <ArrowRight className="h-3.5 w-3.5" />
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
+
+                {currentTask ? (
+                  <dl className="divide-y divide-slate-100 rounded-sm border border-slate-200 bg-white text-xs">
+                    <MetaRow label="会话 ID" value={<span className="font-mono text-[11px] text-slate-700">{shortId(currentTask.id)}</span>} />
+                    <MetaRow label="创建时间" value={<span className="font-mono text-[11px] text-slate-700">{formatTimestamp(currentTask.createdAt)}</span>} />
+                    <MetaRow label="输入类型" value={<span className="text-slate-700">{currentTask.formData?.input_mode === 'url' ? '网页 URL' : '文本'}</span>} />
+                    <MetaRow label="核验模型" value={<span className="truncate text-slate-700">{currentTask.formData?.model_name || '—'}</span>} />
+                    <MetaRow label="核验深度" value={<span className="text-slate-700">{currentTask.formData?.verification_depth === 'deep' ? '深度' : '标准'}</span>} />
+                    <MetaRow label="信源策略" value={<span className="text-slate-700">{currentTask.formData?.source_policy === 'authoritative' ? '权威优先' : '—'}</span>} />
+                  </dl>
+                ) : (
+                  <div className="rounded-sm border border-dashed border-slate-200 bg-slate-50/60 px-3 py-4 text-center text-xs text-slate-400">
+                    尚无活动会话
+                  </div>
+                )}
               </section>
 
-              <section className="shrink-0">
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-slate-800">辅助操作</h2>
-                  <button
-                    type="button"
-                    onClick={() => emitWorkspaceCommand({ action: 'copy' })}
-                    className="cursor-pointer text-xs font-medium text-primary hover:text-primary/80"
-                  >
-                    复制
-                  </button>
-                </div>
-                <div className="grid gap-2">
-                  {utilityCards.map(card => {
-                    const Icon = card.icon
-                    return (
-                      <button
-                        key={card.title}
-                        type="button"
-                        onClick={() => emitWorkspaceCommand(card.command)}
-                        className="flex cursor-pointer items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50"
-                      >
-                        <Icon className="h-4 w-4 text-slate-600" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-sm font-medium text-slate-800">{card.title}</span>
-                          <span className="block truncate text-xs text-slate-500">{card.desc}</span>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </section>
+              {/* 核实结论概览 */}
+              {verification && (
+                <section>
+                  <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                    结论概览
+                  </h2>
+                  <div className="rounded-sm border border-slate-200 bg-white">
+                    <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+                      <span className="text-[11px] text-slate-500">总体判定</span>
+                      <span className="text-xs font-semibold text-slate-900">{verification.overall?.status || '—'}</span>
+                    </div>
+                    <div className="grid grid-cols-3 divide-x divide-slate-100">
+                      <TallyCell label="主张" value={counts?.total ?? verification.claims.length} tone="text-slate-900" />
+                      <TallyCell label="支持" value={counts?.online_supported ?? 0} tone="text-emerald-700" />
+                      <TallyCell label="反证" value={counts?.online_refuted ?? 0} tone="text-red-700" />
+                    </div>
+                    <div className="grid grid-cols-2 divide-x divide-slate-100 border-t border-slate-100">
+                      <TallyCell label="已联网" value={counts?.online_checked ?? 0} tone="text-slate-900" />
+                      <TallyCell label="风险旗标" value={verification.risk_flags?.length ?? 0} tone="text-amber-700" />
+                    </div>
+                  </div>
+                </section>
+              )}
 
-              <section className="shrink-0">
-                <Link
-                  to="/"
-                  className="group flex min-h-20 items-center gap-3 rounded-lg border border-slate-200 bg-white px-3 py-3 text-left transition hover:border-slate-300 hover:bg-slate-50 hover:shadow-sm"
-                >
-                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-slate-100 text-slate-700">
-                    <Bookmark className="h-5 w-5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-semibold text-slate-800">我的收藏</span>
-                    <span className="mt-1 block truncate text-xs text-slate-500">打开完整收藏库</span>
-                  </span>
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-500 transition group-hover:translate-x-0.5 group-hover:text-slate-800">
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </span>
-                </Link>
+              {/* 最近会话 */}
+              <section>
+                <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  最近会话
+                </h2>
+                {recentCases.length === 0 ? (
+                  <div className="rounded-sm border border-dashed border-slate-200 bg-slate-50/60 px-3 py-4 text-center text-xs text-slate-400">
+                    暂无历史会话
+                  </div>
+                ) : (
+                  <ul className="divide-y divide-slate-100 rounded-sm border border-slate-200 bg-white">
+                    {recentCases.map(task => {
+                      const m = statusMeta(task.status)
+                      const active = task.id === currentTask?.id
+                      const title = task.audioMeta?.title || task.formData?.video_url || '未命名会话'
+                      return (
+                        <li key={task.id}>
+                          <button
+                            type="button"
+                            onClick={() => setCurrentTask(task.id)}
+                            className={`flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left transition hover:bg-slate-50 ${active ? 'bg-slate-50' : ''}`}
+                          >
+                            <span className={`mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full ${m.dot}`} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-xs font-medium text-slate-800">{title}</span>
+                              <span className="mt-0.5 block font-mono text-[10px] text-slate-400">
+                                {shortId(task.id)} · {relativeTime(task.createdAt)}
+                              </span>
+                            </span>
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                )}
               </section>
+            </div>
+          </ScrollArea>
 
+          {/* 底部辅助操作 */}
+          <footer className="shrink-0 border-t border-slate-200 px-3 py-2.5">
+            <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => useTaskStore.getState().setCurrentTask(null)}
-                className="flex h-11 w-full shrink-0 cursor-pointer items-center justify-center gap-2 rounded-lg bg-slate-950 text-sm font-semibold text-white transition hover:bg-slate-800"
+                onClick={() => emitWorkspaceCommand({ action: 'copy' })}
+                className="inline-flex h-8 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-sm text-[11px] font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
               >
-                <Plus className="h-4 w-4" />
-                新视频笔记
+                <Copy className="h-3.5 w-3.5" />
+                复制
               </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => emitWorkspaceCommand({ action: 'download' })}
+                className="inline-flex h-8 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-sm text-[11px] font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+              >
+                <Download className="h-3.5 w-3.5" />
+                导出
+              </button>
+              <button
+                type="button"
+                onClick={() => emitWorkspaceCommand({ viewMode: 'preview', transcribe: 'toggle' })}
+                className="inline-flex h-8 flex-1 cursor-pointer items-center justify-center gap-1.5 rounded-sm text-[11px] font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+                title="原文参照"
+              >
+                <FileText className="h-3.5 w-3.5" />
+                原文
+              </button>
+            </div>
+          </footer>
         </aside>
       </div>
+    </div>
+  )
+}
+
+function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-3 py-2">
+      <dt className="shrink-0 text-[11px] text-slate-500">{label}</dt>
+      <dd className="min-w-0 truncate text-right">{value}</dd>
+    </div>
+  )
+}
+
+function TallyCell({ label, value, tone }: { label: string; value: number; tone: string }) {
+  return (
+    <div className="px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wide text-slate-400">{label}</div>
+      <div className={`mt-0.5 font-mono text-base font-semibold tabular-nums ${tone}`}>{value}</div>
     </div>
   )
 }

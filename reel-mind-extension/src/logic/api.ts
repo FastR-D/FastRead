@@ -8,6 +8,7 @@ import type {
   TranscriberConfig,
   TranscriberModelsStatus,
   TranscriberType,
+  VerificationTaskCreated,
   WhisperModelSize,
 } from './types'
 import { settings } from './storage'
@@ -30,6 +31,10 @@ function normalizeBackendUrl(url: string): string {
 
 function configuredBackendUrl(): string {
   return normalizeBackendUrl(settings.value?.backendUrl || DEFAULT_BACKEND_URL)
+}
+
+export function getConfiguredBackendUrl(): string {
+  return configuredBackendUrl()
 }
 
 function backendCandidates(): string[] {
@@ -83,6 +88,27 @@ export async function getDownloaderCookie(platform: string): Promise<string | nu
 
 export async function getDownloaderCookieStatus(platform: string): Promise<DownloaderCookieStatus> {
   return request<DownloaderCookieStatus>(`/api/downloader_cookie_status/${platform}`)
+}
+
+export async function createVerificationTask(payload: {
+  text?: string
+  url?: string
+  max_claims?: number
+  verification_depth?: string
+  source_policy?: string
+  model_name?: string
+  provider_id?: string
+}): Promise<VerificationTaskCreated> {
+  return request<VerificationTaskCreated>('/api/verification_tasks', {
+    method: 'POST',
+    body: JSON.stringify({
+      goal: 'verify',
+      verification_depth: 'deep',
+      source_policy: 'authoritative',
+      max_claims: 50,
+      ...payload,
+    }),
+  })
 }
 
 export async function getProviders(): Promise<Provider[]> {
@@ -224,14 +250,14 @@ export function resolveImageUrl(url?: string | null): string {
 }
 
 export function absolutizeMarkdownImages(markdown: string): string {
-  return markdown.replace(/!\[([^\]]*)\]\((?!https?:\/\/|data:)([^)]+)\)/gi, (_match, alt: string, url: string) => {
+  return markdown.replace(/!\[([^\]]*)\]\((?!https?:\/\/|data:)([^)]+)\)/g, (_match, alt: string, url: string) => {
     return `![${alt}](${resolveImageUrl(url.trim())})`
   })
 }
 
 export function stripSourceLink(markdown: string): string {
   return markdown
-    .replace(/^\s*来源链接[:：].*$/gim, '')
+    .replace(/^\s*来源链接[:：].*$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
 }
 

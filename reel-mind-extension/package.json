@@ -1,10 +1,10 @@
 {
   "name": "reel-mind-extension",
-  "displayName": "Reel Mind Cookie Sync",
+  "displayName": "ReelMind Verification",
   "version": "0.1.0",
   "private": true,
   "packageManager": "npm@11.12.1",
-  "description": "Capture Douyin cookies and sync them to the local Reel Mind backend.",
+  "description": "Start ReelMind online verification tasks from the current page or selected text.",
   "scripts": {
     "dev": "npm run clear && cross-env NODE_ENV=development run-p dev:prepare dev:web",
     "dev-firefox": "npm run clear && cross-env NODE_ENV=development EXTENSION=firefox run-p dev:prepare dev:web",

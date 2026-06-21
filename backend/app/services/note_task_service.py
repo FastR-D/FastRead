@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from datetime import datetime
 import time
+import uuid
 from typing import Callable, Optional, Protocol
 
 from app.db.video_task_dao import (
@@ -22,6 +23,10 @@ from app.services.insight_extractor import build_insights
 from app.services.note import NoteGenerator
 from app.services.online_verifier import verify_claims_online
 from app.services.task_serial_executor import task_serial_executor
+from app.services.verification import claim_pipeline
+from app.services.verification import fetching as verification_fetching
+from app.services.verification import pipeline as verification_pipeline
+from app.services.verification.schemas import utc_now_iso
 from app.utils.logger import get_logger
 from app.utils.url_parser import extract_video_id
 
@@ -37,6 +42,17 @@ class VectorStoreLifecycle(Protocol):
 
 
 VectorStoreFactory = Callable[[], VectorStoreLifecycle]
+
+
+class ArtifactVerificationCache:
+    def __init__(self, artifacts: NoteArtifactRepository):
+        self.artifacts = artifacts
+
+    def read(self, kind: str, key: str) -> dict | None:
+        return self.artifacts.read_verification_cache(kind, key)
+
+    def write(self, kind: str, key: str, payload: dict) -> None:
+        self.artifacts.write_verification_cache(kind, key, payload)
 
 
 def _default_vector_store_factory() -> VectorStoreLifecycle:
@@ -213,10 +229,180 @@ class NoteTaskService:
             model_name=model_name,
             provider_id=provider_id,
             context=self.build_verification_context(result),
+            stage_callback=self._verification_stage_writer(task_id),
+            cache=self._verification_cache(),
+            enable_geo_compare=True,
         )
         result["insights"] = insights
+        self._attach_verification_artifact_refs(task_id, result)
         self.artifacts.write_result(task_id, result)
         return {"ok": True, "data": {"task_id": task_id, "insights": insights}}
+
+    def create_verification_task(
+        self,
+        *,
+        text: str = "",
+        url: str = "",
+        source_task_id: str | None = None,
+        max_claims: int = 50,
+        verification_depth: str = "deep",
+        source_policy: str = "authoritative",
+        model_name: str | None = None,
+        provider_id: str | None = None,
+    ) -> dict:
+        task_id = str(uuid.uuid4())
+        input_payload = {
+            "goal": "verify",
+            "input_mode": "url" if url else "text",
+            "text": text,
+            "url": url,
+            "source_task_id": source_task_id or "",
+            "verification_depth": verification_depth or "deep",
+            "source_policy": source_policy or "authoritative",
+            "max_claims": max(1, min(int(max_claims or 50), 50)),
+            "model_name": model_name or "",
+            "provider_id": provider_id or "",
+        }
+        self.update_status(task_id, TaskStatus.EXTRACTING_CLAIMS, "解析输入并提取可核验主张")
+        result = {
+            "verification_task": True,
+            "markdown": "",
+            "transcript": {"full_text": text or "", "segments": [], "language": "zh"},
+            "audio_meta": {"title": "联网核实任务", "platform": "verification", "raw_info": {"url": url}},
+            "verification_input": input_payload,
+            "insights": {
+                "version": 2,
+                "cards": [],
+                "scores": {},
+                "verification": self._build_verification_seed(
+                    text=text,
+                    url=url,
+                    max_claims=input_payload["max_claims"],
+                ),
+            },
+        }
+        self.artifacts.write_result(task_id, result)
+        return {"task_id": task_id, "status": TaskStatus.EXTRACTING_CLAIMS.value, "input": input_payload}
+
+    def execute_verification_task(
+        self,
+        task_id: str,
+        retry_failed_only: bool = False,
+        rerun_claim_ids: set[str] | None = None,
+        rerun_claim_texts: set[str] | None = None,
+    ) -> None:
+        result = self.artifacts.read_result(task_id)
+        if not result:
+            self.update_status(task_id, TaskStatus.FAILED, "核验任务不存在")
+            return
+        input_payload = result.get("verification_input") or {}
+        rerun_claim_ids = set(rerun_claim_ids or set())
+        rerun_claim_texts = {str(text) for text in (rerun_claim_texts or set()) if str(text)}
+        input_source_audit = None
+        try:
+            text = input_payload.get("text") or ""
+            url = input_payload.get("url") or ""
+            if url and not text:
+                self.update_status(task_id, TaskStatus.FETCHING_SOURCES, "抓取待核实页面正文")
+                snapshot = verification_fetching.fetch_source_snapshot(url, {"title": url})
+                input_source_audit = self._input_source_audit(url, snapshot)
+                text = snapshot.get("text") or url
+                result["transcript"] = {"full_text": text, "segments": [], "language": "zh"}
+
+            if input_payload.get("source_task_id"):
+                source_result = self.artifacts.read_result(input_payload["source_task_id"])
+                if source_result:
+                    text = self.build_verification_context(source_result)
+                    result["source_result"] = {"task_id": input_payload["source_task_id"]}
+
+            self.update_status(task_id, TaskStatus.SEARCHING_WEB, "多策略联网检索")
+            insights = result.setdefault("insights", {})
+            verification = insights.get("verification") or self._build_verification_seed(
+                text=text,
+                url=url,
+                max_claims=input_payload.get("max_claims", 50),
+            )
+            reusable_results = (
+                self._reusable_verification_claim_results(
+                    task_id,
+                    verification,
+                    max_claims=input_payload.get("max_claims", 50),
+                    exclude_claim_ids=rerun_claim_ids,
+                    exclude_claim_texts=rerun_claim_texts,
+                )
+                if retry_failed_only
+                else {}
+            )
+            insights["verification"] = verify_claims_online(
+                verification,
+                max_claims=input_payload.get("max_claims", 50),
+                model_name=input_payload.get("model_name") or None,
+                provider_id=input_payload.get("provider_id") or None,
+                context=text,
+                stage_callback=self._verification_stage_writer(task_id),
+                reuse_claim_results=reusable_results,
+                cache=self._verification_cache(),
+                enable_geo_compare=(input_payload.get("verification_depth") or "deep") == "deep",
+            )
+            self.update_status(task_id, TaskStatus.WRITING_REPORT, "写入可审计核验报告")
+            result["insights"] = insights
+            result["verification_result"] = insights["verification"].get("result")
+            if input_source_audit and result["verification_result"]:
+                result["verification_result"].setdefault("audit", {})["input_source"] = input_source_audit
+            self._attach_verification_artifact_refs(task_id, result)
+            self.artifacts.write_result(task_id, result)
+            self.update_status(task_id, TaskStatus.SUCCESS, "联网核实完成")
+        except Exception as exc:
+            logger.error(f"联网核实任务失败 (task_id={task_id}): {exc}", exc_info=True)
+            result = result or {}
+            result["verification_error"] = str(exc)
+            self.artifacts.write_result(task_id, result)
+            self.update_status(task_id, TaskStatus.FAILED, f"联网核实失败: {exc}")
+
+    def rerun_verification_task(self, task_id: str, retry_failed_only: bool = True) -> dict:
+        if not self.artifacts.read_result(task_id):
+            return {"ok": False, "code": 404, "message": "核验任务不存在"}
+        self.execute_verification_task(task_id, retry_failed_only=retry_failed_only)
+        return {"ok": True, "data": self.get_verification_task(task_id)}
+
+    def rerun_verification_claim(self, task_id: str, claim_id: str) -> dict:
+        result = self.artifacts.read_result(task_id)
+        if not result:
+            return {"ok": False, "code": 404, "message": "核验任务不存在"}
+
+        input_payload = result.get("verification_input") or {}
+        verification = ((result.get("insights") or {}).get("verification") or {})
+        target_claim_text = self._verification_claim_text_for_id(
+            task_id,
+            verification,
+            claim_id,
+            max_claims=input_payload.get("max_claims", 50),
+        )
+        if not target_claim_text:
+            return {"ok": False, "code": 404, "message": "核验主张不存在"}
+
+        self.execute_verification_task(
+            task_id,
+            retry_failed_only=True,
+            rerun_claim_ids={claim_id},
+            rerun_claim_texts={target_claim_text},
+        )
+        return {"ok": True, "data": self.get_verification_task(task_id)}
+
+    def get_verification_task(self, task_id: str) -> dict:
+        return self.get_task_status(task_id)
+
+    def list_verification_tasks(self) -> list[dict]:
+        tasks = []
+        if not self.artifacts.output_dir_exists():
+            return tasks
+        for result_file in self.artifacts.iter_result_files():
+            result = self.artifacts.read_result(result_file.task_id)
+            if not result or not result.get("verification_task"):
+                continue
+            tasks.append(self._build_file_task_snapshot(result_file.task_id, result, result_file.modified_at).to_list_payload())
+        tasks.sort(key=lambda item: item.get("updatedAt") or item.get("createdAt") or 0, reverse=True)
+        return tasks
 
     def list_tasks(self) -> list[dict]:
         db_tasks = list_video_tasks()
@@ -242,6 +428,233 @@ class NoteTaskService:
 
         snapshots.sort(key=lambda item: item.created_at, reverse=True)
         return [snapshot.to_list_payload() for snapshot in snapshots]
+
+    def _verification_stage_writer(self, task_id: str):
+        def _write(event: dict) -> None:
+            self._write_verification_stage(task_id, event)
+
+        return _write
+
+    def _verification_cache(self) -> ArtifactVerificationCache:
+        return ArtifactVerificationCache(self.artifacts)
+
+    @staticmethod
+    def _input_source_audit(original_url: str, snapshot: dict) -> dict:
+        text = snapshot.get("text") or ""
+        return {
+            "input_mode": "url",
+            "requested_url": original_url,
+            "fetched_url": snapshot.get("url") or original_url,
+            "canonical_url": snapshot.get("canonical_url") or "",
+            "title": snapshot.get("title") or "",
+            "publisher": snapshot.get("publisher") or "",
+            "author": snapshot.get("author") or "",
+            "published_at": snapshot.get("published_at") or "",
+            "retrieved_at": snapshot.get("retrieved_at") or "",
+            "fetch_status": snapshot.get("fetch_status") or "",
+            "source_type": snapshot.get("source_type") or "",
+            "redirect_chain": snapshot.get("redirect_chain") or [],
+            "text_chars": len(text),
+            "error": snapshot.get("error") or "",
+        }
+
+    def _write_verification_stage(self, task_id: str, event: dict) -> None:
+        claim_id = event.get("claim_id")
+        if not claim_id:
+            return
+
+        now = utc_now_iso()
+        artifact = self.artifacts.read_verification_claim_artifact(task_id, claim_id) or {
+            "task_id": task_id,
+            "claim_id": claim_id,
+            "created_at": now,
+            "stages": [],
+            "fetches": [],
+        }
+        artifact["updated_at"] = now
+
+        stage = event.get("stage") or "unknown"
+        artifact["stages"].append({
+            "stage": stage,
+            "recorded_at": now,
+            "raw_result_count": event.get("raw_result_count"),
+            "fetch_status": event.get("fetch_status"),
+            "evidence_added": event.get("evidence_added"),
+            "search_error": event.get("search_error"),
+            "cache_hit": event.get("cache_hit"),
+            "cache_key": event.get("cache_key"),
+        })
+
+        if stage == "claim_started":
+            artifact.update({
+                "status": "running",
+                "atomic_claim": event.get("atomic_claim") or "",
+                "claim_facts": event.get("claim_facts") or {},
+                "queries": event.get("queries") or [],
+                "context_chars": event.get("context_chars", 0),
+            })
+        elif stage == "search_completed":
+            artifact["status"] = "search_completed" if not event.get("search_error") else "search_failed"
+            artifact["search"] = {
+                "queries": event.get("queries") or [],
+                "search_providers": event.get("search_providers") or [],
+                "raw_result_count": event.get("raw_result_count", 0),
+                "search_error": event.get("search_error") or "",
+                "raw_results": event.get("raw_results") or [],
+                "cache_hit": bool(event.get("cache_hit")),
+                "cache_key": event.get("cache_key") or "",
+            }
+        elif stage == "source_fetched":
+            source = event.get("source") or {}
+            artifact["fetches"].append({
+                "url": event.get("url") or source.get("url") or "",
+                "canonical_url": source.get("canonical_url") or "",
+                "domain": source.get("domain") or "",
+                "trust_tier": source.get("trust_tier") or "",
+                "fetch_status": event.get("fetch_status") or source.get("fetch_status") or "",
+                "content_hash": event.get("content_hash") or source.get("content_hash") or "",
+                "evidence_added": event.get("evidence_added", 0),
+                "snapshot_cache_hit": bool(event.get("cache_hit")),
+                "snapshot_cache_key": event.get("cache_key") or "",
+                "evidence_cache_hit": bool(event.get("evidence_cache_hit")),
+                "evidence_cache_key": event.get("evidence_cache_key") or "",
+                "recorded_at": now,
+            })
+            artifact["status"] = "fetching_sources"
+        elif stage == "claim_completed":
+            claim_result = event.get("result") or {}
+            source_ids = [source.get("source_id") for source in claim_result.get("sources", []) if source.get("source_id")]
+            evidence_ids = [
+                item.get("evidence_id")
+                for item in claim_result.get("evidence", [])
+                if item.get("evidence_id")
+            ]
+            artifact["status"] = "completed"
+            artifact["verdict"] = claim_result.get("verdict") or ""
+            artifact["confidence"] = claim_result.get("confidence", 0)
+            artifact["risk_flags"] = claim_result.get("risk_flags") or []
+            artifact["audit_ids"] = {
+                "claim_id": claim_result.get("claim_id") or claim_id,
+                "source_ids": source_ids,
+                "evidence_ids": evidence_ids,
+            }
+            artifact["result"] = claim_result
+
+        self.artifacts.write_verification_claim_artifact(task_id, claim_id, artifact)
+
+    def _reusable_verification_claim_results(
+        self,
+        task_id: str,
+        verification: dict,
+        max_claims: int = 50,
+        exclude_claim_ids: set[str] | None = None,
+        exclude_claim_texts: set[str] | None = None,
+    ) -> dict[str, dict]:
+        reusable = {}
+        exclude_claim_ids = set(exclude_claim_ids or set())
+        exclude_claim_texts = {str(text) for text in (exclude_claim_texts or set()) if str(text)}
+        selected = claim_pipeline.sort_claims_by_verification_risk(
+            list(verification.get("claims") or []),
+            max(1, min(int(max_claims or 50), 50)),
+        )
+        for index, claim in enumerate(selected):
+            claim_text = claim.get("claim") or claim.get("text") or ""
+            if not claim_text:
+                continue
+            if claim_text in exclude_claim_texts:
+                continue
+            candidate_ids = self._verification_claim_candidate_ids(claim, claim_text, index)
+            if any(candidate_id in exclude_claim_ids for candidate_id in candidate_ids):
+                continue
+            artifact = self._completed_claim_artifact_for_candidates(task_id, claim_text, candidate_ids)
+            if artifact.get("status") != "completed":
+                continue
+            result = artifact.get("result") or {}
+            if not result:
+                continue
+            reusable[claim_text] = result
+        return reusable
+
+    def _verification_claim_candidate_ids(self, claim: dict, claim_text: str, index: int) -> list[str]:
+        candidates = [
+            ((claim.get("online") or {}).get("claim_id") or ""),
+            claim.get("claim_id") or "",
+            verification_pipeline.claim_id_for(claim_text, index),
+        ]
+        ordered = []
+        for candidate in candidates:
+            if candidate and candidate not in ordered:
+                ordered.append(candidate)
+        return ordered
+
+    def _completed_claim_artifact_for_candidates(
+        self,
+        task_id: str,
+        claim_text: str,
+        candidate_ids: list[str],
+    ) -> dict:
+        for candidate_id in candidate_ids:
+            artifact = self.artifacts.read_verification_claim_artifact(task_id, candidate_id) or {}
+            if artifact.get("status") != "completed":
+                continue
+            artifact_claim = artifact.get("atomic_claim") or (artifact.get("result") or {}).get("atomic_claim") or ""
+            if artifact_claim and artifact_claim != claim_text:
+                continue
+            return artifact
+        return {}
+
+    def _verification_claim_text_for_id(
+        self,
+        task_id: str,
+        verification: dict,
+        claim_id: str,
+        max_claims: int = 50,
+    ) -> str:
+        selected = claim_pipeline.sort_claims_by_verification_risk(
+            list(verification.get("claims") or []),
+            max(1, min(int(max_claims or 50), 50)),
+        )
+        artifact = self.artifacts.read_verification_claim_artifact(task_id, claim_id) or {}
+        artifact_claim = artifact.get("atomic_claim") or (artifact.get("result") or {}).get("atomic_claim") or ""
+        for index, claim in enumerate(selected):
+            claim_text = claim.get("claim") or claim.get("text") or ""
+            if not claim_text:
+                continue
+            if claim_id in self._verification_claim_candidate_ids(claim, claim_text, index):
+                return claim_text
+            if artifact_claim and artifact_claim == claim_text:
+                return claim_text
+        return ""
+
+    def _verification_has_claim_id(self, verification: dict, claim_id: str, max_claims: int = 50) -> bool:
+        selected = claim_pipeline.sort_claims_by_verification_risk(
+            list(verification.get("claims") or []),
+            max(1, min(int(max_claims or 50), 50)),
+        )
+        for index, claim in enumerate(selected):
+            claim_text = claim.get("claim") or claim.get("text") or ""
+            if claim_text and verification_pipeline.claim_id_for(claim_text, index) == claim_id:
+                return True
+        return False
+
+    def _attach_verification_artifact_refs(self, task_id: str, result: dict) -> None:
+        verification = (result.get("insights") or {}).get("verification") or {}
+        claims = verification.get("claims") or []
+        for claim in claims:
+            online = claim.get("online") or {}
+            claim_id = online.get("claim_id")
+            if not claim_id:
+                continue
+            artifact_path = str(self.artifacts.verification_claim_path(task_id, claim_id))
+            online["claim_artifact_path"] = artifact_path
+            audit = online.setdefault("audit", {})
+            audit["claim_artifact_path"] = artifact_path
+            claim["online"] = online
+
+        report = verification.get("result") or result.get("verification_result") or {}
+        if report:
+            report.setdefault("audit", {})["artifact_root"] = str(self.artifacts.verification_task_dir(task_id))
+            result["verification_result"] = report
 
     def get_task_status(self, task_id: str) -> dict:
         status_content = self.artifacts.read_status(task_id)
@@ -308,6 +721,45 @@ class NoteTaskService:
         except Exception as exc:
             logger.warning(f"生成历史笔记洞察失败: {exc}")
             return None
+
+    def _build_verification_seed(self, *, text: str, url: str = "", max_claims: int = 50) -> dict:
+        atomic_claims = claim_pipeline.split_atomic_claims(text or url, max_claims=max_claims)
+        claims = []
+        for index, claim_text in enumerate(atomic_claims):
+            facts = claim_pipeline.extract_claim_facts(claim_text)
+            risk_level = "high" if facts.risk_topics else "medium"
+            claims.append({
+                "claim": claim_text,
+                "type": facts.domain_type,
+                "type_label": facts.domain_type,
+                "risk_level": risk_level,
+                "risk_topics": facts.risk_topics,
+                "verdict": "等待联网核实",
+                "confidence": 0,
+                "reason": "已提取主张，等待联网检索、正文抓取和交叉判定。",
+                "evidence_hint": "",
+                "priority": 100 - index,
+            })
+        return {
+            "version": 2,
+            "external_check": False,
+            "overall": {
+                "status": "等待联网核实",
+                "score": 0,
+                "summary": f"已提取 {len(claims)} 条可核验主张。",
+                "note": "搜索摘要只作为召回线索；最终结论必须来自正文证据、信源分级和独立性交叉判定。",
+            },
+            "claim_counts": {
+                "total": len(claims),
+                "needs_review": len(claims),
+                "high_risk": sum(1 for claim in claims if claim["risk_level"] == "high"),
+                "medium_risk": sum(1 for claim in claims if claim["risk_level"] == "medium"),
+            },
+            "claims": claims,
+            "sources": [],
+            "evidence": [],
+            "risk_flags": [],
+        }
 
     @staticmethod
     def parse_collection_tags(raw) -> list[str]:

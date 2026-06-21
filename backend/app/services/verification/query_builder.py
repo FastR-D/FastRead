@@ -168,3 +168,22 @@ def build_search_queries(claim: str) -> list[str]:
         if query and query not in deduped:
             deduped.append(query)
     return deduped[:4]
+
+
+def build_geo_language_queries(claim: str) -> dict[str, list[str]]:
+    text = clean_claim_text(claim)
+    primary = build_search_query(text)
+    if not primary:
+        return {}
+    variants = {
+        "zh_cn": [f"{primary} 中国 官方", f"{primary} 中文"],
+        "en_global": [f"{primary} official source", f"{primary} English"],
+    }
+    lower = text.lower()
+    if any(hint in lower for hint in ("who", "iarc", "jecfa", "aspartame", "阿斯巴甜", "世卫", "世界卫生组织")):
+        variants["en_global"].insert(0, f"{primary} WHO IARC JECFA")
+        variants["zh_cn"].insert(0, f"{primary} 世界卫生组织 IARC JECFA")
+    return {
+        key: [re.sub(r"\s+", " ", query).strip() for query in queries if query.strip()][:3]
+        for key, queries in variants.items()
+    }

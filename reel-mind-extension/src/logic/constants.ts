@@ -1,7 +1,8 @@
 import type { Settings } from './types'
 
-export const DEFAULT_BACKEND_URL = 'http://127.0.0.1:3015'
+export const DEFAULT_BACKEND_URL = 'http://127.0.0.1:8483'
 export const BACKEND_CANDIDATES = [
+  'http://127.0.0.1:8483',
   'http://127.0.0.1:3015',
 ]
 
@@ -18,7 +19,8 @@ export const DEFAULT_SETTINGS: Settings = {
   grid_size: [2, 2],
 }
 
-export const SETTINGS_KEY = 'reel-mind-cookie-sync-settings'
-export const LEGACY_SETTINGS_KEY = 'bilinote-cookie-sync-settings'
+export const SETTINGS_KEY = 'reelmind-verification-settings'
+export const LEGACY_SETTINGS_KEY = 'reel-mind-cookie-sync-settings'
+export const BILINOTE_SETTINGS_KEY = 'bilinote-cookie-sync-settings'
 export const TASKS_KEY = 'reel-mind-tasks'
 export const MAX_TASKS = 50

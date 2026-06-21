@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
-import { delete_task, generateNote, list_generated_tasks, update_task_collection } from '@/services/note.ts'
+import {
+  delete_task,
+  generateNote,
+  list_generated_tasks,
+  rerun_verification_task,
+  update_task_collection,
+} from '@/services/note.ts'
 import { v4 as uuidv4 } from 'uuid'
 import toast from 'react-hot-toast'
 import { get, set, del } from 'idb-keyval'
@@ -13,6 +19,11 @@ export type TaskStatus =
   | 'SUMMARIZING'
   | 'FORMATTING'
   | 'SAVING'
+  | 'EXTRACTING_CLAIMS'
+  | 'SEARCHING_WEB'
+  | 'FETCHING_SOURCES'
+  | 'EVALUATING_EVIDENCE'
+  | 'WRITING_REPORT'
   | 'RUNNING'
   | 'SUCCESS'
   | 'FAILED'
@@ -79,8 +90,11 @@ export interface VerificationClaim {
   reason: string
   evidence_hint: string
   online?: {
+    claim_id?: string
     checked: boolean
     query: string
+    queries?: string[]
+    status?: string
     verdict: string
     reason: string
     confidence: number
@@ -88,16 +102,51 @@ export interface VerificationClaim {
       coverage: number
       trusted_count: number
       top_overlap: number
+      support?: number
+      refute?: number
+      context?: number
+      high_support_independent?: number
+      high_refute_independent?: number
+      independent_authoritative_sources?: number
     }
     sources: Array<{
+      source_id?: string
       title: string
       url: string
+      canonical_url?: string
       domain: string
+      publisher?: string
+      author?: string
+      published_at?: string
+      retrieved_at?: string
+      source_type?: string
+      trust_tier?: 'A' | 'B' | 'C' | 'D' | 'blocked'
+      trust_reasons?: string[]
+      independence_group?: string
+      content_hash?: string
+      redirect_chain?: string[]
+      fetch_status?: string
       snippet: string
       trusted: boolean
+      risk_flags?: string[]
     }>
+    evidence?: Array<{
+      evidence_id?: string
+      source_url: string
+      passage: string
+      stance: 'support' | 'refute' | 'context'
+      claim_element?: string
+      exact_value?: string
+      unit?: string
+      page_offsets?: { start?: number; end?: number; page_start?: number; page_end?: number }
+      confidence?: number
+      extraction_method?: string
+    }>
+    risk_flags?: string[]
+    audit?: Record<string, any>
   }
   priority?: number
+  machine_verdict?: string
 }
 
 export interface ClaimVerification {
@@ -116,8 +165,13 @@ export interface ClaimVerification {
     medium_risk: number
     online_checked?: number
     online_supported?: number
+    online_refuted?: number
   }
   online_error?: string
+  sources?: NonNullable<VerificationClaim['online']>['sources']
+  evidence?: NonNullable<VerificationClaim['online']>['evidence']
+  risk_flags?: string[]
+  result?: Record<string, any>
   claims: VerificationClaim[]
 }
 
@@ -166,6 +220,9 @@ export interface Task {
     quality: string
     model_name: string
     provider_id: string
+    verification_depth?: string
+    source_policy?: string
+    input_mode?: string
     style?: string
     extras?: string
     format?: string[]
@@ -254,6 +311,11 @@ const hasSuccessSnapshotContent = (data: Partial<Omit<Task, 'id' | 'createdAt'>>
       data.insights
   )
 
+const isVerificationTask = (task: Pick<Task, 'platform' | 'formData'>) =>
+  task.platform === 'verification' || Boolean(task.formData?.input_mode)
+
+const isTerminalStatus = (status: TaskStatus) => status === 'SUCCESS' || status === 'FAILED'
+
 export const useTaskStore = create<TaskStore>()(
   persist(
     (set, get) => ({
@@ -295,7 +357,14 @@ export const useTaskStore = create<TaskStore>()(
         if (!Array.isArray(savedTasks)) return
 
         set(state => {
-          const existingIds = new Set(state.tasks.map(task => task.id))
+          const serverTaskIds = new Set(savedTasks.map(task => task.id))
+          const reconciledLocalTasks = state.tasks.filter(
+            task =>
+              !isVerificationTask(task) ||
+              serverTaskIds.has(task.id) ||
+              !isTerminalStatus(task.status)
+          )
+          const existingIds = new Set(reconciledLocalTasks.map(task => task.id))
           const restoredTasks: Task[] = savedTasks
             .filter((task: any) => task?.id && !existingIds.has(task.id))
             .map((task: any) => ({
@@ -332,15 +401,19 @@ export const useTaskStore = create<TaskStore>()(
               },
             }))
 
-          const currentTask = state.tasks.find(task => task.id === state.currentTaskId)
+          const currentTask = reconciledLocalTasks.find(task => task.id === state.currentTaskId)
           const keepActiveTask =
             currentTask && currentTask.status !== 'SUCCESS' && currentTask.status !== 'FAILED'
           if (restoredTasks.length === 0) {
-            return keepActiveTask ? state : { ...state, currentTaskId: null }
+            return {
+              ...state,
+              tasks: reconciledLocalTasks,
+              currentTaskId: keepActiveTask ? state.currentTaskId : null,
+            }
           }
 
           return {
-            tasks: [...state.tasks, ...restoredTasks].sort(
+            tasks: [...reconciledLocalTasks, ...restoredTasks].sort(
               (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
             ),
             currentTaskId: keepActiveTask ? state.currentTaskId : null,
@@ -458,6 +531,26 @@ export const useTaskStore = create<TaskStore>()(
         if (!task) return
 
         const newFormData = payload || task.formData
+        if (task.platform === 'verification' || newFormData?.input_mode) {
+          await rerun_verification_task(id)
+
+          set(state => ({
+            tasks: state.tasks.map(t =>
+              t.id === id
+                ? {
+                    ...t,
+                    formData: newFormData,
+                    collection: getCollectionFromForm(newFormData),
+                    status: 'SEARCHING_WEB',
+                    message: '重新联网核实中',
+                    error: undefined,
+                  }
+                : t
+            ),
+          }))
+          return
+        }
+
         await generateNote({
           ...newFormData,
           task_id: id,
