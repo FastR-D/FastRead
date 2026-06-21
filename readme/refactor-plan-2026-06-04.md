@@ -217,6 +217,7 @@ Implemented:
 - fully missing source identity excluded from high-trust support and independence counts
 - numeric unit conversion for population/count magnitudes across `万`/`亿` and `million`/`billion`
 - numeric approximation thresholds when either claim or source uses `约`/`about`/`approximately`
+- population numeric scope checks for China/global/United States/Japan context mismatches
 
 Current risk flags include:
 
@@ -337,7 +338,6 @@ Need to add golden fixtures for:
   - year/date exclusion
   - contact number exclusion
   - page navigation number exclusion
-  - statistical scope conflict
 - Source authenticity:
   - fake domain
   - redirect chain

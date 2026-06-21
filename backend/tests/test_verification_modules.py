@@ -167,6 +167,46 @@ def test_numeric_evidence_scores_source_approximation_support():
     assert metrics["numeric_conflict_count"] == 0
 
 
+def test_numeric_evidence_ignores_population_numbers_with_different_statistical_scope():
+    constraints = numeric_evidence.extract_numeric_constraints("中国人口超过14亿人")
+    china_mentions = numeric_evidence.extract_numeric_mentions(
+        "China's population is more than 1.4 billion people."
+    )
+    global_mentions = numeric_evidence.extract_numeric_mentions(
+        "The global population is about 8 billion people."
+    )
+
+    assert constraints
+    assert china_mentions
+    assert global_mentions
+    assert numeric_evidence.statistical_scope(constraints[0]["context"]) == "china"
+    assert numeric_evidence.statistical_scope(china_mentions[0]["context"]) == "china"
+    assert numeric_evidence.statistical_scope(global_mentions[0]["context"]) == "global"
+    assert numeric_evidence.numeric_context_related(constraints[0], china_mentions[0])
+    assert numeric_evidence.numeric_supports(constraints[0], china_mentions[0])
+    assert not numeric_evidence.numeric_context_related(constraints[0], global_mentions[0])
+
+
+def test_numeric_evidence_scores_scope_mismatch_as_not_comparable():
+    metrics = numeric_evidence.score_numeric_evidence(
+        "中国人口超过14亿人",
+        [
+            {
+                "title": "World population statistics",
+                "url": "https://stats.example/world",
+                "domain": "stats.example",
+                "snippet": "The global population is about 8 billion people.",
+                "trusted": True,
+            }
+        ],
+    )
+
+    assert metrics["numeric_claim"]
+    assert metrics["numeric_comparable_count"] == 0
+    assert metrics["numeric_match_count"] == 0
+    assert metrics["numeric_conflict_count"] == 0
+
+
 def test_numeric_evidence_ignores_contact_numbers_in_body_passages():
     mentions = numeric_evidence.extract_numeric_mentions(
         "Media Contacts Veronique Terrasse Communications Officer, IARC Communications Group Telephone: +33 472 738 366 Mobile: +33 645 284 952 Email: media@example.org"

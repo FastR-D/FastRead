@@ -201,6 +201,25 @@ def has_egg_context(text: str) -> bool:
     return any(hint in lower for hint in ("鸡蛋", "蛋清", "蛋黄", "egg", "yolk", "albumen"))
 
 
+def statistical_scope(text: str) -> str:
+    lower = (text or "").lower()
+    if re.search(r"全球人口|世界人口|global population|world population|worldwide population", lower, re.I):
+        return "global"
+    if re.search(r"中国人口|中国.*人口|china'?s population|population of china|chinese population", lower, re.I):
+        return "china"
+    if re.search(r"美国人口|美国.*人口|u\.s\. population|us population|united states population|population of the united states", lower, re.I):
+        return "united_states"
+    if re.search(r"日本人口|日本.*人口|japan'?s population|population of japan|japanese population", lower, re.I):
+        return "japan"
+    return ""
+
+
+def statistical_scopes_compatible(claim_context: str, source_context: str) -> bool:
+    claim_scope = statistical_scope(claim_context)
+    source_scope = statistical_scope(source_context)
+    return not (claim_scope and source_scope and claim_scope != source_scope)
+
+
 def numeric_context_related(claim_mention: dict, source_mention: dict) -> bool:
     claim_context = claim_mention.get("context") or ""
     source_context = source_mention.get("context") or ""
@@ -221,7 +240,7 @@ def numeric_context_related(claim_mention: dict, source_mention: dict) -> bool:
         ):
             return False
     if claim_kind == source_kind == "population_count":
-        return True
+        return statistical_scopes_compatible(claim_context, source_context)
     if has_protein_context(claim_context) and has_protein_context(source_context):
         return True
     if has_egg_context(claim_context) and has_egg_context(source_context):

@@ -81,6 +81,7 @@ Latest backend verification increments on 2026-06-21:
 - Sources with fully missing publisher/author/published date are excluded from independent high-trust support counting and high-quality evidence counting, so they cannot create `supported` even when the domain tier is A/B.
 - Numeric evidence now normalizes population/count magnitude units across Chinese and English (`万`, `亿`, `million`, `billion`) so `14亿人`, `1.4 billion people`, and `1,400 million people` compare correctly.
 - Numeric approximation handling is now symmetric: `约`/`about`/`approximately` on either the claim or source side uses widened support/conflict thresholds, so reasonable approximations support while large deviations still refute.
+- Population numeric evidence now checks statistical scope, so China-specific population claims are not supported or refuted by global population figures.
 
 Latest documentation/config increments before handoff:
 
@@ -291,6 +292,7 @@ The practical benchmark exposed real verification failures. They were fixed and 
 - IARC classification claims now use classification stance rules, so `1类` vs `2B` can be refuted from body text.
 - Population/count claims can compare Chinese large-number units with English million/billion units.
 - Source-side approximate numbers no longer create false numeric conflicts when they are within the configured approximation band.
+- Population figures with mismatched geographic/statistical scope are treated as non-comparable rather than support/refute evidence.
 
 ## Validation Commands
 
@@ -303,7 +305,7 @@ backend\.venv\Scripts\python.exe -m pytest --basetemp .tmp\pytest backend\tests\
 Latest result:
 
 ```text
-85 passed
+87 passed
 ```
 
 Frontend:
