@@ -79,6 +79,50 @@ def test_numeric_evidence_treats_dose_ranges_as_one_comparable_value():
     assert not numeric_evidence.numeric_conflicts(constraints[0], passage_mentions[0])
 
 
+def test_numeric_evidence_converts_chinese_and_english_population_units():
+    constraints = numeric_evidence.extract_numeric_constraints("该国人口超过14亿人")
+    billion_mentions = numeric_evidence.extract_numeric_mentions(
+        "The country's population is more than 1.4 billion people."
+    )
+    million_mentions = numeric_evidence.extract_numeric_mentions(
+        "The country's population reached about 1,400 million people."
+    )
+    conflict_mentions = numeric_evidence.extract_numeric_mentions(
+        "The country's population is about 140 million people."
+    )
+
+    assert constraints
+    assert billion_mentions
+    assert million_mentions
+    assert conflict_mentions
+    assert constraints[0]["value"] == 1_400_000_000
+    assert billion_mentions[0]["value"] == 1_400_000_000
+    assert million_mentions[0]["value"] == 1_400_000_000
+    assert numeric_evidence.numeric_context_related(constraints[0], billion_mentions[0])
+    assert numeric_evidence.numeric_supports(constraints[0], billion_mentions[0])
+    assert numeric_evidence.numeric_supports(constraints[0], million_mentions[0])
+    assert numeric_evidence.numeric_conflicts(constraints[0], conflict_mentions[0])
+
+
+def test_numeric_evidence_scores_unit_converted_population_support():
+    metrics = numeric_evidence.score_numeric_evidence(
+        "该国人口超过14亿人",
+        [
+            {
+                "title": "Population statistics",
+                "url": "https://stats.example/report",
+                "domain": "stats.example",
+                "snippet": "The country's population is more than 1.4 billion people according to the census.",
+                "trusted": True,
+            }
+        ],
+    )
+
+    assert metrics["numeric_claim"]
+    assert metrics["numeric_match_count"] == 1
+    assert metrics["numeric_conflict_count"] == 0
+
+
 def test_numeric_evidence_ignores_contact_numbers_in_body_passages():
     mentions = numeric_evidence.extract_numeric_mentions(
         "Media Contacts Veronique Terrasse Communications Officer, IARC Communications Group Telephone: +33 472 738 366 Mobile: +33 645 284 952 Email: media@example.org"

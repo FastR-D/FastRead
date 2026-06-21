@@ -79,6 +79,7 @@ Latest backend verification increments on 2026-06-21:
 - HTML source identity extraction now resolves schema.org JSON-LD `@graph` `@id` references for publisher/author, reducing false `missing_source_identity` flags on real news/research pages.
 - Source identity scoring now emits granular `missing_publisher`, `missing_author`, and `missing_published_date` risk flags.
 - Sources with fully missing publisher/author/published date are excluded from independent high-trust support counting and high-quality evidence counting, so they cannot create `supported` even when the domain tier is A/B.
+- Numeric evidence now normalizes population/count magnitude units across Chinese and English (`万`, `亿`, `million`, `billion`) so `14亿人`, `1.4 billion people`, and `1,400 million people` compare correctly.
 
 Latest documentation/config increments before handoff:
 
@@ -287,6 +288,7 @@ The practical benchmark exposed real verification failures. They were fixed and 
 - Page navigation numbers such as `IARC@60`, volume `134`, and dates no longer refute dose claims.
 - Protein count claims no longer compare against molecular weights like `7 kDa` or percentages like `42%`.
 - IARC classification claims now use classification stance rules, so `1类` vs `2B` can be refuted from body text.
+- Population/count claims can compare Chinese large-number units with English million/billion units.
 
 ## Validation Commands
 
@@ -299,7 +301,7 @@ backend\.venv\Scripts\python.exe -m pytest --basetemp .tmp\pytest backend\tests\
 Latest result:
 
 ```text
-81 passed
+83 passed
 ```
 
 Frontend:

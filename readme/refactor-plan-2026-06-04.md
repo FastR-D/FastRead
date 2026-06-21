@@ -215,6 +215,7 @@ Implemented:
 - GEO/language disagreement detection
 - granular source identity flags for missing publisher/author/published date
 - fully missing source identity excluded from high-trust support and independence counts
+- numeric unit conversion for population/count magnitudes across `万`/`亿` and `million`/`billion`
 
 Current risk flags include:
 
@@ -331,7 +332,6 @@ Need to add golden fixtures for:
 - Biased listicles: mutually copied rankings count as low-independence.
 - GEO disagreement: different regions/languages conflict, output `mixed` or `geo_disagreement`.
 - Numeric verification:
-  - unit conversion
   - ranges
   - approximations
   - year/date exclusion

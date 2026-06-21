@@ -10,11 +10,31 @@ from app.services.verification.constants import (
 from app.services.verification.text_utils import domain, tokenize
 
 
+UNIT_PATTERN = (
+    r"billion\s+people|million\s+people|billion|million|"
+    r"亿人|万人|人|亿|万|"
+    r"mg/kg|mg\/kg|%|种|个|项|倍|元|分钟|小时|天|年|proteins?|protein entries|entries"
+)
+
+
 def normalize_number(value: str) -> float | None:
     try:
         return float(str(value or "").replace(",", ""))
     except Exception:
         return None
+
+
+def normalize_number_with_unit(value: float, unit: str) -> float:
+    normalized_unit = (unit or "").strip().lower()
+    if normalized_unit in {"亿", "亿人"}:
+        return value * 100_000_000
+    if normalized_unit in {"万", "万人"}:
+        return value * 10_000
+    if normalized_unit in {"billion", "billion people"}:
+        return value * 1_000_000_000
+    if normalized_unit in {"million", "million people"}:
+        return value * 1_000_000
+    return value
 
 
 def numeric_op_pattern() -> str:
@@ -30,7 +50,7 @@ def extract_numeric_mentions(text: str, include_operator: bool = True) -> list[d
     pattern = re.compile(
         rf"(?P<prefix>{op_pattern})?\s*"
         r"(?P<number>\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)\s*"
-        r"(?P<unit>mg/kg|mg\/kg|%|种|个|项|倍|元|分钟|小时|天|年|proteins?|protein entries|entries)?\s*"
+        rf"(?P<unit>{UNIT_PATTERN})?\s*"
         rf"(?P<suffix>{op_pattern})?",
         re.I,
     )
@@ -48,8 +68,10 @@ def extract_numeric_mentions(text: str, include_operator: bool = True) -> list[d
         unit = (match.group("unit") or "").strip().lower()
         if _is_non_factual_number(match.group(0), value, unit, context):
             continue
+        normalized_value = normalize_number_with_unit(value, unit)
         mentions.append({
-            "value": value,
+            "value": normalized_value,
+            "raw_value": value,
             "op": op,
             "unit": unit,
             "context": context,
@@ -63,7 +85,7 @@ def extract_numeric_mentions(text: str, include_operator: bool = True) -> list[d
 def _extract_numeric_ranges(text: str, include_operator: bool = True) -> list[dict]:
     pattern = re.compile(
         r"(?P<low>\d+(?:\.\d+)?)\s*[–-]\s*(?P<high>\d+(?:\.\d+)?)\s*"
-        r"(?P<unit>mg/kg|mg\/kg|%|种|个|项|proteins?|protein entries|entries)?",
+        rf"(?P<unit>{UNIT_PATTERN})?",
         re.I,
     )
     mentions = []
@@ -77,11 +99,16 @@ def _extract_numeric_ranges(text: str, include_operator: bool = True) -> list[di
         unit = (match.group("unit") or "").strip().lower()
         if _is_non_factual_number(match.group(0), high, unit, context):
             continue
+        normalized_low = normalize_number_with_unit(low, unit)
+        normalized_high = normalize_number_with_unit(high, unit)
         mentions.append(
             {
-                "value": high,
-                "low_value": low,
-                "high_value": high,
+                "value": normalized_high,
+                "raw_value": high,
+                "low_value": normalized_low,
+                "high_value": normalized_high,
+                "raw_low_value": low,
+                "raw_high_value": high,
                 "op": "range" if include_operator else "eq",
                 "unit": unit,
                 "context": context,
@@ -146,6 +173,10 @@ def numeric_kind(unit: str, context: str) -> str:
         return "molecular_weight"
     if has_protein_context(context) and re.search(r"entries|identified|proteins?|蛋白质|蛋白|种|个", lower):
         return "protein_count"
+    if unit in {"人", "万人", "亿人", "万", "亿", "million", "billion", "million people", "billion people"} or re.search(
+        r"population|people|居民|人口|人数", lower
+    ):
+        return "population_count"
     if unit in {"种", "个", "项", "entries", "protein entries"}:
         return "count"
     if unit in {"年"} or re.search(r"year|年", lower):
@@ -184,8 +215,13 @@ def numeric_context_related(claim_mention: dict, source_mention: dict) -> bool:
     ):
         return False
     if claim_unit and source_unit and claim_unit != source_unit:
-        if not ({claim_kind, source_kind} <= {"protein_count", "count"}):
+        if not (
+            {claim_kind, source_kind} <= {"protein_count", "count"}
+            or {claim_kind, source_kind} <= {"population_count"}
+        ):
             return False
+    if claim_kind == source_kind == "population_count":
+        return True
     if has_protein_context(claim_context) and has_protein_context(source_context):
         return True
     if has_egg_context(claim_context) and has_egg_context(source_context):
