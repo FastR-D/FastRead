@@ -40,6 +40,9 @@ def test_pipeline_support_requires_independent_body_evidence():
             "url": "https://pubmed.ncbi.nlm.nih.gov/1/",
             "canonical_url": "https://pubmed.ncbi.nlm.nih.gov/1/",
             "title": "Egg protein atlas",
+            "publisher": "PubMed",
+            "author": "Research Team",
+            "published_at": "2026-06-20",
             "retrieved_at": "2026-06-20T00:00:00Z",
             "fetch_status": "ok",
             "source_type": "web",
@@ -49,6 +52,9 @@ def test_pipeline_support_requires_independent_body_evidence():
             "url": "https://www.nature.com/articles/egg",
             "canonical_url": "https://www.nature.com/articles/egg",
             "title": "Chicken egg proteome",
+            "publisher": "Nature",
+            "author": "Research Team",
+            "published_at": "2026-06-20",
             "retrieved_at": "2026-06-20T00:00:00Z",
             "fetch_status": "ok",
             "source_type": "web",
@@ -64,6 +70,32 @@ def test_pipeline_support_requires_independent_body_evidence():
     assert all(item["evidence_id"].startswith("ev-") for item in result["evidence"])
     assert all(item["source_id"].startswith("src-") for item in result["audit"]["source_audit"])
     assert result["audit"]["independent_authoritative_sources"] == 2
+
+
+def test_pipeline_missing_identity_sources_cannot_create_supported_verdict():
+    claim = "鸡蛋中含有超过1500种独特蛋白质"
+    results = [
+        {"title": "Egg protein atlas", "url": "https://pubmed.ncbi.nlm.nih.gov/1/", "snippet": "snippet"},
+        {"title": "Chicken egg proteome", "url": "https://www.nature.com/articles/egg", "snippet": "snippet"},
+    ]
+    snapshots = {
+        item["url"]: {
+            "url": item["url"],
+            "canonical_url": item["url"],
+            "title": item["title"],
+            "retrieved_at": "2026-06-20T00:00:00Z",
+            "fetch_status": "ok",
+            "source_type": "web",
+            "text": "鸡蛋 蛋白质组 研究显示鸡蛋中含有超过1500种独特蛋白质。",
+        }
+        for item in results
+    }
+
+    result = pipeline.verify_claim(claim, search_fn=_search(results), fetch_fn=_fetch(snapshots))
+
+    assert result["verdict"] != "supported"
+    assert result["audit"]["independent_authoritative_sources"] == 0
+    assert "missing_source_identity" in result["risk_flags"]
 
 
 def test_pipeline_never_supports_search_snippets_without_body_evidence():
@@ -383,6 +415,9 @@ def test_pipeline_geo_compare_flags_cross_region_stance_conflict(monkeypatch):
             "url": main_url,
             "canonical_url": main_url,
             "title": "WHO main",
+            "publisher": "World Health Organization",
+            "author": "WHO",
+            "published_at": "2026-06-20",
             "fetch_status": "ok",
             "source_type": "web",
             "text": "main body",
@@ -391,6 +426,9 @@ def test_pipeline_geo_compare_flags_cross_region_stance_conflict(monkeypatch):
             "url": zh_url,
             "canonical_url": zh_url,
             "title": "WHO Chinese",
+            "publisher": "World Health Organization",
+            "author": "WHO",
+            "published_at": "2026-06-20",
             "fetch_status": "ok",
             "source_type": "web",
             "text": "zh body",
@@ -399,6 +437,9 @@ def test_pipeline_geo_compare_flags_cross_region_stance_conflict(monkeypatch):
             "url": en_url,
             "canonical_url": en_url,
             "title": "IARC English",
+            "publisher": "International Agency for Research on Cancer",
+            "author": "IARC",
+            "published_at": "2026-06-20",
             "fetch_status": "ok",
             "source_type": "web",
             "text": "en body",

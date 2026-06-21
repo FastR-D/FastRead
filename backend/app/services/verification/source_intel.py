@@ -153,6 +153,12 @@ def detect_source_risks(source: dict, text: str = "") -> list[str]:
         flags.append(risky_flag)
     if source.get("missing_source_identity"):
         flags.append("missing_source_identity")
+    if source.get("missing_publisher"):
+        flags.append("missing_publisher")
+    if source.get("missing_author"):
+        flags.append("missing_author")
+    if source.get("missing_published_date"):
+        flags.append("missing_published_date")
     if any(hint in (title or "").lower() for hint in LISTICLE_TITLE_HINTS):
         flags.append("biased_listicle")
     if source.get("fetch_status") in {"failed", "blocked", "empty"}:
@@ -185,7 +191,11 @@ def classify_source(result: dict, fetched: dict | None = None) -> dict:
     )
     author = fetched.get("author") or result.get("author") or ""
     published_at = fetched.get("published_at") or result.get("published_at") or ""
-    missing_source_identity = bool(fetch_status in {"ok", "pdf_ok"} and not publisher and not author and not published_at)
+    fetched_body = fetch_status in {"ok", "pdf_ok"}
+    missing_publisher = bool(fetched_body and not publisher)
+    missing_author = bool(fetched_body and not author)
+    missing_published_date = bool(fetched_body and not published_at)
+    missing_source_identity = bool(missing_publisher and missing_author and missing_published_date)
 
     tier = "D"
     reasons = []
@@ -222,6 +232,10 @@ def classify_source(result: dict, fetched: dict | None = None) -> dict:
 
     if fetch_status in {"failed", "empty", "blocked"} and tier in {"A", "B"}:
         reasons.append("source identity is strong but body was not fetched; cannot support claims alone")
+    if missing_source_identity:
+        reasons.append("fetched body lacks publisher, author, and published date metadata")
+    elif missing_published_date:
+        reasons.append("fetched body lacks published date metadata")
 
     return {
         "source_id": source_id_for(url, canonical_url, text_hash),
@@ -251,6 +265,9 @@ def classify_source(result: dict, fetched: dict | None = None) -> dict:
             "canonical_anomaly": canonical_anomaly,
             "redirect_anomaly": redirect_anomaly,
             "missing_source_identity": missing_source_identity,
+            "missing_publisher": missing_publisher,
+            "missing_author": missing_author,
+            "missing_published_date": missing_published_date,
         }, text),
     }
 
@@ -295,6 +312,8 @@ def independent_source_count(sources: list[dict], tiers: set[str] | None = None)
         if source.get("trust_tier") not in tiers:
             continue
         if source.get("fetch_status") not in {"ok", "pdf_ok"}:
+            continue
+        if "missing_source_identity" in (source.get("risk_flags") or []):
             continue
         groups.add(source.get("independence_group") or source.get("domain") or source.get("url"))
     return len(groups)

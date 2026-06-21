@@ -77,6 +77,8 @@ Latest backend verification increments on 2026-06-21:
 - Degraded search mode now adds `search_unavailable` when search raises, returns `data_void`, and cannot output `supported`.
 - Snippet-only, fetch-failed, content-farm, copied press-release, fake authority, prompt-injection, GEO-conflict, and degraded-search paths are covered by targeted backend tests.
 - HTML source identity extraction now resolves schema.org JSON-LD `@graph` `@id` references for publisher/author, reducing false `missing_source_identity` flags on real news/research pages.
+- Source identity scoring now emits granular `missing_publisher`, `missing_author`, and `missing_published_date` risk flags.
+- Sources with fully missing publisher/author/published date are excluded from independent high-trust support counting and high-quality evidence counting, so they cannot create `supported` even when the domain tier is A/B.
 
 Latest documentation/config increments before handoff:
 
@@ -297,7 +299,7 @@ backend\.venv\Scripts\python.exe -m pytest --basetemp .tmp\pytest backend\tests\
 Latest result:
 
 ```text
-79 passed
+81 passed
 ```
 
 Frontend:

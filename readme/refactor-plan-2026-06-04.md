@@ -213,6 +213,8 @@ Implemented:
 - prompt-injection stress fixtures
 - biased listicle clustering across domains
 - GEO/language disagreement detection
+- granular source identity flags for missing publisher/author/published date
+- fully missing source identity excluded from high-trust support and independence counts
 
 Current risk flags include:
 
@@ -222,6 +224,9 @@ Current risk flags include:
 - `fake_authority`
 - `press_release_repost`
 - `missing_source_identity`
+- `missing_publisher`
+- `missing_author`
+- `missing_published_date`
 - `content_farm`
 
 Still needed:
@@ -229,7 +234,7 @@ Still needed:
 - more real-world GEO/language fixtures beyond the current synthetic coverage
 - broader fake authority and canonical/redirect regression fixtures
 - stronger copied press-release clustering across unrelated domains
-- richer no author/no date source-identity scoring
+- broader source-identity extraction fixtures across real official, journal, regulator, and news templates
 
 ### Phase 3: Taskization
 

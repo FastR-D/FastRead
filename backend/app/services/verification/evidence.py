@@ -154,7 +154,20 @@ def evidence_counts(evidence: list[dict], sources_by_url: dict[str, dict]) -> di
     for item in evidence:
         source = sources_by_url.get(item.get("source_url") or "") or {}
         group = source.get("independence_group") or source.get("domain") or item.get("source_url")
-        high_quality = source.get("trust_tier") in {"A", "B"} and source.get("fetch_status") in {"ok", "pdf_ok"}
+        source_risks = set(source.get("risk_flags") or [])
+        disqualifying_risks = {
+            "blocked_domain",
+            "canonical_anomaly",
+            "fake_authority",
+            "missing_source_identity",
+            "prompt_injection",
+            "redirect_anomaly",
+        }
+        high_quality = (
+            source.get("trust_tier") in {"A", "B"}
+            and source.get("fetch_status") in {"ok", "pdf_ok"}
+            and not (source_risks & disqualifying_risks)
+        )
         if item.get("stance") == "support":
             support += 1
             if high_quality:

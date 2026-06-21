@@ -406,6 +406,28 @@ def test_source_intel_flags_missing_source_identity():
     )
 
     assert "missing_source_identity" in source["risk_flags"]
+    assert "missing_publisher" in source["risk_flags"]
+    assert "missing_author" in source["risk_flags"]
+    assert "missing_published_date" in source["risk_flags"]
+
+
+def test_source_intel_flags_partial_identity_gaps_without_full_identity_failure():
+    source = source_intel.classify_source(
+        {"url": "https://example-news.com/report", "title": "Report"},
+        {
+            "url": "https://example-news.com/report",
+            "canonical_url": "https://example-news.com/report",
+            "title": "Report",
+            "publisher": "Example News",
+            "fetch_status": "ok",
+            "text": "A report body with publisher but no byline or date.",
+        },
+    )
+
+    assert "missing_source_identity" not in source["risk_flags"]
+    assert "missing_publisher" not in source["risk_flags"]
+    assert "missing_author" in source["risk_flags"]
+    assert "missing_published_date" in source["risk_flags"]
 
 
 def test_source_intel_annotates_reposted_low_tier_content():
