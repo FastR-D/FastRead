@@ -240,12 +240,25 @@ def numeric_kinds_comparable(claim_kind: str, source_kind: str) -> bool:
     return frozenset({claim_kind, source_kind}) in compatible
 
 
+def _has_approx_operator(*mentions: dict) -> bool:
+    return any((mention.get("op") or "eq") == "approx" for mention in mentions)
+
+
+def _approx_support_tolerance(value: float) -> float:
+    return max(abs(value) * 0.15, 2.0)
+
+
+def _approx_conflict_tolerance(value: float) -> float:
+    return max(abs(value) * 0.25, 3.0)
+
+
 def numeric_supports(claim_mention: dict, source_mention: dict) -> bool:
     claim_value = float(claim_mention["value"])
     source_value = float(source_mention["value"])
     claim_op = claim_mention.get("op") or "eq"
     source_op = source_mention.get("op") or "eq"
-    tolerance = max(abs(claim_value) * 0.02, 1.0)
+    approximate = _has_approx_operator(claim_mention, source_mention)
+    tolerance = _approx_support_tolerance(claim_value) if approximate else max(abs(claim_value) * 0.02, 1.0)
     if source_op == "range":
         low = float(source_mention.get("low_value", source_value))
         high = float(source_mention.get("high_value", source_value))
@@ -263,8 +276,6 @@ def numeric_supports(claim_mention: dict, source_mention: dict) -> bool:
         if source_op in {"lt", "lte"} and source_value <= claim_value + tolerance:
             return True
         return source_value <= claim_value + tolerance
-    if claim_op == "approx":
-        return abs(source_value - claim_value) <= max(abs(claim_value) * 0.15, 2.0)
     return abs(source_value - claim_value) <= tolerance
 
 
@@ -273,7 +284,8 @@ def numeric_conflicts(claim_mention: dict, source_mention: dict) -> bool:
     source_value = float(source_mention["value"])
     claim_op = claim_mention.get("op") or "eq"
     source_op = source_mention.get("op") or "eq"
-    tolerance = max(abs(claim_value) * 0.02, 2.0)
+    approximate = _has_approx_operator(claim_mention, source_mention)
+    tolerance = _approx_conflict_tolerance(claim_value) if approximate else max(abs(claim_value) * 0.02, 2.0)
     if source_op == "range":
         low = float(source_mention.get("low_value", source_value))
         high = float(source_mention.get("high_value", source_value))
@@ -281,16 +293,12 @@ def numeric_conflicts(claim_mention: dict, source_mention: dict) -> bool:
             return high < claim_value - tolerance
         if claim_op in {"lt", "lte"}:
             return low > claim_value + tolerance
-        if claim_op == "approx":
-            return claim_value < low - tolerance or claim_value > high + tolerance
         return claim_value < low - tolerance or claim_value > high + tolerance
 
     if claim_op in {"gt", "gte"}:
         return source_op in {"eq", "approx", "lt", "lte"} and source_value < claim_value - tolerance
     if claim_op in {"lt", "lte"}:
         return source_op in {"eq", "approx", "gt", "gte"} and source_value > claim_value + tolerance
-    if claim_op == "approx":
-        return abs(source_value - claim_value) > max(abs(claim_value) * 0.25, 3.0)
     return abs(source_value - claim_value) > tolerance
 
 

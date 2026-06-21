@@ -123,6 +123,50 @@ def test_numeric_evidence_scores_unit_converted_population_support():
     assert metrics["numeric_conflict_count"] == 0
 
 
+def test_numeric_evidence_allows_source_approximation_without_false_conflict():
+    constraints = numeric_evidence.extract_numeric_constraints("鸡蛋中含有1500种独特蛋白质")
+    close_mentions = numeric_evidence.extract_numeric_mentions(
+        "The chicken egg proteome contains about 1,430 protein entries."
+    )
+    gray_mentions = numeric_evidence.extract_numeric_mentions(
+        "The chicken egg proteome contains about 1,200 protein entries."
+    )
+    far_mentions = numeric_evidence.extract_numeric_mentions(
+        "The chicken egg proteome contains about 1,050 protein entries."
+    )
+
+    assert constraints
+    assert close_mentions
+    assert gray_mentions
+    assert far_mentions
+    assert close_mentions[0]["op"] == "approx"
+    assert numeric_evidence.numeric_context_related(constraints[0], close_mentions[0])
+    assert numeric_evidence.numeric_supports(constraints[0], close_mentions[0])
+    assert not numeric_evidence.numeric_conflicts(constraints[0], close_mentions[0])
+    assert not numeric_evidence.numeric_supports(constraints[0], gray_mentions[0])
+    assert not numeric_evidence.numeric_conflicts(constraints[0], gray_mentions[0])
+    assert numeric_evidence.numeric_conflicts(constraints[0], far_mentions[0])
+
+
+def test_numeric_evidence_scores_source_approximation_support():
+    metrics = numeric_evidence.score_numeric_evidence(
+        "鸡蛋中含有1500种独特蛋白质",
+        [
+            {
+                "title": "Chicken egg proteome",
+                "url": "https://example.edu/egg-proteome",
+                "domain": "example.edu",
+                "snippet": "The chicken egg proteome contains about 1,430 protein entries.",
+                "trusted": True,
+            }
+        ],
+    )
+
+    assert metrics["numeric_claim"]
+    assert metrics["numeric_match_count"] == 1
+    assert metrics["numeric_conflict_count"] == 0
+
+
 def test_numeric_evidence_ignores_contact_numbers_in_body_passages():
     mentions = numeric_evidence.extract_numeric_mentions(
         "Media Contacts Veronique Terrasse Communications Officer, IARC Communications Group Telephone: +33 472 738 366 Mobile: +33 645 284 952 Email: media@example.org"

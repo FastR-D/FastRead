@@ -216,6 +216,7 @@ Implemented:
 - granular source identity flags for missing publisher/author/published date
 - fully missing source identity excluded from high-trust support and independence counts
 - numeric unit conversion for population/count magnitudes across `万`/`亿` and `million`/`billion`
+- numeric approximation thresholds when either claim or source uses `约`/`about`/`approximately`
 
 Current risk flags include:
 
@@ -333,7 +334,6 @@ Need to add golden fixtures for:
 - GEO disagreement: different regions/languages conflict, output `mixed` or `geo_disagreement`.
 - Numeric verification:
   - ranges
-  - approximations
   - year/date exclusion
   - contact number exclusion
   - page navigation number exclusion
