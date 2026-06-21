@@ -1,44 +1,35 @@
-# Reel Mind 使用说明
+# ReelMind 使用说明
 
-更新时间：2026-05-15
+更新时间：2026-06-21
 
-## 当前 demo 能做什么
+## 当前主流程
 
-这个仓库已经收口成 Reel Mind 的 demo 版本，当前优先面向抖音精选知识视频。
+ReelMind 当前优先解决一个问题：
 
-当前可跑通的主流程：
+```text
+这句话到底有没有可靠联网证据支持？
+```
 
-1. 打开 Web 前端。
-2. 输入抖音精选视频链接。
-3. 后端解析视频信息并下载音频。
-4. 转写音频。
-5. 调用已配置的大模型生成 Markdown 笔记和专用思维导图章节。
-6. 在“我的收藏”里回看笔记，并编辑收藏夹、标签、备注。
-7. 刷新或重启后，从后端恢复收藏记录和收藏元数据。
-8. 在笔记页切换为思维导图视图，优先渲染 `## 思维导图` 章节。
-9. 在笔记页使用基于当前任务索引的 AI 问答。
+P0 主流程是：
 
-当前 demo 重点验证的是：
+1. 打开 Web 工作台。
+2. 粘贴待核实文本，或输入网页 URL。
+3. 系统拆分 atomic claims。
+4. 多查询、多来源联网检索。
+5. 抓取网页/PDF 正文。
+6. 判断信源等级、独立性和风险。
+7. 抽取正文证据片段。
+8. 输出可审计核验报告。
 
-- 抖音精选链接输入
-- AI 知识提取
-- AI 总结
-- 收藏列表回看和收藏元数据后端持久化
-- Markdown/专用思维导图展示
-- 抖音 Cookie 状态诊断和浏览器扩展同步入口
-- 基于笔记/转写/视频元信息的 AI 问答
+搜索结果摘要只用于召回候选来源，不能单独产生 `supported`。最终判定必须来自已抓取正文证据和规则引擎。
 
 ## 启动方式
 
-推荐优先使用本地 Windows 脚本启动整套 demo，不再默认要求 Docker。Docker 只作为可选部署或高级演示路径。
+推荐优先使用 Windows 本地脚本，不再默认要求 Docker。
 
-如果只是交给非技术人员启动，让对方双击根目录的 `run.bat`。状态检查、停止服务和依赖检查也都走这个文件。
+### 本地脚本
 
-### 方式一：本地脚本启动整套服务
-
-Windows 用户可以双击根目录的 `run.bat`。这是唯一保留的本地入口，默认不需要 Docker。
-
-首次运行前需要准备好：
+首次运行前需要准备：
 
 - `backend\.venv`
 - `reel-mind-frontend\node_modules`
@@ -61,66 +52,44 @@ pnpm install
 cd ..
 ```
 
-默认访问地址：
+启动：
+
+```powershell
+.\run.bat
+```
+
+打开：
 
 ```text
 http://127.0.0.1:3015/
 ```
 
-本地后端默认监听 `8483`：
+本地后端默认监听：
 
 ```text
 http://127.0.0.1:8483/api/sys_check
 http://127.0.0.1:8483/api/sys_health
 ```
 
-正常返回：
-
-```json
-{"code":0,"msg":"success","data":null}
-```
-
-如果只想启动但不自动打开浏览器：
+常用脚本参数：
 
 ```powershell
 .\run.bat --no-open
-```
-
-状态、停止和依赖检查：
-
-```powershell
 .\run.bat --status
 .\run.bat --stop
 .\run.bat --check
 ```
 
-### 方式二：手动源码开发启动
+### 手动开发启动
 
-手动源码开发也推荐使用和 `run.bat` 一致的 demo 端口：
-
-- 后端：`http://127.0.0.1:8483`
-- 前端：`http://127.0.0.1:3015`
-
-`run.bat` 会启动源码开发环境。它要求 `backend\.venv` 和 `reel-mind-frontend\node_modules` 已经存在；首次运行前先安装依赖。
-
-#### 启动后端
-
-在仓库根目录执行：
+后端：
 
 ```powershell
 cd backend
 .\.venv\Scripts\python.exe main.py
 ```
 
-后端健康检查：
-
-```text
-http://127.0.0.1:8483/api/sys_check
-```
-
-#### 启动前端
-
-另开一个终端，在仓库根目录执行：
+前端：
 
 ```powershell
 cd reel-mind-frontend
@@ -128,256 +97,168 @@ $env:VITE_API_BASE_URL="/api"
 pnpm run dev -- --host 0.0.0.0 --port 3015
 ```
 
-打开：
+不要直接打开 `http://127.0.0.1:8483`；那是 API 根路径，返回 `{"detail":"Not Found"}` 是正常现象。
 
-```text
-http://127.0.0.1:3015
-```
+### 可选 Docker
 
-不要直接打开 `http://127.0.0.1:8483`，那是后端 API 根路径，会返回 `{"detail":"Not Found"}`，这是正常现象。
-
-### 可选：Docker 部署路径
-
-Docker 只作为可选部署或高级演示路径保留。确实需要容器部署时，在仓库根目录直接执行：
+Docker 只作为可选部署或高级演示路径：
 
 ```powershell
 docker compose up -d --build
 ```
 
-Docker 模式下，后端容器内部监听 `8483`，宿主机通过 Nginx 的 `3015` 端口访问 API：
+Docker 模式下通过前端/Nginx 访问：
 
 ```text
+http://127.0.0.1:3015/
 http://127.0.0.1:3015/api/sys_check
-http://127.0.0.1:3015/api/sys_health
 ```
 
-查看服务状态和日志：
-
-```powershell
-docker compose ps
-docker compose logs --tail=80 backend
-```
-
-## 使用流程
+## 联网核实文本
 
 1. 打开 `http://127.0.0.1:3015`。
-2. 在左侧“视频链接”输入抖音精选链接，例如：
+2. 在左侧输入框粘贴一段文字。
+3. 点击 `开始联网核实`。
+4. 等待状态经过解析输入、联网检索、抓取信源、评估证据、生成报告。
+5. 在报告中查看：
+   - 总体判定
+   - 每条 atomic claim
+   - 正文证据片段
+   - 支持/反驳/背景 stance
+   - 信源 tier
+   - canonical URL、publisher、author、published_at
+   - 风险旗标和审计信息
 
-```text
-https://www.douyin.com/jingxuan?modal_id=7633777410067926322
-```
+## 联网核实 URL
 
-3. 确认模型已选择，例如 `deepseek-v4-flash`。
-4. 可填写收藏夹、标签、收藏备注。
-5. 点击“生成笔记”。
-6. 等待状态从解析、下载、转写、总结进入完成。
-7. 完成后可在中间栏“我的收藏”里点击卡片回看。
-8. 可在“我的收藏”中继续修改收藏夹、标签、备注；修改会防抖同步到后端。
-9. 笔记页顶部可切换“思维导图”。
-10. 笔记页可切换 AI 问答，基于当前任务内容提问。
+输入网页 URL 后，系统会先抓取输入源正文，再从正文中拆分主张并核实。
 
-## 当前本地配置
+报告顶部会展示输入源审计信息，包括：
 
-当前 demo 使用过的模型配置：
+- requested URL
+- fetched URL
+- canonical URL
+- redirect chain
+- fetch status
+- publisher/author/date
+- text chars
 
-- Provider ID：`deepseek`
-- Base URL：`https://api.deepseek.com`
-- Model：`deepseek-v4-flash`
+如果输入源无法抓取，系统应保守返回非 `supported` 结果，并在报告里展示失败状态或风险旗标。
 
-如果重建数据库，需要重新在设置页添加 provider 和 model。
+## 重新核实
 
-当前默认转写配置：
+报告支持两类重跑：
 
-```env
-TRANSCRIBER_TYPE=bcut
-WHISPER_MODEL_SIZE=tiny
-```
+- 整个任务重跑：默认重试失败或未完成的联网阶段。
+- 单条主张重跑：只重跑目标 claim，复用其他已完成 claim 的结果。
 
-后端已加兜底逻辑：
+重跑期间旧报告会保留，界面显示进度条和当前阶段。
 
-- 抖音精选会优先把视频标题、文案、描述、话题标签当作“平台字幕/元信息”使用
-- `bcut` 第三方服务异常时，会自动回退到 `fast-whisper`
-- `bcut` 返回空转写时，也会自动回退到 `fast-whisper`
-- 如果音频转写很短、明显不是中文、或像示例里误识别成英文数字，后端会把抖音元信息合并进转写内容，避免笔记只基于错误 ASR
+## 历史任务
 
-首次触发 `fast-whisper tiny` 时，会下载约 72MB 模型到：
+资料库中的任务分为两类：
 
-```text
-backend/models/whisper/whisper-tiny
-```
+- 已有核验报告：显示 `支持`、`反证`、`混合`、`证据不足`、`数据空缺` 或 `信源风险`。
+- 旧笔记/历史任务：如果没有 `verification_result`，会显示 `未联网核实`，并进入 `需复核`。
 
-## 抖音 Cookie
+打开旧笔记后，联网核实视图会提供 `发起联网核实`，用于把旧笔记升级为可审计核验报告。
 
-抖音视频详情接口依赖有效 Cookie。
+## 兼容能力
 
-如果出现视频详情为空、提示需要登录、或下载失败，优先检查：
+旧的视频笔记能力仍保留为次级产物：
 
-1. 浏览器插件是否已同步抖音 Cookie。
-2. Cookie 是否过期。
-3. 后端是否能读取到 Cookie。
+- 抖音精选链接解析
+- 音频转写
+- Markdown 笔记
+- 思维导图
+- 知识卡片
+- 基于笔记内容的 AI 问答
+
+这些能力不再是 P0。旧笔记不能默认视为已经联网核实。
+
+## 抖音输入诊断
+
+如果继续使用旧抖音视频笔记流程，可能仍需要 Cookie。
 
 检查接口：
-
-```text
-http://127.0.0.1:8483/api/get_downloader_cookie/douyin
-```
-
-推荐检查接口：
 
 ```text
 http://127.0.0.1:8483/api/downloader_cookie_status/douyin
 ```
 
-如果使用 Docker 启动，对应地址是：
+Docker 模式：
 
 ```text
 http://127.0.0.1:3015/api/downloader_cookie_status/douyin
 ```
 
-正常情况下应看到：
+浏览器扩展当前发布范围是 popup：
 
-```json
-{
-  "configured": true,
-  "valid_looking": true,
-  "cookie_count": 2
-}
-```
+- 提交当前页面 URL 或粘贴文本到 `/api/verification_tasks`
+- 打开 Web 工作台深链
+- 提供抖音输入诊断入口
 
-`valid_looking = false` 时，通常说明 Cookie 已保存但缺少 `ttwid`、`msToken` 等关键字段，需要重新同步。
+## 结果位置
 
-### 推荐同步方式
-
-1. 在浏览器中打开抖音精选并登录。
-2. 打开 Reel Mind 浏览器扩展 popup。
-3. 点击顶部 Cookie 状态块里的“同步 Cookie”。
-4. 返回 Web 前端设置页，点击“刷新状态”确认已配置。
-
-Web 设置页不能直接读取浏览器跨域 Cookie，因此只保留手动粘贴作为兜底；真正的一键同步入口在浏览器扩展 popup 和扩展设置页。
-
-## 结果文件位置
-
-生成结果会写入：
+结果文件默认写入：
 
 ```text
 backend/note_results/
 ```
 
-常见文件：
+核验任务会保存：
 
 ```text
-{task_id}.json
-{task_id}.status.json
-{task_id}_audio.json
-{task_id}_transcript.json
-{task_id}_markdown.md
-{task_id}_markdown.status.json
+_verification/<task_id>/claims/<claim_id>.json
 ```
 
-查看任务状态：
+常用接口：
 
 ```text
-http://127.0.0.1:8483/api/task_status/{task_id}
+POST http://127.0.0.1:8483/api/verification_tasks
+GET  http://127.0.0.1:8483/api/verification_tasks/{task_id}
+POST http://127.0.0.1:8483/api/verification_tasks/{task_id}/rerun
+POST http://127.0.0.1:8483/api/verification_tasks/{task_id}/claims/{claim_id}/rerun
+GET  http://127.0.0.1:8483/api/verification_tasks
 ```
 
-Docker 模式：
+兼容旧任务接口：
 
 ```text
-http://127.0.0.1:3015/api/task_status/{task_id}
+GET http://127.0.0.1:8483/api/task_status/{task_id}
+GET http://127.0.0.1:8483/api/tasks
 ```
-
-查看已生成知识卡片列表：
-
-```text
-http://127.0.0.1:8483/api/tasks
-```
-
-Docker 模式：
-
-```text
-http://127.0.0.1:3015/api/tasks
-```
-
-`/api/tasks` 当前优先从数据库读取任务记录和收藏元数据，并兼容读取旧的 `note_results` 文件。
 
 ## 常见问题
 
-### 页面一直显示“后端正在初始化”
+### 页面一直显示后端初始化
 
-优先检查前端是否指向了正确后端：
+确认前端 API 地址：
 
 ```powershell
 $env:VITE_API_BASE_URL="http://127.0.0.1:8483/api"
 ```
 
-然后重启前端。
+然后重启前端。浏览器缓存旧代码时按 `Ctrl + F5`。
 
-如果浏览器缓存了旧代码，按 `Ctrl + F5` 强制刷新。
+### 报告没有 supported
 
-### 打开后端地址显示 Not Found
+这通常是正确的保守行为。以下情况不能输出 `supported`：
 
-不要打开：
+- 只有搜索摘要，没有正文证据。
+- 抓取失败或正文为空。
+- 只有论坛、社交、SEO、榜单、营销页。
+- 信源疑似伪权威、重定向异常、canonical 异常。
+- 降级搜索不可用。
 
-```text
-http://127.0.0.1:8483
-```
+### 旧笔记显示未联网核实
 
-应该打开前端：
+旧任务没有可审计 `verification_result`。打开任务后点击 `发起联网核实`，系统会尝试基于旧任务内容补充证据报告。
 
-```text
-http://127.0.0.1:3015
-```
+## 下一步重点
 
-后端只通过 `/api/...` 提供接口。
-
-Docker 模式下建议直接打开：
-
-```text
-http://127.0.0.1:3015
-```
-
-并用下面接口验证后端：
-
-```text
-http://127.0.0.1:3015/api/sys_check
-```
-
-### 生成失败：第三方服务异常
-
-通常是 `bcut` 在线转写服务波动。当前代码会自动回退到 `fast-whisper`。
-
-如果仍失败，检查：
-
-- `backend/models/whisper/whisper-tiny` 是否下载完整
-- 后端日志里的具体异常
-- 本机是否能正常读取音频文件
-
-### 生成成功但内容很少
-
-部分抖音精选视频可能是：
-
-- 背景音乐为主
-- 画面文字为主
-- 字幕/视觉信息承载主要知识
-- 音频里没有完整讲解
-
-当前后端已经会优先使用抖音标题、文案、描述、话题标签，并在 ASR 结果低质量时合并这些元信息。若仍然内容很少，通常说明主要知识在画面文字里，后续需要增强“视频理解/截图 OCR/页面字幕提取”能力。
-
-## 当前未完成事项
-
-还没彻底产品化的部分：
-
-- 删除接口按 `task_id` 会清理结果文件和向量索引；按 `video_id` 删除时仍需要补齐对应文件清理。
-- `/api/tasks` 已优先读数据库，但仍保留扫描旧 `note_results` 的兼容路径；后续可做一次性导入/迁移。
-- 生成失败原因还没有产品化分类展示，常见失败包括 Cookie 缺失/过期、模型供应商未配置、ASR 失败、抖音详情接口失败、LLM 调用失败。
-- 思维导图已有专用 prompt 和专用章节渲染，但导出按钮和导出体验仍偏工程化。
-- 针对画面文字信息多的视频，仍需增强截图 OCR 或视频理解路径。
-
-## 推荐下一步
-
-下一位接手的人建议优先做：
-
-1. 补齐删除清理：数据库记录、结果 JSON、状态文件、转写缓存、Markdown 缓存、向量索引统一清理。
-2. 做生成失败原因分类和用户可读提示。
-3. 做一次真实端到端回归：同步 Cookie、生成笔记、编辑收藏元数据、刷新恢复、删除清理。
-4. 针对画面文字信息多的视频，补充截图 OCR 或视频理解路径。
+1. 继续扩充真实 GEO/language disagreement fixtures。
+2. 扩展 prompt injection、SEO farm、fake authority、repost、data void 测试。
+3. 处理 standalone `tsc --noEmit` 里的历史前端类型错误。
+4. 决定扩展是否激活 sidepanel/content script；如果激活，必须转向进度/证据/选中文本核验。
+5. 持续清理旧文档里的 note-first 和 Cookie-first 叙事。

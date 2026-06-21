@@ -56,6 +56,14 @@ function getSourceCount(task: Task) {
   return verification?.sources?.length || claimSourceUrls.size
 }
 
+function isFirstClassVerificationTask(task: Task) {
+  return task.platform === 'verification' || ['text', 'url'].includes(task.formData?.input_mode || '')
+}
+
+function isUnverifiedLegacyTask(task: Task) {
+  return task.status === 'SUCCESS' && !task.insights?.verification && !isFirstClassVerificationTask(task)
+}
+
 function formatDate(value?: string) {
   if (!value) return ''
   const date = new Date(value)
@@ -96,6 +104,14 @@ const verdictTone: Record<string, string> = {
 function VerdictMark({ task }: { task: Task }) {
   const verification = task.insights?.verification
   const status = verification?.overall?.status
+  if (!status && isUnverifiedLegacyTask(task)) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-sm bg-amber-50 px-2 py-1 text-xs text-amber-700">
+        <SearchCheck className="h-3 w-3" />
+        未联网核实
+      </span>
+    )
+  }
   if (!status) return <StatusMark task={task} />
 
   return (
@@ -308,6 +324,7 @@ export default function LibraryPage() {
         getNotebookTitle(task),
         task.formData?.video_url,
         task.insights?.verification?.overall?.status,
+        isUnverifiedLegacyTask(task) ? '未联网核实' : '',
         task.collection?.folder,
         ...(task.collection?.tags || []),
         task.collection?.note,
@@ -324,6 +341,7 @@ export default function LibraryPage() {
       return searchedTasks.filter(task => {
         const verification = task.insights?.verification
         return (
+          isUnverifiedLegacyTask(task) ||
           task.status === 'FAILED' ||
           Boolean(verification?.risk_flags?.length) ||
           ['refuted', 'mixed', 'insufficient', 'data_void', 'source_risk'].includes(verification?.overall?.status || '')

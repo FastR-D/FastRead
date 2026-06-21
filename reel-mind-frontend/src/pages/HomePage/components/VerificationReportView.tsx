@@ -601,10 +601,26 @@ export default function VerificationReportView({ task }: VerificationReportViewP
           <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-sm border border-slate-200 bg-white text-slate-400">
             <SearchCheck className="h-4 w-4" />
           </div>
-          <p className="mt-3 text-sm font-semibold text-slate-800">等待联网核实任务</p>
-          <p className="mt-1 text-xs leading-5 text-slate-500">
-            提交 URL 或文本后，会在这里显示证据矩阵与逐条判定。
+          <p className="mt-3 text-sm font-semibold text-slate-800">
+            {task?.id ? '未联网核实' : '等待联网核实任务'}
           </p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            {task?.id
+              ? '这条旧笔记还没有证据矩阵与逐条判定。发起联网核实后，报告会覆盖主张、来源、证据和风险旗标。'
+              : '提交 URL 或文本后，会在这里显示证据矩阵与逐条判定。'}
+          </p>
+          {task?.id && (
+            <Button
+              type="button"
+              onClick={handleVerify}
+              disabled={reportBusy}
+              className="mt-4 h-8"
+              size="sm"
+            >
+              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${reportBusy ? 'animate-spin' : ''}`} />
+              {reportBusy ? '核实中' : '发起联网核实'}
+            </Button>
+          )}
         </div>
       </div>
     )

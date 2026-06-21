@@ -81,6 +81,8 @@ Latest backend verification increments on 2026-06-21:
 Latest documentation/config increments before handoff:
 
 - Root `README.md` now describes ReelMind as verification-first in the first screen, usage flow, config table, extension section, and roadmap.
+- `README-usage.md`, `DEPLOYMENT.md`, `docs/deployment.md`, `OPEN_ME_FIRST.md`, and `task/ReelMind_使用指南.md` now present text/URL verification as the primary workflow.
+- `task/ReelMind_PRD_汇报版.md` is explicitly marked as a historical note/video-first PRD superseded by the verification-first direction.
 - Root `.env.example` already documents Brave search, degraded behavior, and OpenAI-compatible examples without real keys.
 - `backend/.env.example` is aligned to local backend port `8483`, and now includes `NOTE_OUTPUT_DIR`, `BACKEND_HOST`, `BACKEND_PORT`, Brave/search settings, degraded-mode comments, and OpenAI/DeepSeek placeholder examples without secrets.
 - `readme/refactor-plan-2026-06-04.md` no longer lists completed persistence/cache/source-registry/GEO/taskization/popup/docs work as undone; remaining gaps are closer to the current implementation state.
@@ -130,6 +132,8 @@ The web app now defaults toward verification:
 - Left-panel rerun uses the same active-task path and no longer waits for the rerun request to finish before polling can begin.
 - `/workspace?task_id=<id>` deep links now select restored backend tasks after `loadSavedTasks()`.
 - Task snapshot timestamp normalization accepts both `createdAt/updatedAt` and `created_at/updated_at`.
+- Legacy note/history tasks with no `verification_result` now display `未联网核实` in the library and are included in `需复核`.
+- Opening an old note's verification workspace now offers `发起联网核实` instead of a passive waiting state.
 
 ### Extension Pivot
 
@@ -303,7 +307,7 @@ cd reel-mind-frontend
 node_modules\.bin\eslint.cmd src\pages\HomePage\components\VerificationReportView.tsx src\pages\HomePage\components\MarkdownViewer.tsx src\pages\HomePage\components\NoteForm.tsx src\hooks\useTaskPolling.ts
 ```
 
-Latest result: passed for touched rerun/progress files.
+Latest result: passed for touched rerun/progress/library files.
 
 Full frontend build:
 
@@ -312,7 +316,7 @@ cd reel-mind-frontend
 npm run build
 ```
 
-Latest result: passed in about 2m48s. Existing warnings remain for `lottie-web` eval usage and large chunks.
+Latest result: passed in about 1m26s after the old-note verification-entry cleanup. Existing warnings remain for `lottie-web` eval usage and large chunks.
 
 Extension:
 
@@ -361,8 +365,8 @@ Known untracked or generated paths from this work:
 2. Anti-manipulation: expand prompt injection, SEO farm, republished press release, listicle, fake authority, and data void fixtures beyond the current unit coverage.
 3. Frontend health: investigate the existing standalone `tsc --noEmit` errors separately from verification feature work.
 4. Extension: decide whether to activate/fix sidepanel/content scripts or keep popup-only MVP; if activating, pivot sidepanel to progress/evidence and content script to selected-text/page-URL verification.
-5. Product cleanup: make verification report the only first-class workspace; keep Markdown/mind map/cards/Q&A as secondary artifacts.
-6. Documentation/env cleanup: root README and env examples were updated in this handoff pass; next agent should review `README-usage.md`, `OPEN_ME_FIRST.md`, `DEPLOYMENT.md`, `task/`, and older readme handoff docs for stale note-first/Cookie-first wording.
+5. Product cleanup: verification report is now the first-class workspace and old notes expose an explicit verification entry; continue moving Markdown/mind map/cards/Q&A into secondary-artifact paths.
+6. Documentation/env cleanup: primary user/deployment docs now point to verification-first; continue keeping historical PRDs/handoffs clearly marked so old note-first language is not mistaken for current scope.
 
 ## Hard Constraints For Next Agent
 

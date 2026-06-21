@@ -301,11 +301,14 @@ Implemented:
   - Brave key
   - degraded mode behavior
   - DeepSeek/OpenAI-compatible provider examples without secrets
+- old note tasks display `未联网核实`
+- old note pages offer `发起联网核实`
+- `README-usage.md`, `DEPLOYMENT.md`, `docs/deployment.md`, `OPEN_ME_FIRST.md`, and `task/ReelMind_使用指南.md` use verification-first user/deployment wording
+- historical PRD is marked as superseded by verification-first direction
 
 Still needed:
 
-- old note tasks display `未联网核实`
-- old note pages offer `发起联网核实`
+- keep historical PRDs/handoffs clearly marked when they preserve old note-first context
 
 ## Test Plan
 

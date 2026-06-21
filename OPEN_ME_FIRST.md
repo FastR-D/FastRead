@@ -12,6 +12,8 @@ When the browser opens, use:
 http://127.0.0.1:3015/
 ```
 
+Paste text or a URL, then click `开始联网核实` to generate an auditable verification report.
+
 Stop the project with `run.bat --stop`.
 
 Docker is optional. Use `docker compose` only when you explicitly want the container deployment path.
