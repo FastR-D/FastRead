@@ -53,6 +53,10 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: path => path.replace(/^\/static/, '/static'),
         },
+        '/uploads': {
+          target: proxyTarget,
+          changeOrigin: true,
+        },
       },
     },
   }

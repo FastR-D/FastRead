@@ -4,11 +4,13 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Trash2, ChevronDown, ChevronUp, BookOpen, UserRound, Bot, Maximize2, Minimize2, Library } from 'lucide-react'
+import { Trash2, ChevronDown, ChevronUp, BookOpen, UserRound, Bot, Maximize2, Minimize2, Library, ExternalLink } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useChatStore } from '@/store/chatStore'
 import { useTaskStore } from '@/store/taskStore'
+import { useModelStore } from '@/store/modelStore'
 import { askQuestion, getChatStatus, indexTask, type ChatSource, type IndexStatus } from '@/services/chat'
+import { resolve_backend_resource_url } from '@/services/note'
 
 type ChatMode = 'half' | 'full'
 
@@ -35,15 +37,41 @@ function SourceBadges({ sources }: { sources: ChatSource[] }) {
       </button>
       {expanded && (
         <div className="mt-1 flex flex-wrap gap-1">
-          {sources.map((s, i) => (
-            <Badge key={i} variant="outline" className="text-xs font-normal">
-              {s.title
-                ? `${s.title.slice(0, 16)} · ${s.source_type === 'markdown' ? '笔记' : s.source_type === 'meta' ? '信息' : '转录'}`
-                : s.source_type === 'markdown'
-                ? s.section_title || '笔记'
-                : `${(s.start_time ?? 0).toFixed(0)}s ~ ${(s.end_time ?? 0).toFixed(0)}s`}
-            </Badge>
-          ))}
+          {sources.map((source, index) => {
+            const pageLabel = source.page_start
+              ? `第 ${source.page_start}${source.page_end && source.page_end !== source.page_start ? `–${source.page_end}` : ''} 页`
+              : '论文原文'
+            const typeLabel = source.source_type === 'paper_page'
+              ? pageLabel
+              : source.source_type === 'reading_report'
+                ? '阅读报告'
+                : source.source_type === 'verification'
+                  ? '核验证据'
+                  : source.source_type === 'markdown'
+                    ? source.section_title || '笔记'
+                    : source.source_type === 'meta'
+                      ? '信息'
+                      : source.start_time != null && source.end_time != null
+                        ? `${source.start_time.toFixed(0)}s ~ ${source.end_time.toFixed(0)}s`
+                        : '原文'
+            const label = source.title ? `${source.title.slice(0, 24)} · ${typeLabel}` : typeLabel
+            const href = resolve_backend_resource_url(source.source_url)
+              || (source.doi ? `https://doi.org/${source.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')}` : '')
+            const badge = (
+              <Badge variant="outline" className="gap-1 text-xs font-normal">
+                {label}
+                {href && <ExternalLink className="h-2.5 w-2.5" />}
+              </Badge>
+            )
+
+            return href ? (
+              <a key={`${source.source_url || source.doi || index}`} href={href} target="_blank" rel="noreferrer" title="打开引用原文">
+                {badge}
+              </a>
+            ) : (
+              <span key={index}>{badge}</span>
+            )
+          })}
         </div>
       )}
     </div>
@@ -62,17 +90,30 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
   const addMessage = useChatStore(state => state.addMessage)
   const clearChat = useChatStore(state => state.clearChat)
 
-  const currentTaskId = useTaskStore(state => state.currentTaskId)
   const tasks = useTaskStore(state => state.tasks)
-  const currentTask = useMemo(
-    () => tasks.find(t => t.id === currentTaskId) ?? null,
-    [tasks, currentTaskId],
+  const task = useMemo(
+    () => tasks.find(item => item.id === taskId) ?? null,
+    [tasks, taskId],
   )
+  const modelList = useModelStore(state => state.modelList)
+  const loadEnabledModels = useModelStore(state => state.loadEnabledModels)
 
-  const modelTask = useMemo(
-    () => currentTask || tasks.find(t => t.formData?.provider_id && t.formData?.model_name) || null,
-    [currentTask, tasks],
-  )
+  useEffect(() => {
+    if (modelList.length === 0) loadEnabledModels()
+  }, [loadEnabledModels, modelList.length])
+
+  const model = useMemo(() => {
+    const reportModel = task?.insights?.reading_report?.model
+    const providerId = task?.formData?.provider_id || reportModel?.provider_id
+    const modelName = task?.formData?.model_name || reportModel?.model_name
+    if (providerId || modelName) {
+      return modelList.find(item =>
+        item.provider_id === providerId && item.model_name === modelName
+      )
+    }
+    return modelList[0]
+  }, [modelList, task?.formData?.model_name, task?.formData?.provider_id, task?.insights?.reading_report?.model])
+  const suggestedQuestions = task?.insights?.reading_report?.suggested_questions || []
 
   // 检查索引状态。索引只是增强能力，不能阻塞基础问答。
   useEffect(() => {
@@ -110,8 +151,8 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
       const question = value.trim()
       if (!question || loading) return
 
-      const providerId = modelTask?.formData?.provider_id
-      const modelName = modelTask?.formData?.model_name
+      const providerId = model?.provider_id
+      const modelName = model?.model_name
       if (!providerId || !modelName) {
         toast.error('无法获取模型配置，请确认任务已完成')
         return
@@ -142,7 +183,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
         setLoading(false)
       }
     },
-    [loading, taskId, chatKey, scope, modelTask, messages, addMessage],
+    [loading, taskId, chatKey, scope, model, messages, addMessage],
   )
 
   // 转换为 Bubble.List 的数据格式
@@ -284,10 +325,24 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
         {messages.length === 0 && !loading ? (
           <div className="flex h-full items-center justify-center text-center text-sm text-neutral-400">
             <div>
-              <p>针对笔记内容提问</p>
+              <p>针对论文与阅读报告持续追问</p>
               <p className="mt-1 text-xs">
-                {scope === 'task' ? '例如：这个视频的核心观点是什么？' : '例如：这些视频共同提到的行动建议是什么？'}
+                {scope === 'task' ? '回答会优先引用论文原文页码。' : '可跨论文比较共同结论与差异。'}
               </p>
+              {scope === 'task' && suggestedQuestions.length > 0 && (
+                <div className="mx-auto mt-4 flex max-w-md flex-wrap justify-center gap-2 px-4">
+                  {suggestedQuestions.slice(0, 4).map(question => (
+                    <button
+                      key={question}
+                      type="button"
+                      onClick={() => handleSend(question)}
+                      className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-left text-xs text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                    >
+                      {question}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         ) : (

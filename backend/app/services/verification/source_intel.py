@@ -4,6 +4,7 @@ import hashlib
 import re
 from urllib.parse import urlparse
 
+from app.services.academic_evidence import assess_academic_identity
 from app.services.verification import source_registry
 from app.services.verification.text_utils import domain as parse_domain, strip_html
 
@@ -196,6 +197,7 @@ def classify_source(result: dict, fetched: dict | None = None) -> dict:
     missing_author = bool(fetched_body and not author)
     missing_published_date = bool(fetched_body and not published_at)
     missing_source_identity = bool(missing_publisher and missing_author and missing_published_date)
+    academic = assess_academic_identity({**result, **fetched, "canonical_url": canonical_url, "url": url})
 
     tier = "D"
     reasons = []
@@ -237,6 +239,23 @@ def classify_source(result: dict, fetched: dict | None = None) -> dict:
     elif missing_published_date:
         reasons.append("fetched body lacks published date metadata")
 
+    risk_flags = detect_source_risks({
+        **result,
+        "domain": source_domain,
+        "fetch_status": fetch_status,
+        "fake_authority": fake_authority,
+        "canonical_anomaly": canonical_anomaly,
+        "redirect_anomaly": redirect_anomaly,
+        "missing_source_identity": missing_source_identity,
+        "missing_publisher": missing_publisher,
+        "missing_author": missing_author,
+        "missing_published_date": missing_published_date,
+    }, text)
+    if academic["level"] == "U":
+        risk_flags.append("academic_identity_incomplete")
+    if academic["publication_status"] == "retracted":
+        risk_flags.append("retracted_or_withdrawn")
+
     return {
         "source_id": source_id_for(url, canonical_url, text_hash),
         "url": url,
@@ -245,7 +264,12 @@ def classify_source(result: dict, fetched: dict | None = None) -> dict:
         "title": title[:200],
         "publisher": publisher,
         "author": author,
+        "authors": fetched.get("authors") or result.get("authors") or ([author] if author else []),
         "published_at": published_at,
+        "doi": academic.get("doi") or "",
+        "venue": academic.get("venue") or {},
+        "pdf_url": fetched.get("pdf_url") or result.get("pdf_url") or "",
+        "academic": academic,
         "retrieved_at": fetched.get("retrieved_at") or "",
         "source_type": fetched.get("source_type") or "web",
         "redirect_chain": fetched.get("redirect_chain") or [],
@@ -257,18 +281,7 @@ def classify_source(result: dict, fetched: dict | None = None) -> dict:
         "fetch_status": fetch_status,
         "snippet": result.get("snippet") or "",
         "trusted": tier in {"A", "B"},
-        "risk_flags": detect_source_risks({
-            **result,
-            "domain": source_domain,
-            "fetch_status": fetch_status,
-            "fake_authority": fake_authority,
-            "canonical_anomaly": canonical_anomaly,
-            "redirect_anomaly": redirect_anomaly,
-            "missing_source_identity": missing_source_identity,
-            "missing_publisher": missing_publisher,
-            "missing_author": missing_author,
-            "missing_published_date": missing_published_date,
-        }, text),
+        "risk_flags": sorted(set(risk_flags)),
     }
 
 

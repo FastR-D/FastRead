@@ -7,12 +7,16 @@ export interface ChatMessage {
 
 export interface ChatSource {
   text: string
-  source_type: 'meta' | 'markdown' | 'transcript' | 'unknown'
+  source_type: 'meta' | 'markdown' | 'transcript' | 'reading_report' | 'verification' | 'paper_page' | 'unknown'
   task_id?: string
   title?: string
   section_title?: string
   start_time?: number
   end_time?: number
+  page_start?: number
+  page_end?: number
+  source_url?: string
+  doi?: string
 }
 
 export interface AskResponse {
@@ -20,7 +24,7 @@ export interface AskResponse {
   sources: ChatSource[]
 }
 
-export type IndexStatus = 'idle' | 'indexing' | 'indexed' | 'failed'
+export type IndexStatus = 'disabled' | 'idle' | 'indexing' | 'indexed' | 'failed'
 
 export interface ChatStatusResponse {
   indexed: boolean

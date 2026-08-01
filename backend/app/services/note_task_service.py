@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime
+from pathlib import Path
+import re
 import time
 import uuid
 from typing import Callable, Optional, Protocol
+from urllib.parse import urlparse
 
 from app.db.video_task_dao import (
     delete_task_by_task_id,
@@ -14,6 +17,7 @@ from app.db.video_task_dao import (
     update_task_collection,
     upsert_video_task,
 )
+from app.core.settings import get_settings
 from app.enmus.note_enums import DownloadQuality
 from app.enmus.task_status_enums import TaskStatus
 from app.models.task_snapshot import TaskSnapshot
@@ -172,12 +176,42 @@ class NoteTaskService:
         return deleted
 
     def delete_task_artifacts(self, task_id: str) -> int:
+        deleted_upload = self._delete_owned_paper_upload(task_id)
         deleted_files = self.artifacts.delete_task_files(task_id)
         try:
             self._vector_store_factory().delete_index(task_id)
         except Exception as exc:
             logger.warning(f"删除向量索引失败（不影响任务删除）: {exc}")
-        return deleted_files
+        return deleted_files + deleted_upload
+
+    def _delete_owned_paper_upload(self, task_id: str) -> int:
+        """Delete only UUID-named PDFs created by the local paper upload endpoint."""
+        result = self.artifacts.read_result(task_id) or {}
+        paper = result.get("paper_document") or {}
+        if not (result.get("paper_task") and paper):
+            return 0
+
+        settings = get_settings()
+        uploads_prefix = settings.uploads_path.rstrip("/") + "/"
+        raw_url = str(paper.get("pdf_url") or paper.get("source_url") or "")
+        parsed_path = urlparse(raw_url).path
+        if not parsed_path.startswith(uploads_prefix):
+            return 0
+
+        filename = Path(parsed_path).name
+        if not re.fullmatch(r"[0-9a-f]{32}\.pdf", filename, re.IGNORECASE):
+            return 0
+
+        uploads_dir = settings.uploads_dir.resolve()
+        target = (uploads_dir / filename).resolve()
+        if target.parent != uploads_dir or not target.is_file():
+            return 0
+        try:
+            target.unlink()
+            return 1
+        except Exception as exc:
+            logger.warning(f"删除论文上传文件失败 ({target}): {exc}")
+            return 0
 
     def update_collection(
         self,
@@ -235,8 +269,16 @@ class NoteTaskService:
         )
         result["insights"] = insights
         self._attach_verification_artifact_refs(task_id, result)
-        self.artifacts.write_result(task_id, result)
-        return {"ok": True, "data": {"task_id": task_id, "insights": insights}}
+
+        def merge_online_verification(latest: dict) -> dict:
+            latest_insights = latest.setdefault("insights", {})
+            latest_insights["verification"] = insights["verification"]
+            latest["insights"] = latest_insights
+            self._attach_verification_artifact_refs(task_id, latest)
+            return latest
+
+        merged = self.artifacts.update_result(task_id, merge_online_verification)
+        return {"ok": True, "data": {"task_id": task_id, "insights": merged.get("insights") or {}}}
 
     def create_verification_task(
         self,
@@ -299,6 +341,7 @@ class NoteTaskService:
         rerun_claim_ids = set(rerun_claim_ids or set())
         rerun_claim_texts = {str(text) for text in (rerun_claim_texts or set()) if str(text)}
         input_source_audit = None
+        rebuild_seed_from_fetched_body = False
         try:
             text = input_payload.get("text") or ""
             url = input_payload.get("url") or ""
@@ -308,6 +351,19 @@ class NoteTaskService:
                 input_source_audit = self._input_source_audit(url, snapshot)
                 text = snapshot.get("text") or url
                 result["transcript"] = {"full_text": text, "segments": [], "language": "zh"}
+                if snapshot.get("text"):
+                    rebuild_seed_from_fetched_body = True
+                    audio_meta = result.setdefault("audio_meta", {})
+                    audio_meta["title"] = snapshot.get("title") or audio_meta.get("title") or "联网核实任务"
+                    raw_info = audio_meta.setdefault("raw_info", {})
+                    raw_info.update({
+                        "url": snapshot.get("url") or url,
+                        "authors": snapshot.get("authors") or ([snapshot.get("author")] if snapshot.get("author") else []),
+                        "published_at": snapshot.get("published_at") or "",
+                        "venue": snapshot.get("venue") or "",
+                        "doi": snapshot.get("doi") or "",
+                        "page_spans": snapshot.get("page_spans") or [],
+                    })
 
             if input_payload.get("source_task_id"):
                 source_result = self.artifacts.read_result(input_payload["source_task_id"])
@@ -317,10 +373,18 @@ class NoteTaskService:
 
             self.update_status(task_id, TaskStatus.SEARCHING_WEB, "多策略联网检索")
             insights = result.setdefault("insights", {})
-            verification = insights.get("verification") or self._build_verification_seed(
-                text=text,
-                url=url,
-                max_claims=input_payload.get("max_claims", 50),
+            verification = (
+                self._build_verification_seed(
+                    text=text,
+                    url="",
+                    max_claims=input_payload.get("max_claims", 50),
+                )
+                if rebuild_seed_from_fetched_body
+                else insights.get("verification") or self._build_verification_seed(
+                    text=text,
+                    url=url,
+                    max_claims=input_payload.get("max_claims", 50),
+                )
             )
             reusable_results = (
                 self._reusable_verification_claim_results(
@@ -350,13 +414,35 @@ class NoteTaskService:
             if input_source_audit and result["verification_result"]:
                 result["verification_result"].setdefault("audit", {})["input_source"] = input_source_audit
             self._attach_verification_artifact_refs(task_id, result)
-            self.artifacts.write_result(task_id, result)
+
+            def merge_verification_task(latest: dict) -> dict:
+                if rebuild_seed_from_fetched_body:
+                    latest["transcript"] = result.get("transcript") or latest.get("transcript") or {}
+                    latest_audio = latest.setdefault("audio_meta", {})
+                    result_audio = result.get("audio_meta") or {}
+                    if result_audio.get("title"):
+                        latest_audio["title"] = result_audio["title"]
+                    latest_raw = latest_audio.setdefault("raw_info", {})
+                    latest_raw.update(result_audio.get("raw_info") or {})
+                    latest["audio_meta"] = latest_audio
+                if result.get("source_result"):
+                    latest["source_result"] = result["source_result"]
+                latest_insights = latest.setdefault("insights", {})
+                latest_insights["verification"] = insights["verification"]
+                latest["insights"] = latest_insights
+                latest["verification_result"] = result.get("verification_result")
+                latest.pop("verification_error", None)
+                self._attach_verification_artifact_refs(task_id, latest)
+                return latest
+
+            self.artifacts.update_result(task_id, merge_verification_task)
             self.update_status(task_id, TaskStatus.SUCCESS, "联网核实完成")
         except Exception as exc:
             logger.error(f"联网核实任务失败 (task_id={task_id}): {exc}", exc_info=True)
-            result = result or {}
-            result["verification_error"] = str(exc)
-            self.artifacts.write_result(task_id, result)
+            self.artifacts.update_result(
+                task_id,
+                lambda latest: {**latest, "verification_error": str(exc)},
+            )
             self.update_status(task_id, TaskStatus.FAILED, f"联网核实失败: {exc}")
 
     def rerun_verification_task(self, task_id: str, retry_failed_only: bool = True) -> dict:
@@ -708,7 +794,10 @@ class NoteTaskService:
         return result
 
     def get_note_insights(self, result: dict) -> Optional[dict]:
-        if result.get("insights") and result["insights"].get("verification"):
+        if result.get("insights") and any(
+            result["insights"].get(key)
+            for key in ("verification", "reading_report", "academic_gate")
+        ):
             return result.get("insights")
 
         markdown = result.get("markdown") or ""

@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 ARTIFACTS = NoteArtifactRepository()
 CHAT_VECTOR_INDEX_ENABLED = os.getenv("CHAT_VECTOR_INDEX_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
 
-SYSTEM_PROMPT = """你是一个视频笔记问答助手。你拥有以下能力：
+SYSTEM_PROMPT = """你是 FastRead 的学术阅读问答助手。你拥有以下能力：
 
 1. 系统已自动检索了一些相关内容作为初始参考（见下方）
 2. 你可以调用工具主动查询更多信息：
@@ -28,8 +28,24 @@ SYSTEM_PROMPT = """你是一个视频笔记问答助手。你拥有以下能力�
 
 回答要求：
 - 如果初始检索内容不足以回答问题，请主动调用工具获取更多信息
-- 回答关于视频具体原话、细节时，用 lookup_transcript 查询原文
+- 回答关于原文具体表述、细节时，优先引用检索到的原文或报告证据
 - 回答关于作者、标题等基本信息时，用 get_video_info 查询
+- 明确区分“原文声称”“联网核验支持”和“领域共识”；证据不足时直接说明
+- 只有标注为“论文原文”的分页片段可以证明论文写了什么；阅读报告只是辅助导航，联网核验证据才可用于外部支持或反证
+- 引用论文时必须说明页码；若当前上下文没有能支持答案的分页原文，直接回答“原文证据不足”
+- 请用中文回答，保持简洁准确"""
+
+PAPER_SYSTEM_PROMPT = """你是 FastRead 的单篇论文阅读问答助手。
+
+--- 当前论文的分页原文与辅助材料 ---
+{context}
+---
+
+回答要求：
+- 论文原文分页片段是回答“论文写了什么”的唯一依据；阅读报告只用于导航，联网证据只用于外部支持或反证
+- 每个实质结论必须标明当前上下文给出的论文页码，不能把单篇论文的陈述升级为领域共识
+- 如果分页原文不足以回答，明确回答“原文证据不足”，不要用常识或模型记忆补写
+- 明确区分“原文声称”“外部核验支持”和“实验已复现”；没有实际运行证据时不得声称实验已复现
 - 请用中文回答，保持简洁准确"""
 
 LIBRARY_SYSTEM_PROMPT = """你是一个跨视频知识库问答助手。
@@ -57,6 +73,12 @@ def _build_context(chunks: list[dict]) -> str:
             label = "[视频信息]"
         elif source_type == "markdown":
             label = f"[笔记 - {meta.get('section_title', '')}]"
+        elif source_type == "reading_report":
+            label = "[学术阅读报告]"
+        elif source_type == "verification":
+            label = "[联网核验证据]"
+        elif source_type == "paper_page":
+            label = f"[论文原文 · 第 {meta.get('page_start', '?')} 页]"
         else:
             start = meta.get("start_time", 0)
             end = meta.get("end_time", 0)
@@ -89,6 +111,14 @@ def _build_sources(chunks: list[dict]) -> list[dict]:
             source["start_time"] = meta["start_time"]
         if meta.get("end_time") is not None:
             source["end_time"] = meta["end_time"]
+        if meta.get("page_start") is not None:
+            source["page_start"] = meta["page_start"]
+        if meta.get("page_end") is not None:
+            source["page_end"] = meta["page_end"]
+        if meta.get("source_url"):
+            source["source_url"] = meta["source_url"]
+        if meta.get("doi"):
+            source["doi"] = meta["doi"]
         sources.append(source)
     return sources
 
@@ -116,6 +146,46 @@ def _chunk_text(text: str, size: int = 520, overlap: int = 80) -> list[str]:
     return chunks
 
 
+def _reading_report_text(note_data: dict) -> str:
+    report = ((note_data.get("insights") or {}).get("reading_report") or {})
+    return json.dumps(report, ensure_ascii=False, default=str) if report else ""
+
+
+def _verification_text(note_data: dict) -> str:
+    insights = note_data.get("insights") or {}
+    verification = insights.get("verification") or {}
+    if not verification:
+        return ""
+    compact = {
+        "overall": verification.get("overall") or {},
+        "claims": verification.get("claims") or [],
+        "result": note_data.get("verification_result") or verification.get("result") or {},
+    }
+    return json.dumps(compact, ensure_ascii=False, default=str)
+
+
+def _paper_page_chunks(note_data: dict, task_id: str, title: str) -> list[dict]:
+    paper = note_data.get("paper_document") or {}
+    chunks = []
+    for page in paper.get("pages") or []:
+        page_number = int(page.get("page") or 1)
+        for index, text in enumerate(_chunk_text(page.get("text") or "", size=700, overlap=100)):
+            chunks.append({
+                "text": text,
+                "metadata": {
+                    "task_id": task_id,
+                    "title": title,
+                    "source_type": "paper_page",
+                    "chunk_index": index,
+                    "page_start": page_number,
+                    "page_end": page_number,
+                    "source_url": paper.get("pdf_url") or paper.get("source_url") or "",
+                    "doi": paper.get("doi") or "",
+                },
+            })
+    return chunks
+
+
 def _load_library_chunks() -> list[dict]:
     chunks = []
     for result_file in ARTIFACTS.iter_result_files():
@@ -130,7 +200,10 @@ def _load_library_chunks() -> list[dict]:
         title = audio_meta.get("title") or task_id
         markdown = note_data.get("markdown") or ""
         transcript = note_data.get("transcript") or {}
-        transcript_text = transcript.get("full_text") or ""
+        is_paper = bool(note_data.get("paper_task") or note_data.get("paper_document"))
+        transcript_text = "" if is_paper else (transcript.get("full_text") or "")
+        reading_report_text = _reading_report_text(note_data)
+        verification_text = _verification_text(note_data)
         tags = raw_info.get("tags") if isinstance(raw_info.get("tags"), list) else []
         meta_text = "\n".join(part for part in [
             f"视频标题：{title}",
@@ -142,6 +215,8 @@ def _load_library_chunks() -> list[dict]:
             ("meta", meta_text),
             ("markdown", markdown),
             ("transcript", transcript_text),
+            ("reading_report", reading_report_text),
+            ("verification", verification_text),
         ):
             for index, text in enumerate(_chunk_text(source_text)):
                 chunks.append({
@@ -153,6 +228,7 @@ def _load_library_chunks() -> list[dict]:
                         "chunk_index": index,
                     },
                 })
+        chunks.extend(_paper_page_chunks(note_data, task_id, title))
 
     return chunks
 
@@ -182,7 +258,10 @@ def _load_task_chunks(task_id: str) -> list[dict]:
     title = audio_meta.get("title") or task_id
     markdown = _normalize_markdown(note_data.get("markdown"))
     transcript = note_data.get("transcript") or {}
-    transcript_text = transcript.get("full_text") or ""
+    is_paper = bool(note_data.get("paper_task") or note_data.get("paper_document"))
+    transcript_text = "" if is_paper else (transcript.get("full_text") or "")
+    reading_report_text = _reading_report_text(note_data)
+    verification_text = _verification_text(note_data)
     tags = raw_info.get("tags") if isinstance(raw_info.get("tags"), list) else []
     meta_text = "\n".join(part for part in [
         f"视频标题：{title}",
@@ -197,6 +276,8 @@ def _load_task_chunks(task_id: str) -> list[dict]:
         ("meta", meta_text),
         ("markdown", markdown),
         ("transcript", transcript_text),
+        ("reading_report", reading_report_text),
+        ("verification", verification_text),
     ):
         for index, text in enumerate(_chunk_text(source_text)):
             chunks.append({
@@ -208,6 +289,7 @@ def _load_task_chunks(task_id: str) -> list[dict]:
                     "chunk_index": index,
                 },
             })
+    chunks.extend(_paper_page_chunks(note_data, task_id, title))
     return chunks
 
 
@@ -314,7 +396,10 @@ def chat(
     sources = _build_sources(chunks) if chunks else []
 
     # 2. 构建消息
-    system_msg = SYSTEM_PROMPT.format(context=context)
+    note_data = _load_task_data(task_id) or {}
+    is_paper = bool(note_data.get("paper_task") or note_data.get("paper_document"))
+    system_template = PAPER_SYSTEM_PROMPT if is_paper else SYSTEM_PROMPT
+    system_msg = system_template.format(context=context)
     messages = [{"role": "system", "content": system_msg}]
 
     for msg in history[-20:]:
@@ -326,6 +411,16 @@ def chat(
     gpt = _get_gpt(provider_id, model_name)
 
     logger.info(f"Chat: task_id={task_id}, model={model_name}")
+
+    # Paper answers must stay inside page-aware retrieval. Legacy video tools return
+    # unpaged transcript text, so exposing them here would weaken citation provenance.
+    if is_paper:
+        response = gpt.client.chat.completions.create(
+            model=gpt.model,
+            messages=messages,
+            temperature=0.3,
+        )
+        return {"answer": response.choices[0].message.content or "", "sources": sources}
 
     # 4. Tool calling 循环（最多 3 轮）
     max_rounds = 3

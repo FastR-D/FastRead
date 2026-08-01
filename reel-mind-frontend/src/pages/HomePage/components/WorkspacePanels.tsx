@@ -7,8 +7,9 @@ import ChatPanel from '@/pages/HomePage/components/ChatPanel.tsx'
 import KnowledgeCardsView from '@/pages/HomePage/components/KnowledgeCardsView.tsx'
 import MarkdownDocument from '@/pages/HomePage/components/MarkdownDocument.tsx'
 import VerificationReportView from '@/pages/HomePage/components/VerificationReportView.tsx'
+import ReadingReportView from '@/pages/HomePage/components/ReadingReportView.tsx'
 
-type ViewMode = 'verify' | 'map' | 'preview' | 'cards'
+type ViewMode = 'report' | 'verify' | 'map' | 'preview' | 'cards'
 type ChatMode = false | 'half' | 'full'
 
 interface WorkspacePanelsProps {
@@ -28,9 +29,39 @@ const WorkspacePanels: FC<WorkspacePanelsProps> = ({
   currentTask,
   setShowChat,
 }) =>
-  viewMode === 'verify' ? (
-    <div className="flex flex-1 overflow-hidden bg-slate-50/40">
-      <VerificationReportView task={currentTask} />
+  viewMode === 'report' ? (
+    <div className="flex min-h-0 flex-1 overflow-hidden bg-slate-50/40">
+      {showChat === 'full' && currentTask ? (
+        <div className="h-full min-h-0 w-full overflow-hidden">
+          <ChatPanel taskId={currentTask.id} mode="full" onModeChange={setShowChat} />
+        </div>
+      ) : (
+        <>
+          <div className="min-w-0 flex-1"><ReadingReportView task={currentTask} /></div>
+          {showChat === 'half' && currentTask && (
+            <div className="h-full min-h-0 w-1/2 shrink-0 overflow-hidden">
+              <ChatPanel taskId={currentTask.id} mode="half" onModeChange={setShowChat} />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  ) : viewMode === 'verify' ? (
+    <div className="flex min-h-0 flex-1 overflow-hidden bg-slate-50/40">
+      {showChat === 'full' && currentTask ? (
+        <div className="h-full min-h-0 w-full overflow-hidden">
+          <ChatPanel taskId={currentTask.id} mode="full" onModeChange={setShowChat} />
+        </div>
+      ) : (
+        <>
+          <div className="min-w-0 flex-1"><VerificationReportView task={currentTask} /></div>
+          {showChat === 'half' && currentTask && (
+            <div className="h-full min-h-0 w-1/2 shrink-0 overflow-hidden">
+              <ChatPanel taskId={currentTask.id} mode="half" onModeChange={setShowChat} />
+            </div>
+          )}
+        </>
+      )}
     </div>
   ) : viewMode === 'map' ? (
     <div className="flex min-h-0 w-full flex-1 overflow-hidden bg-white">

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import {
   BrainCircuit,
+  BookOpenCheck,
   Copy,
   Download,
   FileText,
@@ -50,8 +51,8 @@ interface NoteHeaderProps {
   setShowTranscribe: (show: boolean) => void
   showChat?: false | 'half' | 'full'
   setShowChat?: (mode: false | 'half' | 'full') => void
-  viewMode: 'verify' | 'map' | 'preview' | 'cards'
-  setViewMode: (mode: 'verify' | 'map' | 'preview' | 'cards') => void
+  viewMode: 'report' | 'verify' | 'map' | 'preview' | 'cards'
+  setViewMode: (mode: 'report' | 'verify' | 'map' | 'preview' | 'cards') => void
 }
 
 const VERDICT_TONE: Record<string, string> = {
@@ -199,14 +200,21 @@ export function MarkdownHeader({
 
       {/* 右侧：视图切换 + 工具操作 */}
       <div className="flex items-center gap-1">
-        {/* 视图切换：联网核实为主，其余次级 */}
+        {/* 视图切换：阅读报告为主，联网核实是证据层 */}
+        {viewBtn(
+          viewMode === 'report',
+          () => setViewMode('report'),
+          <BookOpenCheck className="h-3.5 w-3.5" />,
+          '阅读报告',
+          'NotebookLM 式关键问题阅读报告',
+          true,
+        )}
         {viewBtn(
           viewMode === 'verify',
           () => setViewMode('verify'),
           <SearchCheck className="h-3.5 w-3.5" />,
           '联网核实',
           '联网核实报告',
-          true,
         )}
         {viewBtn(
           viewMode === 'preview',

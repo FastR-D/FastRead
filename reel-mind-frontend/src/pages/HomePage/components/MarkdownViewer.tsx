@@ -21,7 +21,7 @@ interface MarkdownViewerProps {
 }
 
 type WorkspaceCommand = {
-  viewMode?: 'verify' | 'map' | 'preview' | 'cards'
+  viewMode?: 'report' | 'verify' | 'map' | 'preview' | 'cards'
   chat?: false | 'half' | 'full'
   transcribe?: boolean | 'toggle'
   action?: 'copy' | 'download'
@@ -48,7 +48,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const isMultiVersion = Array.isArray(currentTask?.markdown)
   const [showTranscribe, setShowTranscribe] = useState(false)
   const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
-  const [viewMode, setViewMode] = useState<'verify' | 'map' | 'preview' | 'cards'>('verify')
+  const [viewMode, setViewMode] = useState<'report' | 'verify' | 'map' | 'preview' | 'cards'>('report')
   const hasVerificationReport = Boolean(currentTask?.insights?.verification)
 
   // 多版本内容处理
@@ -110,7 +110,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         setViewMode(command.viewMode)
       }
       if (command.chat !== undefined) {
-        setViewMode('preview')
+        if (!command.viewMode && command.chat === 'full') setViewMode('report')
         setShowChat(command.chat)
       }
       if (command.transcribe !== undefined) {

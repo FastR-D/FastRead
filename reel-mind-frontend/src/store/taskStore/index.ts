@@ -175,6 +175,56 @@ export interface ClaimVerification {
   claims: VerificationClaim[]
 }
 
+export interface AcademicGate {
+  level: 'A1' | 'A2' | 'B1' | 'U' | 'N/A'
+  label: string
+  gate_passed: boolean
+  identity_complete: boolean
+  is_top4_security: boolean
+  publication_status: 'published' | 'preprint' | 'retracted'
+  title?: string
+  authors?: string[]
+  year?: number | null
+  doi?: string
+  venue?: { id?: string; name?: string; short_name?: string; raw?: string }
+  warnings?: string[]
+}
+
+export interface ReadingReportEvidence {
+  source_id?: string
+  source_url?: string
+  page_start?: number | null
+  page_end?: number | null
+  exact_quote: string
+  verified_in_source: boolean
+}
+
+export interface ReadingReport {
+  version: number
+  generated_at: string
+  title: string
+  executive_summary: string
+  key_questions: Array<{
+    question: string
+    answer: string
+    why_it_matters: string
+    evidence: ReadingReportEvidence[]
+    verification_status: string
+  }>
+  process: Array<{ step: string; description: string }>
+  contributions: Array<{
+    title: string
+    description: string
+    evidence?: string | ReadingReportEvidence[]
+  }>
+  limitations: string[]
+  terms: Array<{ term: string; explanation: string }>
+  suggested_questions: string[]
+  academic_gate: AcademicGate
+  report_grounding_status?: string
+  model?: { provider_id: string; model_name: string }
+}
+
 export interface NoteInsights {
   version: number
   summary?: {
@@ -189,6 +239,13 @@ export interface NoteInsights {
     actionability: InsightScore
   }
   verification?: ClaimVerification
+  reading_report?: ReadingReport
+  academic_gate?: AcademicGate
+  personal_summary?: {
+    content: string
+    updated_at: string
+    max_chars: number
+  }
   cards: KnowledgeCard[]
 }
 
@@ -358,48 +415,82 @@ export const useTaskStore = create<TaskStore>()(
 
         set(state => {
           const serverTaskIds = new Set(savedTasks.map(task => task.id))
+          const restoredServerTasks: Task[] = savedTasks
+            .filter((task: any) => task?.id)
+            .map((task: any) => {
+              const paperInput = task.result?.paperInput || {}
+              const verificationInput = task.result?.verificationInput || {}
+              const reportModel = task.insights?.reading_report?.model || {}
+              const isPaper = task.audioMeta?.platform === 'paper' || Boolean(paperInput.filename || paperInput.source_url)
+              const providerId = paperInput.provider_id || verificationInput.provider_id || reportModel.provider_id || ''
+              const modelName = paperInput.model_name || verificationInput.model_name || reportModel.model_name || ''
+
+              return {
+                id: task.id,
+                status: task.status || 'SUCCESS',
+                markdown: task.markdown || '',
+                platform: task.audioMeta?.platform || (isPaper ? 'paper' : 'douyin'),
+                collection: {
+                  ...DEFAULT_COLLECTION,
+                  ...(task.collection || {}),
+                  tags: Array.isArray(task.collection?.tags) ? task.collection.tags : [],
+                },
+                transcript: task.transcript || emptyTranscript(),
+                createdAt: task.createdAt || new Date().toISOString(),
+                audioMeta: {
+                  ...EMPTY_AUDIO_META,
+                  ...(task.audioMeta || {}),
+                  platform: task.audioMeta?.platform || (isPaper ? 'paper' : 'douyin'),
+                  title: task.audioMeta?.title || paperInput.filename || '未命名知识卡片',
+                },
+                insights: task.insights,
+                message: task.message || '',
+                error: task.error,
+                formData: {
+                  video_url: paperInput.source_url || task.videoUrl || paperInput.filename || verificationInput.url || '',
+                  link: false,
+                  screenshot: false,
+                  platform: isPaper ? 'paper' : 'douyin',
+                  quality: 'medium',
+                  model_name: modelName,
+                  provider_id: providerId,
+                  input_mode: isPaper ? 'paper' : verificationInput.input_mode,
+                  style: 'minimal',
+                  format: ['toc', 'summary', 'mindmap'],
+                },
+              }
+            })
+          const serverTasksById = new Map(restoredServerTasks.map(task => [task.id, task]))
           const reconciledLocalTasks = state.tasks.filter(
             task =>
               !isVerificationTask(task) ||
               serverTaskIds.has(task.id) ||
               !isTerminalStatus(task.status)
-          )
-          const existingIds = new Set(reconciledLocalTasks.map(task => task.id))
-          const restoredTasks: Task[] = savedTasks
-            .filter((task: any) => task?.id && !existingIds.has(task.id))
-            .map((task: any) => ({
-              id: task.id,
-              status: task.status || 'SUCCESS',
-              markdown: task.markdown || '',
-              platform: task.audioMeta?.platform || 'douyin',
-              collection: {
-                ...DEFAULT_COLLECTION,
-                ...(task.collection || {}),
-                tags: Array.isArray(task.collection?.tags) ? task.collection.tags : [],
-              },
-              transcript: task.transcript || emptyTranscript(),
-              createdAt: task.createdAt || new Date().toISOString(),
-              audioMeta: {
-                ...EMPTY_AUDIO_META,
-                ...(task.audioMeta || {}),
-                platform: task.audioMeta?.platform || 'douyin',
-                title: task.audioMeta?.title || '未命名知识卡片',
-              },
-              insights: task.insights,
-              message: task.message || '',
-              error: task.error,
+          ).map(localTask => {
+            const serverTask = serverTasksById.get(localTask.id)
+            if (!serverTask) return localTask
+            return {
+              ...localTask,
+              status: serverTask.status,
+              message: serverTask.message,
+              error: serverTask.error,
+              markdown: serverTask.markdown || localTask.markdown,
+              transcript: serverTask.transcript || localTask.transcript,
+              audioMeta: { ...localTask.audioMeta, ...serverTask.audioMeta },
+              insights: serverTask.insights || localTask.insights,
+              collection: serverTask.collection || localTask.collection,
               formData: {
-                video_url: task.videoUrl || '',
-                link: false,
-                screenshot: false,
-                platform: 'douyin',
-                quality: 'medium',
-                model_name: '',
-                provider_id: '',
-                style: 'minimal',
-                format: ['toc', 'summary', 'mindmap'],
+                ...serverTask.formData,
+                ...localTask.formData,
+                provider_id: localTask.formData.provider_id || serverTask.formData.provider_id,
+                model_name: localTask.formData.model_name || serverTask.formData.model_name,
+                input_mode: localTask.formData.input_mode || serverTask.formData.input_mode,
+                video_url: localTask.formData.video_url || serverTask.formData.video_url,
               },
-            }))
+            }
+          })
+          const existingIds = new Set(reconciledLocalTasks.map(task => task.id))
+          const restoredTasks = restoredServerTasks.filter(task => !existingIds.has(task.id))
 
           const currentTask = reconciledLocalTasks.find(task => task.id === state.currentTaskId)
           const keepActiveTask =

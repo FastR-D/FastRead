@@ -8,6 +8,7 @@ import type {
   TaskFailure,
   TaskStatus,
   Transcript,
+  ReadingReport,
 } from '@/store/taskStore'
 
 type BackendTaskResult = {
@@ -16,6 +17,23 @@ type BackendTaskResult = {
   audio_meta?: unknown
   audioMeta?: unknown
   insights?: NoteInsights
+  paper_input?: PaperInput
+  verification_input?: VerificationInput
+}
+
+export type PaperInput = {
+  source_url?: string
+  filename?: string
+  provider_id?: string
+  model_name?: string
+}
+
+export type VerificationInput = {
+  input_mode?: 'text' | 'url'
+  text?: string
+  url?: string
+  provider_id?: string
+  model_name?: string
 }
 
 type BackendTaskSnapshot = {
@@ -43,6 +61,8 @@ export type TaskSnapshotResult = {
   transcript?: Transcript
   audioMeta?: AudioMeta
   insights?: NoteInsights
+  paperInput?: PaperInput
+  verificationInput?: VerificationInput
 }
 
 export type TaskSnapshot = {
@@ -133,6 +153,8 @@ export const normalizeTaskSnapshot = (payload: unknown): TaskSnapshot | null => 
   const transcript = normalizeTranscript(result?.transcript || raw.transcript)
   const markdown = raw.markdown ?? result?.markdown
   const insights = raw.insights ?? result?.insights
+  const paperInput = result?.paper_input
+  const verificationInput = result?.verification_input
   const taskId = String(raw.id || raw.task_id || '')
 
   return {
@@ -148,6 +170,8 @@ export const normalizeTaskSnapshot = (payload: unknown): TaskSnapshot | null => 
             transcript,
             audioMeta,
             insights,
+            paperInput,
+            verificationInput,
           }
         : undefined,
     markdown,
@@ -156,7 +180,12 @@ export const normalizeTaskSnapshot = (payload: unknown): TaskSnapshot | null => 
     transcript,
     createdAt: normalizeTimestamp(raw.createdAt ?? (raw as any).created_at),
     updatedAt: normalizeTimestamp(raw.updatedAt ?? (raw as any).updated_at),
-    videoUrl: raw.videoUrl,
+    videoUrl:
+      raw.videoUrl ||
+      paperInput?.source_url ||
+      paperInput?.filename ||
+      verificationInput?.url ||
+      '',
     collection: raw.collection,
     title: raw.title,
     coverUrl: raw.coverUrl,
@@ -274,6 +303,81 @@ export const rerun_verification_task = async (task_id: string, retry_failed_only
 
 export const rerun_verification_claim = async (task_id: string, claim_id: string) => {
   return await request.post(`/verification_tasks/${task_id}/claims/${claim_id}/rerun`, {}, { timeout: 600000 })
+}
+
+export const generate_reading_report = async (data: {
+  task_id: string
+  provider_id: string
+  model_name: string
+  force?: boolean
+}): Promise<{ task_id: string; reading_report: ReadingReport }> => {
+  return await request.post('/reading_reports', data, { timeout: 180000 }) as any
+}
+
+export const save_personal_summary = async (taskId: string, summary: string): Promise<{
+  task_id: string
+  personal_summary: { content: string; updated_at: string; max_chars: number }
+}> => {
+  return await request.put(`/reading_reports/${taskId}/personal_summary`, { summary }) as any
+}
+
+export const ingest_paper_pdf = async (data: {
+  file: File
+  provider_id?: string
+  model_name?: string
+  source_url?: string
+  venue?: string
+  doi?: string
+  year?: string
+}): Promise<TaskSnapshot> => {
+  const body = new FormData()
+  body.append('file', data.file)
+  body.append('provider_id', data.provider_id || '')
+  body.append('model_name', data.model_name || '')
+  body.append('source_url', data.source_url || '')
+  body.append('venue', data.venue || '')
+  body.append('doi', data.doi || '')
+  body.append('year', data.year || '')
+  const snapshot = normalizeTaskSnapshot(
+    await request.post('/papers/upload', body, { timeout: 180000 }),
+  )
+  if (!snapshot) throw new Error('论文导入响应格式异常')
+  return snapshot
+}
+
+export const ingest_paper_url = async (data: {
+  url: string
+  provider_id?: string
+  model_name?: string
+  title?: string
+  authors?: string[]
+  venue?: string
+  doi?: string
+  year?: number
+}): Promise<TaskSnapshot> => {
+  const snapshot = normalizeTaskSnapshot(
+    await request.post('/papers/from_url', data, { timeout: 180000 }),
+  )
+  if (!snapshot) throw new Error('论文 URL 导入响应格式异常')
+  return snapshot
+}
+
+export const resolve_backend_resource_url = (value?: string | null): string => {
+  const resource = String(value || '').trim()
+  if (!resource) return ''
+  if (/^(?:https?:|data:|blob:)/i.test(resource)) return resource
+
+  const path = resource.startsWith('/') ? resource : `/${resource}`
+  const apiBase = String(import.meta.env.VITE_API_BASE_URL || '/api').trim()
+  if (/^https?:\/\//i.test(apiBase)) {
+    try {
+      return new URL(path, new URL(apiBase).origin).toString()
+    }
+    catch {
+      return path
+    }
+  }
+  return path
 }
 
 export const get_task_status = async (task_id: string): Promise<TaskSnapshot> => {

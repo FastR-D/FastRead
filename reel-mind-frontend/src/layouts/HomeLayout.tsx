@@ -1,6 +1,7 @@
 import React, { FC } from 'react'
 import {
   BookOpenText,
+  BookOpenCheck,
   ChevronRight,
   Copy,
   Download,
@@ -22,7 +23,7 @@ interface IProps {
   Preview: React.ReactNode
 }
 
-type WorkspaceViewMode = 'verify' | 'preview' | 'map' | 'cards'
+type WorkspaceViewMode = 'report' | 'verify' | 'preview' | 'map' | 'cards'
 type ChatMode = false | 'half' | 'full'
 
 function emitWorkspaceCommand(command: {
@@ -103,11 +104,11 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview }) => {
         <aside className="flex max-h-[46vh] min-h-0 flex-col bg-white lg:max-h-none">
           <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-200 px-4">
             <Link to="/" className="flex items-center gap-2.5">
-              <img src={logo} alt="Reel Mind" className="h-7 w-7 rounded-sm" />
+              <img src={logo} alt="FastRead" className="h-7 w-7 rounded-sm" />
               <div className="leading-tight">
-                <div className="text-[15px] font-semibold tracking-tight">Reel Mind</div>
+                <div className="text-[15px] font-semibold tracking-tight">FastRead</div>
                 <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-slate-400">
-                  Verification Workbench
+                  Academic Reading Workbench
                 </div>
               </div>
             </Link>
@@ -123,10 +124,10 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview }) => {
           <div className="shrink-0 border-b border-slate-200 bg-slate-50/60 px-4 py-3">
             <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
               <SearchCheck className="h-3.5 w-3.5 text-slate-700" />
-              核实输入
+              论文输入
             </div>
             <p className="mt-1.5 text-xs leading-5 text-slate-500">
-              粘贴网页 URL 或待核实文本，系统将抓取原文、分级信源并生成可审计证据报告。
+              导入论文 PDF，或粘贴论文 URL / 原文；先理解研究过程与贡献，再查看证据核验层。
             </p>
           </div>
 
@@ -142,7 +143,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview }) => {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
                   <ShieldCheck className="h-3.5 w-3.5" />
-                  联网核实
+                  学术阅读
                 </div>
                 <h1 className="mt-0.5 truncate text-[15px] font-semibold tracking-tight text-slate-900">
                   {currentTask?.audioMeta?.title || currentTask?.formData?.video_url || '新核实会话'}
@@ -162,8 +163,16 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview }) => {
             <div className="flex shrink-0 items-center gap-1">
               <button
                 type="button"
-                onClick={() => emitWorkspaceCommand({ viewMode: 'verify', chat: false })}
+                onClick={() => emitWorkspaceCommand({ viewMode: 'report', chat: false })}
                 className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm bg-slate-900 px-3 text-xs font-semibold text-white transition hover:bg-slate-700"
+              >
+                <BookOpenCheck className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">阅读报告</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => emitWorkspaceCommand({ viewMode: 'verify', chat: false })}
+                className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
               >
                 <SearchCheck className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">核实报告</span>
@@ -179,7 +188,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview }) => {
               </button>
               <button
                 type="button"
-                onClick={() => emitWorkspaceCommand({ viewMode: 'preview', chat: 'full' })}
+                onClick={() => emitWorkspaceCommand({ viewMode: 'report', chat: 'full' })}
                 className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
               >
                 <MessageSquareText className="h-3.5 w-3.5" />
@@ -230,7 +239,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview }) => {
                   <dl className="divide-y divide-slate-100 rounded-sm border border-slate-200 bg-white text-xs">
                     <MetaRow label="会话 ID" value={<span className="font-mono text-[11px] text-slate-700">{shortId(currentTask.id)}</span>} />
                     <MetaRow label="创建时间" value={<span className="font-mono text-[11px] text-slate-700">{formatTimestamp(currentTask.createdAt)}</span>} />
-                    <MetaRow label="输入类型" value={<span className="text-slate-700">{currentTask.formData?.input_mode === 'url' ? '网页 URL' : '文本'}</span>} />
+                    <MetaRow label="输入类型" value={<span className="text-slate-700">{currentTask.formData?.input_mode === 'paper' ? '论文 PDF / URL' : currentTask.formData?.input_mode === 'url' ? '网页 URL' : '文本'}</span>} />
                     <MetaRow label="核验模型" value={<span className="truncate text-slate-700">{currentTask.formData?.model_name || '—'}</span>} />
                     <MetaRow label="核验深度" value={<span className="text-slate-700">{currentTask.formData?.verification_depth === 'deep' ? '深度' : '标准'}</span>} />
                     <MetaRow label="信源策略" value={<span className="text-slate-700">{currentTask.formData?.source_policy === 'authoritative' ? '权威优先' : '—'}</span>} />

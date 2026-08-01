@@ -6,7 +6,7 @@ import uuid
 from typing import Optional
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
 from pydantic import BaseModel, field_validator, model_validator
 
 from app.core.settings import get_settings
@@ -17,6 +17,8 @@ from app.repositories.note_artifacts import NoteArtifactRepository
 from app.services.note import logger
 from app.utils.local_access import require_local_request
 from app.services.note_task_service import NoteTaskService
+from app.services.paper_ingest_service import PaperIngestService
+from app.services.reading_report_service import ReadingReportService
 from app.utils.response import ResponseWrapper as R
 from app.validators.video_url_validator import SUPPORTED_PLATFORMS, is_supported_video_url
 from fastapi import Request
@@ -76,6 +78,43 @@ class VerificationRerunRequest(BaseModel):
     retry_failed_only: bool = True
 
 
+class ReadingReportRequest(BaseModel):
+    task_id: str
+    provider_id: str
+    model_name: str
+    force: bool = False
+
+
+class PersonalSummaryRequest(BaseModel):
+    summary: str = ""
+
+    @field_validator("summary")
+    @classmethod
+    def validate_summary_length(cls, value: str) -> str:
+        if len(value or "") > 300:
+            raise ValueError("个人总结不能超过 300 字")
+        return value
+
+
+class PaperUrlRequest(BaseModel):
+    url: str
+    provider_id: str = ""
+    model_name: str = ""
+    title: str = ""
+    authors: list[str] = []
+    venue: str = ""
+    year: Optional[int] = None
+    doi: str = ""
+
+    @field_validator("url")
+    @classmethod
+    def validate_paper_url(cls, value: str) -> str:
+        parsed = urlparse(value or "")
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("论文地址必须是有效的 http/https URL")
+        return value
+
+
 class VideoRequest(BaseModel):
     video_url: str
     platform: str = "douyin"
@@ -127,6 +166,8 @@ ALLOWED_UPLOAD_EXTENSIONS = {
 ALLOWED_IMAGE_PROXY_HOSTS = settings.image_proxy_allowed_hosts
 ARTIFACTS = NoteArtifactRepository(settings.note_output_dir)
 NOTE_TASKS = NoteTaskService(ARTIFACTS)
+READING_REPORTS = ReadingReportService(ARTIFACTS)
+PAPERS = PaperIngestService(ARTIFACTS)
 
 
 def _safe_upload_extension(filename: str) -> str:
@@ -285,6 +326,109 @@ def rerun_verification_claim(task_id: str, claim_id: str):
     if not result["ok"]:
         return R.error(msg=result["message"], code=result["code"])
     return R.success(result["data"])
+
+
+@router.post("/reading_reports")
+def generate_reading_report(data: ReadingReportRequest):
+    try:
+        report = READING_REPORTS.generate(
+            task_id=data.task_id,
+            provider_id=data.provider_id,
+            model_name=data.model_name,
+            force=data.force,
+        )
+        return R.success({"task_id": data.task_id, "reading_report": report})
+    except ValueError as exc:
+        return R.error(msg=str(exc), code=400)
+    except Exception as exc:
+        logger.error(f"生成学术阅读报告失败 (task_id={data.task_id}): {exc}", exc_info=True)
+        return R.error(msg=f"生成学术阅读报告失败: {exc}")
+
+
+@router.put("/reading_reports/{task_id}/personal_summary")
+def save_personal_summary(task_id: str, data: PersonalSummaryRequest):
+    try:
+        summary = READING_REPORTS.save_personal_summary(task_id=task_id, summary=data.summary)
+        return R.success({"task_id": task_id, "personal_summary": summary})
+    except ValueError as exc:
+        return R.error(msg=str(exc), code=400)
+
+
+@router.post("/papers/from_url")
+def ingest_paper_url(data: PaperUrlRequest):
+    try:
+        created = PAPERS.ingest_url(
+            url=data.url,
+            provider_id=data.provider_id,
+            model_name=data.model_name,
+            overrides={
+                "title": data.title,
+                "authors": data.authors,
+                "venue": data.venue,
+                "year": data.year,
+                "doi": data.doi,
+            },
+        )
+        return R.success(NOTE_TASKS.get_task_status(created["task_id"]))
+    except ValueError as exc:
+        return R.error(msg=str(exc), code=400)
+    except Exception as exc:
+        logger.error(f"导入论文 URL 失败: {exc}", exc_info=True)
+        return R.error(msg=f"导入论文 URL 失败: {exc}")
+
+
+@router.post("/papers/upload")
+async def ingest_paper_upload(
+    _: None = Depends(require_local_request),
+    file: UploadFile = File(...),
+    provider_id: str = Form(""),
+    model_name: str = Form(""),
+    source_url: str = Form(""),
+    venue: str = Form(""),
+    doi: str = Form(""),
+    year: str = Form(""),
+):
+    if _safe_upload_extension(file.filename or "") != ".pdf":
+        raise HTTPException(status_code=400, detail="论文导入当前仅支持 PDF")
+    body = bytearray()
+    while True:
+        chunk = await file.read(IO_CHUNK_SIZE)
+        if not chunk:
+            break
+        body.extend(chunk)
+        if len(body) > MAX_UPLOAD_BYTES:
+            raise HTTPException(status_code=413, detail="PDF 文件过大")
+    safe_name = f"{uuid.uuid4().hex}.pdf"
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    stored_pdf = UPLOAD_DIR / safe_name
+    temp_pdf = stored_pdf.with_suffix(".pdf.part")
+    try:
+        with open(temp_pdf, "wb") as handle:
+            handle.write(body)
+        os.replace(temp_pdf, stored_pdf)
+        persisted_source_url = source_url or f"{UPLOADS_PATH.rstrip('/')}/{safe_name}"
+        created = PAPERS.ingest_pdf(
+            content=bytes(body),
+            filename=file.filename or "paper.pdf",
+            source_url=persisted_source_url,
+            provider_id=provider_id,
+            model_name=model_name,
+            overrides={"venue": venue, "doi": doi, "year": year},
+        )
+        return R.success(NOTE_TASKS.get_task_status(created["task_id"]))
+    except ValueError as exc:
+        if temp_pdf.exists():
+            temp_pdf.unlink()
+        if stored_pdf.exists():
+            stored_pdf.unlink()
+        return R.error(msg=str(exc), code=400)
+    except Exception as exc:
+        if temp_pdf.exists():
+            temp_pdf.unlink()
+        if stored_pdf.exists():
+            stored_pdf.unlink()
+        logger.error(f"导入 PDF 失败: {exc}", exc_info=True)
+        return R.error(msg=f"导入 PDF 失败: {exc}")
 
 
 @router.post("/upload")

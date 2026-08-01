@@ -1,15 +1,15 @@
 <p align="center">
-  <img src="./doc/icon.png" alt="Reel Mind Logo" width="72" height="72" />
+  <img src="./doc/icon.png" alt="FastRead Logo" width="72" height="72" />
 </p>
 
-<h1 align="center">Reel Mind</h1>
+<h1 align="center">FastRead</h1>
 
 <p align="center">
-  <strong>把文本、URL 和视频内容变成可审计的联网核验报告</strong>
+  <strong>NotebookLM 式学术阅读报告 + 可审计证据层</strong>
 </p>
 
 <p align="center">
-  Reel Mind 当前以事实核验为第一能力：主张原子化、多源联网检索、正文/PDF 抓取、信源验真、证据抽取、规则判定和可追溯审计。
+  FastRead 优先解决“如何读懂一篇论文”：导入 PDF、围绕关键问题解释方法与贡献、保留页码引用、支持 300 字个人总结和持续追问；联网核验作为证据层保留。
 </p>
 
 <p align="center">
@@ -38,11 +38,19 @@
 
 ## 项目亮点
 
-Reel Mind 已转向 verification-first。旧的笔记、思维导图、知识卡片和问答仍作为辅助产物保留，但 P0 是回答：
+FastRead 当前的 P0 是完成一篇论文的可审计阅读闭环：
 
 ```text
-这句话到底有没有可靠联网证据支持？
+PDF / 论文 URL -> 分页原文 -> 关键问题报告 -> 方法与贡献 -> 300 字总结 -> 带页码持续追问
 ```
+
+- **NotebookLM 式报告**：固定覆盖研究问题、方法过程、主要贡献、实验/证据和局限，避免零散 bullet 堆砌。
+- **结构化引用**：报告引用只有在分页原文或已抽取核验证据中匹配成功才会保留。
+- **学术身份 Gate**：区分正式论文、预印本、身份不完整和撤稿；四大安全顶会须由抓取到的官方出版记录对齐标题、作者、年份、venue 和 DOI/官方 URL，用户填写的字段不能直接过 Gate。
+- **个人总结**：AI 报告之外单独保存用户自己的 300 字内总结。
+- **持续追问**：论文分页原文、阅读报告和核验证据共同进入任务问答上下文，来源显示页码。
+
+联网核验仍是报告的证据层，规则不降级：
 
 当前核验链路：
 

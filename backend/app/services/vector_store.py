@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from typing import Optional
@@ -99,6 +100,50 @@ def _build_meta_chunk(audio_meta: dict) -> list[dict]:
     }]
 
 
+def _chunk_plain_text(text: str, size: int = 700, overlap: int = 100) -> list[str]:
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if not cleaned:
+        return []
+    chunks = []
+    step = max(size - overlap, 1)
+    for start in range(0, len(cleaned), step):
+        chunk = cleaned[start:start + size].strip()
+        if len(chunk) >= 30:
+            chunks.append(chunk)
+        if start + size >= len(cleaned):
+            break
+    return chunks
+
+
+def _chunk_paper_pages(note_data: dict) -> list[dict]:
+    paper = note_data.get("paper_document") or {}
+    chunks = []
+    for page in paper.get("pages") or []:
+        page_number = max(1, int(page.get("page") or 1))
+        for text in _chunk_plain_text(page.get("text") or ""):
+            chunks.append({
+                "text": text,
+                "metadata": {
+                    "source_type": "paper_page",
+                    "page_start": page_number,
+                    "page_end": page_number,
+                    "source_url": paper.get("pdf_url") or paper.get("source_url") or "",
+                    "doi": paper.get("doi") or "",
+                },
+            })
+    return chunks
+
+
+def _chunk_json_section(value: dict | list | None, source_type: str) -> list[dict]:
+    if not value:
+        return []
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    return [
+        {"text": chunk, "metadata": {"source_type": source_type}}
+        for chunk in _chunk_plain_text(text, size=520, overlap=80)
+    ]
+
+
 class VectorStoreManager:
     """基于 ChromaDB 的笔记向量存储管理器。"""
 
@@ -137,8 +182,13 @@ class VectorStoreManager:
 
         meta_chunks = _build_meta_chunk(audio_meta)
         md_chunks = _chunk_markdown(markdown)
-        tr_chunks = _chunk_transcript(segments)
-        all_chunks = meta_chunks + md_chunks + tr_chunks
+        is_paper = bool(note_data.get("paper_task") or note_data.get("paper_document"))
+        tr_chunks = [] if is_paper else _chunk_transcript(segments)
+        paper_chunks = _chunk_paper_pages(note_data)
+        insights = note_data.get("insights") or {}
+        reading_chunks = _chunk_json_section(insights.get("reading_report"), "reading_report")
+        verification_chunks = _chunk_json_section(insights.get("verification"), "verification")
+        all_chunks = meta_chunks + md_chunks + tr_chunks + paper_chunks + reading_chunks + verification_chunks
 
         if not all_chunks:
             logger.warning(f"笔记内容为空，跳过索引: {task_id}")
@@ -179,8 +229,8 @@ class VectorStoreManager:
 
     def query(self, task_id: str, query_text: str, n_results: int = 6) -> list[dict]:
         """
-        按固定配额从各来源检索：meta 1 条、markdown 2 条、transcript 3 条，
-        确保三种来源都被召回。
+        按固定配额从各来源检索。论文分页原文优先，报告和核验证据仅作辅助；
+        普通视频任务仍保留 meta/markdown/transcript 配额。
         """
         col_name = self._collection_name(task_id)
         try:
@@ -192,7 +242,14 @@ class VectorStoreManager:
         all_chunks = []
 
         # 每种来源的配额
-        quotas = {"meta": 1, "markdown": 2, "transcript": 3}
+        quotas = {
+            "paper_page": 4,
+            "reading_report": 1,
+            "verification": 1,
+            "meta": 1,
+            "markdown": 2,
+            "transcript": 3,
+        }
 
         for source_type, quota in quotas.items():
             try:

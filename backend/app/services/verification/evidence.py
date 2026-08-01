@@ -162,6 +162,7 @@ def evidence_counts(evidence: list[dict], sources_by_url: dict[str, dict]) -> di
             "missing_source_identity",
             "prompt_injection",
             "redirect_anomaly",
+            "retracted_or_withdrawn",
         }
         high_quality = (
             source.get("trust_tier") in {"A", "B"}

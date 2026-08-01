@@ -12,7 +12,15 @@ When the browser opens, use:
 http://127.0.0.1:3015/
 ```
 
-Paste text or a URL, then click `开始联网核实` to generate an auditable verification report.
+Recommended first journey:
+
+1. Click `选择 PDF 并导入`.
+2. Open `阅读报告` and click `一键生成阅读报告`.
+3. Review the key questions, page-linked quotes, process, contributions, and limitations.
+4. Save your own summary (maximum 300 Chinese characters).
+5. Click `继续追问` for page-aware follow-up questions.
+
+Text/URL verification is still available as the evidence-audit layer.
 
 Stop the project with `run.bat --stop`.
 

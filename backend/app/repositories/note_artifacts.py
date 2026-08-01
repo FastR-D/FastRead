@@ -1,9 +1,11 @@
 import json
 import os
 import shutil
+import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Optional, Union
+from typing import Callable, Iterator, Optional, Union
 
 from app.core.settings import get_settings
 from app.enmus.task_status_enums import TaskStatus
@@ -21,6 +23,18 @@ IGNORED_RESULT_SUFFIXES = (
     "_markdown.status.json",
 )
 VERIFICATION_CACHE_KINDS = {"serp", "snapshot", "evidence"}
+_TASK_LOCKS_GUARD = threading.Lock()
+_TASK_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _task_lock(path: Path) -> threading.RLock:
+    key = str(path.resolve())
+    with _TASK_LOCKS_GUARD:
+        lock = _TASK_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _TASK_LOCKS[key] = lock
+        return lock
 
 
 @dataclass(frozen=True)
@@ -73,10 +87,28 @@ class NoteArtifactRepository:
         return self.result_path(task_id).exists()
 
     def read_result(self, task_id: str) -> Optional[dict]:
-        return self._read_json(self.result_path(task_id))
+        target = self.result_path(task_id)
+        with _task_lock(target):
+            return self._read_json(target)
 
     def write_result(self, task_id: str, payload: dict) -> None:
-        self._write_json(self.result_path(task_id), payload)
+        target = self.result_path(task_id)
+        with _task_lock(target):
+            self._write_json(target, payload)
+
+    def update_result(self, task_id: str, mutator: Callable[[dict], dict | None]) -> dict:
+        target = self.result_path(task_id)
+        with _task_lock(target):
+            payload = self._read_json(target)
+            if payload is None:
+                raise ValueError("任务结果不存在")
+            updated = mutator(payload)
+            if updated is None:
+                updated = payload
+            if not isinstance(updated, dict):
+                raise TypeError("result mutator must return a dict or None")
+            self._write_json(target, updated)
+            return updated
 
     def read_status(self, task_id: str) -> Optional[dict]:
         return self._read_json(self.status_path(task_id))
@@ -106,10 +138,8 @@ class NoteArtifactRepository:
 
         self.ensure_output_dir()
         target = self.status_path(task_id)
-        tmp_path = target.with_suffix(".tmp")
         try:
-            self._write_json(tmp_path, payload)
-            tmp_path.replace(target)
+            self._write_json(target, payload)
         except Exception as exc:
             logger.error(f"写入任务状态失败 (task_id={task_id}): {exc}")
             try:
@@ -213,8 +243,28 @@ class NoteArtifactRepository:
     def _write_json(self, path: Path, payload: dict) -> None:
         self.ensure_output_dir()
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=path.parent,
+                prefix=f".{path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as handle:
+                temp_path = Path(handle.name)
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temp_path, path)
+            temp_path = None
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     @staticmethod
     def _is_note_result_file(path: Path) -> bool:

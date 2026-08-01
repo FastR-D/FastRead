@@ -19,6 +19,7 @@ ENV/
 # Logs and diagnostics
 logs/
 .tmp/
+work/
 .vs/
 *.log
 npm-debug.log*
