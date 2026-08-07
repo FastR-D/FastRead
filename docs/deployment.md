@@ -9,7 +9,7 @@ Docker is optional. Use it only when you explicitly want the container deploymen
 First make sure these dependencies exist:
 
 - `backend\.venv`
-- `reel-mind-frontend\node_modules`
+- `fastread-frontend\node_modules`
 
 Start:
 
@@ -54,7 +54,7 @@ cd backend
 Frontend:
 
 ```powershell
-cd reel-mind-frontend
+cd fastread-frontend
 $env:VITE_API_BASE_URL="/api"
 pnpm run dev -- --host 0.0.0.0 --port 3015
 ```

@@ -111,6 +111,60 @@ def test_pdf_ingest_persists_pages_and_academic_boundary(tmp_path):
     assert repo.read_status(created["task_id"])["status"] == "SUCCESS"
 
 
+def test_paper_landing_url_follows_linked_pdf_and_preserves_metadata(monkeypatch, tmp_path):
+    repo = NoteArtifactRepository(tmp_path)
+    landing_url = "https://papers.example/item/42"
+    pdf_url = "https://papers.example/files/42.pdf"
+    calls = []
+
+    def fake_fetch(url, _overrides):
+        calls.append(url)
+        if url == landing_url:
+            return {
+                "url": landing_url,
+                "canonical_url": landing_url,
+                "title": "A Page-Aware Reading Paper",
+                "authors": ["Alice", "Bob"],
+                "published_at": "2026",
+                "venue": "Example Conference",
+                "doi": "10.1234/example.42",
+                "pdf_url": "/files/42.pdf",
+                "text": "Landing page metadata.",
+                "fetch_status": "ok",
+                "source_type": "web",
+            }
+        assert url == pdf_url
+        return {
+            "url": pdf_url,
+            "canonical_url": pdf_url,
+            "pdf_url": pdf_url,
+            "text": "First page text.\nSecond page method and contribution.",
+            "page_spans": [
+                {"page": 1, "start": 0, "end": 16},
+                {"page": 2, "start": 17, "end": 53},
+            ],
+            "fetch_status": "pdf_ok",
+            "source_type": "pdf",
+        }
+
+    monkeypatch.setattr(
+        "app.services.paper_ingest_service.fetch_source_snapshot",
+        fake_fetch,
+    )
+
+    created = PaperIngestService(repo).ingest_url(url=landing_url)
+    paper = repo.read_result(created["task_id"])["paper_document"]
+
+    assert calls == [landing_url, pdf_url]
+    assert paper["title"] == "A Page-Aware Reading Paper"
+    assert paper["authors"] == ["Alice", "Bob"]
+    assert paper["source_url"] == landing_url
+    assert paper["resolved_source_url"] == pdf_url
+    assert paper["pdf_url"] == pdf_url
+    assert paper["page_count"] == 2
+    assert "method and contribution" in paper["pages"][1]["text"]
+
+
 def test_reading_report_requires_and_persists_verified_page_quotes(monkeypatch, tmp_path):
     repo = NoteArtifactRepository(tmp_path)
     created = PaperIngestService(repo).ingest_pdf(

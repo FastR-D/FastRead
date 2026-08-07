@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
 cd /d "%~dp0"
-title ReelMind
+title FastRead
 
 set "MODE=start"
 set "NO_OPEN=0"
@@ -61,7 +61,7 @@ for /f "tokens=1 delims= " %%A in ("!BACKEND_PORT!") do set "BACKEND_PORT=%%A"
 for /f "tokens=1 delims= " %%A in ("!FRONTEND_PORT!") do set "FRONTEND_PORT=%%A"
 
 set "BACKEND_PY=%CD%\backend\.venv\Scripts\python.exe"
-set "FRONTEND_DIR=%CD%\reel-mind-frontend"
+set "FRONTEND_DIR=%CD%\fastread-frontend"
 set "APP_URL=http://127.0.0.1:%FRONTEND_PORT%/"
 set "CHECK_URL=http://127.0.0.1:%BACKEND_PORT%/api/sys_check"
 set "HEALTH_URL=http://127.0.0.1:%BACKEND_PORT%/api/sys_health"
@@ -77,7 +77,7 @@ goto START
 :HEADER
 echo.
 echo ========================================
-echo   ReelMind Local Entry
+echo   FastRead Local Entry
 echo ========================================
 echo.
 exit /b 0
@@ -147,7 +147,7 @@ echo [check] Frontend dependencies
 if not exist "%FRONTEND_DIR%\node_modules" (
   echo [fail] frontend dependencies not found: %FRONTEND_DIR%\node_modules
   echo Install them:
-  echo   cd reel-mind-frontend
+  echo   cd fastread-frontend
   echo   corepack enable
   echo   %PNPM_CMD% install
   goto FAIL
@@ -157,7 +157,7 @@ if not exist "%FRONTEND_DIR%\node_modules" (
 
 echo.
 echo [check] Ports %BACKEND_PORT% and %FRONTEND_PORT%
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports=@(%BACKEND_PORT%,%FRONTEND_PORT%); foreach($port in $ports){ $listeners=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if($listeners){ Write-Output \"[warn] Port $port is already in use. If ReelMind is not running, use run.bat --stop or change .env.\" } else { Write-Output \"[ok] Port $port is free.\" } }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports=@(%BACKEND_PORT%,%FRONTEND_PORT%); foreach($port in $ports){ $listeners=Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if($listeners){ Write-Output \"[warn] Port $port is already in use. If FastRead is not running, use run.bat --stop or change .env.\" } else { Write-Output \"[ok] Port $port is free.\" } }"
 
 echo.
 echo [check] Required project files
@@ -165,8 +165,8 @@ if not exist "backend\main.py" (
   echo [fail] backend\main.py is missing.
   goto FAIL
 )
-if not exist "reel-mind-frontend\package.json" (
-  echo [fail] reel-mind-frontend\package.json is missing.
+if not exist "fastread-frontend\package.json" (
+  echo [fail] fastread-frontend\package.json is missing.
   goto FAIL
 )
 echo [ok] Project files look complete.
@@ -193,7 +193,7 @@ exit /b 0
 call :HEADER
 echo [stop] Stopping local processes on ports %BACKEND_PORT% and %FRONTEND_PORT%...
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ports=@(%BACKEND_PORT%,%FRONTEND_PORT%); $owners=@(); foreach($port in $ports){ Get-NetTCPConnection -LocalPort $port -ErrorAction SilentlyContinue | ForEach-Object { $owners += $_.OwningProcess } }; $owners | Sort-Object -Unique | Where-Object { $_ -and $_ -ne $PID } | ForEach-Object { Write-Host ('[stop] PID ' + $_); Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"
-echo [done] Local ReelMind processes stopped if they were running.
+echo [done] Local FastRead processes stopped if they were running.
 exit /b 0
 
 :START
@@ -218,7 +218,7 @@ if errorlevel 1 (
 )
 
 echo [start] Backend window...
-start "ReelMind Backend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:PYTHONUTF8='1'; Set-Location '%CD%\backend'; .\.venv\Scripts\python.exe main.py"
+start "FastRead Backend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:PYTHONUTF8='1'; Set-Location '%CD%\backend'; .\.venv\Scripts\python.exe main.py"
 
 echo [wait] Backend health check...
 for /l %%I in (1,1,60) do (
@@ -233,7 +233,7 @@ goto FAIL
 :BACKEND_READY
 echo [ok] Backend is ready.
 echo [start] Frontend window...
-start "ReelMind Frontend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:VITE_API_BASE_URL='%FRONTEND_API_BASE%'; $env:VITE_SCREENSHOT_BASE_URL='/static/screenshots'; $env:VITE_FRONTEND_PORT='%FRONTEND_PORT%'; $env:BACKEND_PORT='%BACKEND_PORT%'; $env:VITE_ENV_DIR='%FRONTEND_DIR%'; Set-Location '%FRONTEND_DIR%'; cmd /c call %PNPM_CMD% run dev -- --host 0.0.0.0 --port %FRONTEND_PORT%"
+start "FastRead Frontend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:VITE_API_BASE_URL='%FRONTEND_API_BASE%'; $env:VITE_SCREENSHOT_BASE_URL='/static/screenshots'; $env:VITE_FRONTEND_PORT='%FRONTEND_PORT%'; $env:BACKEND_PORT='%BACKEND_PORT%'; $env:VITE_ENV_DIR='%FRONTEND_DIR%'; Set-Location '%FRONTEND_DIR%'; cmd /c call %PNPM_CMD% run dev -- --host 0.0.0.0 --port %FRONTEND_PORT%"
 
 echo [wait] Frontend dev server...
 for /l %%I in (1,1,60) do (
@@ -247,7 +247,7 @@ goto FAIL
 
 :READY
 echo.
-echo [done] ReelMind local dev is ready.
+echo [done] FastRead local dev is ready.
 echo Open: %APP_URL%
 echo.
 if "%NO_OPEN%"=="0" start "" "%APP_URL%"
@@ -266,7 +266,7 @@ if not exist "%BACKEND_PY%" (
 if not exist "%FRONTEND_DIR%\node_modules" (
   echo [error] frontend dependencies not found: %FRONTEND_DIR%\node_modules
   echo Install them first:
-  echo   cd reel-mind-frontend
+  echo   cd fastread-frontend
   echo   corepack enable
   echo   %PNPM_CMD% install
   exit /b 1
@@ -295,7 +295,7 @@ exit /b 0
 
 :FAIL
 echo.
-echo ReelMind command did not complete.
+echo FastRead command did not complete.
 echo Run "run.bat --help" for available commands.
 echo.
 exit /b 1

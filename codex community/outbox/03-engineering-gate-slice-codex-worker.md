@@ -13,8 +13,8 @@ Why this slice:
 
 Current package-manager state:
 
-- Frontend is intentionally pnpm: `reel-mind-frontend/package.json` has `packageManager: "pnpm@9.15.0"` and `pnpm-lock.yaml`.
-- Extension is intentionally npm: `reel-mind-extension/package.json` has `packageManager: "npm@11.12.1"` and `package-lock.json`.
+- Frontend is intentionally pnpm: `fastread-frontend/package.json` has `packageManager: "pnpm@9.15.0"` and `pnpm-lock.yaml`.
+- Extension is intentionally npm: `fastread-extension/package.json` has `packageManager: "npm@11.12.1"` and `package-lock.json`.
 - Root docs and `run.bat` consistently use pnpm for the frontend local path.
 - Extension README consistently uses npm for extension development.
 
@@ -33,7 +33,7 @@ Add a new job to `.github/workflows/quality-gate.yml`:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: reel-mind-extension
+        working-directory: fastread-extension
 
     steps:
       - name: Checkout
@@ -44,7 +44,7 @@ Add a new job to `.github/workflows/quality-gate.yml`:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: reel-mind-extension/package-lock.json
+          cache-dependency-path: fastread-extension/package-lock.json
 
       - name: Install extension dependencies
         run: npm ci
@@ -67,7 +67,7 @@ Optional documentation follow-up:
 ## Risks
 
 - `npm@11.12.1` in `packageManager` may be newer than the npm bundled with Node 20. If CI enforces package manager versions through corepack, it may need `corepack enable` plus npm activation. If not, `npm ci` should use the bundled npm and still honor `package-lock.json`.
-- `npm run build` may emit extension artifacts under `reel-mind-extension/extension/`; CI workspace writes are fine.
+- `npm run build` may emit extension artifacts under `fastread-extension/extension/`; CI workspace writes are fine.
 - If extension dependencies include browser or Playwright downloads in postinstall, CI time may increase. Current scripts do not require e2e for this slice.
 
 ## Verification
@@ -75,7 +75,7 @@ Optional documentation follow-up:
 Suggested local verification:
 
 ```powershell
-cd reel-mind-extension
+cd fastread-extension
 npm ci
 npm run typecheck
 npm run build
@@ -85,19 +85,19 @@ Suggested full gate after patch:
 
 ```powershell
 backend\.venv\Scripts\python.exe -m pytest --basetemp .tmp\pytest backend\tests
-cd reel-mind-frontend
+cd fastread-frontend
 pnpm run lint
 pnpm run build
-cd ..\reel-mind-extension
+cd ..\fastread-extension
 npm run typecheck
 npm run build
 ```
 
 Commands run for this report:
 
-- `rg --files .github reel-mind-frontend reel-mind-extension | rg "(quality-gate\\.yml|package\\.json|package-lock\\.json|pnpm-lock|yarn\\.lock)$"`
-- `rg -n "pnpm|npm|packageManager|package-lock|pnpm-lock|Docker|docker|corepack|quality" README.md README-usage.md OPEN_ME_FIRST.md DEPLOYMENT.md run.bat .github/workflows/quality-gate.yml reel-mind-frontend/package.json reel-mind-extension/package.json reel-mind-extension/README.md Dockerfile.complete docker-compose.yml`
-- `git status --short -- reel-mind-frontend/package-lock.json reel-mind-frontend/pnpm-lock.yaml reel-mind-extension/package-lock.json reel-mind-extension/pnpm-lock.yaml .github/workflows/quality-gate.yml run.bat README.md README-usage.md OPEN_ME_FIRST.md DEPLOYMENT.md Dockerfile.complete docker-compose.yml`
+- `rg --files .github fastread-frontend fastread-extension | rg "(quality-gate\\.yml|package\\.json|package-lock\\.json|pnpm-lock|yarn\\.lock)$"`
+- `rg -n "pnpm|npm|packageManager|package-lock|pnpm-lock|Docker|docker|corepack|quality" README.md README-usage.md OPEN_ME_FIRST.md DEPLOYMENT.md run.bat .github/workflows/quality-gate.yml fastread-frontend/package.json fastread-extension/package.json fastread-extension/README.md Dockerfile.complete docker-compose.yml`
+- `git status --short -- fastread-frontend/package-lock.json fastread-frontend/pnpm-lock.yaml fastread-extension/package-lock.json fastread-extension/pnpm-lock.yaml .github/workflows/quality-gate.yml run.bat README.md README-usage.md OPEN_ME_FIRST.md DEPLOYMENT.md Dockerfile.complete docker-compose.yml`
 - Read-only inspection of the files listed below.
 
 Tests were not run; this was a read-only worker investigation.
@@ -113,8 +113,8 @@ Tests were not run; this was a read-only worker investigation.
 - `run.bat`
 - `Dockerfile.complete`
 - `docker-compose.yml`
-- `reel-mind-frontend/package.json`
-- `reel-mind-frontend/pnpm-lock.yaml`
-- `reel-mind-extension/package.json`
-- `reel-mind-extension/package-lock.json`
-- `reel-mind-extension/README.md`
+- `fastread-frontend/package.json`
+- `fastread-frontend/pnpm-lock.yaml`
+- `fastread-extension/package.json`
+- `fastread-extension/package-lock.json`
+- `fastread-extension/README.md`

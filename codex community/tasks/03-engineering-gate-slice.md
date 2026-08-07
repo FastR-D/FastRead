@@ -13,7 +13,7 @@ Focus on:
 - `.github/workflows/quality-gate.yml`
 - root `README.md`, `README-usage.md`, `OPEN_ME_FIRST.md`, `DEPLOYMENT.md`
 - root `run.bat`
-- package-manager consistency in `reel-mind-frontend` and `reel-mind-extension`
+- package-manager consistency in `fastread-frontend` and `fastread-extension`
 - Docker being optional rather than default
 
 ## Required checks

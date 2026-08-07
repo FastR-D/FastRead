@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
 cd /d "%~dp0..\.."
-title ReelMind Docker Starter
+title FastRead Docker Starter
 
 set "APP_PORT=3015"
 set "REBUILD=1"
@@ -75,7 +75,7 @@ set "HEALTH_URL=http://127.0.0.1:%APP_PORT%/api/sys_health"
 
 echo.
 echo ========================================
-echo   ReelMind Docker Starter
+echo   FastRead Docker Starter
 echo ========================================
 echo.
 echo Default mode rebuilds images for reliability.
@@ -162,7 +162,7 @@ if "%NO_OPEN%"=="0" start "" "%APP_URL%"
 exit /b 0
 
 :HELP
-echo ReelMind Docker Starter
+echo FastRead Docker Starter
 echo.
 echo Usage:
 echo   scripts\windows\start.bat              Build and start services

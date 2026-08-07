@@ -331,7 +331,7 @@ def search_wikipedia(query: str, max_results: int = DEFAULT_MAX_RESULTS) -> list
     seen = set()
     results = []
     headers = {
-        "User-Agent": "ReelMind/0.1 knowledge verification (local user initiated)"
+        "User-Agent": "FastRead/0.1 knowledge verification (local user initiated)"
     }
     with httpx.Client(timeout=SEARCH_TIMEOUT, follow_redirects=True, headers=headers) as client:
         for item in queries:

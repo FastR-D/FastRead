@@ -1,7 +1,7 @@
 
 services:
   backend:
-    container_name: reel-mind-backend
+    container_name: fastread-backend
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -28,10 +28,10 @@ services:
     mem_limit: 4g
 
   frontend:
-    container_name: reel-mind-frontend
+    container_name: fastread-frontend
     build:
       context: .
-      dockerfile: reel-mind-frontend/Dockerfile
+      dockerfile: fastread-frontend/Dockerfile
       args:
         NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-mirror.gcr.io/library/node:20-alpine}
         NGINX_BASE_IMAGE: ${NGINX_BASE_IMAGE:-mirror.gcr.io/library/nginx:1.25-alpine}
@@ -43,7 +43,7 @@ services:
     mem_limit: 512m
 
   nginx:
-    container_name: reel-mind-nginx
+    container_name: fastread-nginx
     image: ${NGINX_RUNTIME_IMAGE:-mirror.gcr.io/library/nginx:1.25-alpine}
     ports:
       - "${APP_PORT:-3015}:80"

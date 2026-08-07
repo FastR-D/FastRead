@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
@@ -128,14 +129,31 @@ def is_allowed_authority_domain(domain: str, allowed_domains: tuple[str, ...]) -
     return any(domain_matches(domain, allowed) for allowed in allowed_domains)
 
 
+def _contains_brand_token(text: str, token: str) -> bool:
+    if not text or not token:
+        return False
+    return bool(
+        re.search(rf"(?<![a-z0-9]){re.escape(token.lower())}(?![a-z0-9])", text.lower())
+    )
+
+
 def detect_fake_authority(domain: str, title: str = "", publisher: str = "") -> bool:
     domain = (domain or "").lower().removeprefix("www.")
-    visible_text = f"{domain} {publisher or ''}".lower()
+    publisher_text = (publisher or "").lower()
+    title_text = (title or "").lower()
+    official_title_claim = bool(
+        re.search(
+            r"official|press release|official release|statement|公告|官方|权威发布|新闻稿",
+            title_text,
+            re.I,
+        )
+    )
     for token, allowed_domains in AUTHORITY_BRAND_TOKENS.items():
-        if token not in visible_text:
-            continue
         if not is_allowed_authority_domain(domain, allowed_domains):
-            return True
+            if _contains_brand_token(domain, token) or _contains_brand_token(publisher_text, token):
+                return True
+            if official_title_claim and _contains_brand_token(title_text, token):
+                return True
     return False
 
 

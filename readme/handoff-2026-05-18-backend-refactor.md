@@ -1,4 +1,4 @@
-# ReelMind Backend Verification Handoff
+# FastRead Backend Verification Handoff
 
 Updated: 2026-06-20
 
@@ -6,7 +6,7 @@ This file replaces the older backend-refactor handoff. Historical note-generatio
 
 ## Backend Goal
 
-ReelMind backend must become a high-quality verification engine:
+FastRead backend must become a high-quality verification engine:
 
 ```text
 claim extraction -> multi-query retrieval -> source fetch -> source intelligence -> evidence extraction -> rule adjudication -> audit report
@@ -297,14 +297,14 @@ Start-Process -FilePath $python -ArgumentList @('-m','uvicorn','main:app','--hos
 Frontend:
 
 ```powershell
-cd reel-mind-frontend
+cd fastread-frontend
 npm run dev
 ```
 
 Build:
 
 ```powershell
-cd reel-mind-frontend
+cd fastread-frontend
 npm run build
 ```
 

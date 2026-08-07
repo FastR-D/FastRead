@@ -6,8 +6,8 @@
 .DS_Store
 
 # Tauri 构建产物（非常大）
-reel-mind-frontend/src-tauri/target
-reel-mind-frontend/src-tauri/bin
+fastread-frontend/src-tauri/target
+fastread-frontend/src-tauri/bin
 
 # 运行时数据
 backend/data

@@ -1,32 +1,32 @@
-# ReelMind Next Session Handoff
+# FastRead Next Session Handoff
 
-Updated: 2026-06-21
+Updated: 2026-08-05
 
 This is the first file the next conversation should read.
 
 ## Product Direction
 
-ReelMind has pivoted to verification-first.
+FastRead is paper-reading-first. Online verification remains an optional evidence-audit layer.
 
-P0 is no longer notes, mind maps, cards, Q&A, or video summarization. P0 is:
+P0 is:
 
 ```text
-输入文本/URL -> 主张原子化 -> 多源联网检索 -> 抓取原文/PDF -> 信源验真 -> 证据抽取 -> 交叉判定 -> 可审计核验报告
+PDF / 论文 URL -> 分页原文 -> 关键问题报告 -> 方法与贡献 -> 300 字总结 -> 带页码持续追问
 ```
 
-Quality is allowed to cost time, requests, and old UX convenience. Search snippets are recall hints only. They must never produce `supported`.
+The verification engine described below remains available for external support, refutation, and source-risk checks. Search snippets are recall hints only and must never produce `supported`.
 
 ## Current Workspace
 
 ```powershell
-E:\C_Moved_From_C\Users\Lenovo\Desktop\schoolwork\reelmind
+E:\C_Moved_From_C\Users\Lenovo\Desktop\fastread
 ```
 
 Current local services after the last run:
 
 ```text
 Backend:  http://127.0.0.1:8483
-Frontend: http://127.0.0.1:5173
+Frontend: http://127.0.0.1:3015
 ```
 
 The DeepSeek provider is configured locally in the app database. Do not write or echo API keys in docs, logs, commits, or final messages.
@@ -82,12 +82,13 @@ Latest backend verification increments on 2026-06-21:
 - Numeric evidence now normalizes population/count magnitude units across Chinese and English (`万`, `亿`, `million`, `billion`) so `14亿人`, `1.4 billion people`, and `1,400 million people` compare correctly.
 - Numeric approximation handling is now symmetric: `约`/`about`/`approximately` on either the claim or source side uses widened support/conflict thresholds, so reasonable approximations support while large deviations still refute.
 - Population numeric evidence now checks statistical scope, so China-specific population claims are not supported or refuted by global population figures.
+- Fake authority detection now flags non-authoritative pages that combine an authority brand token with official-release/title cues such as `official release`, while ordinary reporting titles that merely mention an authority are not flagged.
 
 Latest documentation/config increments before handoff:
 
-- Root `README.md` now describes ReelMind as verification-first in the first screen, usage flow, config table, extension section, and roadmap.
-- `README-usage.md`, `DEPLOYMENT.md`, `docs/deployment.md`, `OPEN_ME_FIRST.md`, and `task/ReelMind_使用指南.md` now present text/URL verification as the primary workflow.
-- `task/ReelMind_PRD_汇报版.md` is explicitly marked as a historical note/video-first PRD superseded by the verification-first direction.
+- Root `README.md` now describes the paper-reading chain first and keeps verification as an optional evidence layer.
+- `README-usage.md`, `DEPLOYMENT.md`, `docs/deployment.md`, `OPEN_ME_FIRST.md`, and `task/FastRead_使用指南.md` now present text/URL verification as the primary workflow.
+- `task/FastRead_PRD_汇报版.md` now specifies the current paper-reading P0 and evidence boundaries.
 - Root `.env.example` already documents Brave search, degraded behavior, and OpenAI-compatible examples without real keys.
 - `backend/.env.example` is aligned to local backend port `8483`, and now includes `NOTE_OUTPUT_DIR`, `BACKEND_HOST`, `BACKEND_PORT`, Brave/search settings, degraded-mode comments, and OpenAI/DeepSeek placeholder examples without secrets.
 - `readme/refactor-plan-2026-06-04.md` no longer lists completed persistence/cache/source-registry/GEO/taskization/popup/docs work as undone; remaining gaps are closer to the current implementation state.
@@ -127,7 +128,7 @@ Latest behavior:
 
 The web app now defaults toward verification:
 
-- Main action text is verification-first.
+- Main actions now start from PDF / paper URL and lead to paginated source text.
 - `NoteForm.tsx` submits to `create_verification_task`.
 - `MarkdownViewer.tsx` defaults to verification view.
 - Added `VerificationReportView.tsx`.
@@ -142,9 +143,9 @@ The web app now defaults toward verification:
 
 ### Extension Pivot
 
-Current published extension scope is still popup-only. It now moves in the verification-first direction:
+Current published extension scope is still popup-only and is explicitly secondary to the paper-reading workspace:
 
-- Toolbar popup title/action is `ReelMind 联网核实`.
+- Toolbar popup title/action is `FastRead 联网核实`.
 - Popup can submit current page URL or pasted text to `/api/verification_tasks`.
 - Created verification tasks are stored in extension local history records.
 - After creation, popup opens the web workbench deep link `/workspace?task_id=<id>` instead of the raw API list.
@@ -193,15 +194,15 @@ Backend quality pass on 2026-06-21:
 
 Touched frontend files:
 
-- `reel-mind-frontend/src/layouts/HomeLayout.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/NoteForm.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/MarkdownViewer.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/MarkdownHeader.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/WorkspaceStatusView.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/VerificationReportView.tsx`
-- `reel-mind-frontend/src/hooks/useTaskPolling.ts`
-- `reel-mind-frontend/src/services/note.ts`
-- `reel-mind-frontend/src/store/taskStore/index.ts`
+- `fastread-frontend/src/layouts/HomeLayout.tsx`
+- `fastread-frontend/src/pages/HomePage/components/NoteForm.tsx`
+- `fastread-frontend/src/pages/HomePage/components/MarkdownViewer.tsx`
+- `fastread-frontend/src/pages/HomePage/components/MarkdownHeader.tsx`
+- `fastread-frontend/src/pages/HomePage/components/WorkspaceStatusView.tsx`
+- `fastread-frontend/src/pages/HomePage/components/VerificationReportView.tsx`
+- `fastread-frontend/src/hooks/useTaskPolling.ts`
+- `fastread-frontend/src/services/note.ts`
+- `fastread-frontend/src/store/taskStore/index.ts`
 
 ## Real Benchmark Results
 
@@ -305,13 +306,13 @@ backend\.venv\Scripts\python.exe -m pytest --basetemp .tmp\pytest backend\tests\
 Latest result:
 
 ```text
-87 passed
+88 passed
 ```
 
 Frontend:
 
 ```powershell
-cd reel-mind-frontend
+cd fastread-frontend
 node_modules\.bin\eslint.cmd src\pages\HomePage\components\VerificationReportView.tsx src\pages\HomePage\components\MarkdownViewer.tsx src\pages\HomePage\components\NoteForm.tsx src\hooks\useTaskPolling.ts
 ```
 
@@ -320,7 +321,7 @@ Latest result: passed for touched rerun/progress/library files.
 Full frontend build:
 
 ```powershell
-cd reel-mind-frontend
+cd fastread-frontend
 npm run build
 ```
 
@@ -329,7 +330,7 @@ Latest result: passed in about 1m26s after the old-note verification-entry clean
 Extension:
 
 ```powershell
-cd reel-mind-extension
+cd fastread-extension
 npm run typecheck
 npm run build
 ```
@@ -364,17 +365,17 @@ Known untracked or generated paths from this work:
 - `.vs/`
 - new backend verification modules
 - new backend verification tests
-- `reel-mind-frontend/src/pages/HomePage/components/VerificationReportView.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/WorkspacePanels.tsx`
+- `fastread-frontend/src/pages/HomePage/components/VerificationReportView.tsx`
+- `fastread-frontend/src/pages/HomePage/components/WorkspacePanels.tsx`
 
 ## Next Priorities
 
 1. Retrieval quality: keep improving query expansion and add more real-world GEO/language disagreement fixtures beyond the current synthetic fixture.
-2. Anti-manipulation: expand prompt injection, SEO farm, republished press release, listicle, fake authority, and data void fixtures beyond the current unit coverage.
+2. Anti-manipulation: expand prompt injection, SEO farm, republished press release, listicle, fake authority, and data void fixtures beyond the current unit coverage; fake authority now covers domain impersonation and official-title impersonation, but still needs broader real-world fixtures.
 3. Frontend health: investigate the existing standalone `tsc --noEmit` errors separately from verification feature work.
 4. Extension: decide whether to activate/fix sidepanel/content scripts or keep popup-only MVP; if activating, pivot sidepanel to progress/evidence and content script to selected-text/page-URL verification.
 5. Product cleanup: verification report is now the first-class workspace and old notes expose an explicit verification entry; continue moving Markdown/mind map/cards/Q&A into secondary-artifact paths.
-6. Documentation/env cleanup: primary user/deployment docs now point to verification-first; continue keeping historical PRDs/handoffs clearly marked so old note-first language is not mistaken for current scope.
+6. Documentation/env cleanup: primary user/deployment docs now point to the paper-reading chain; keep generic web verification documented only as an optional evidence-audit layer.
 
 ## Hard Constraints For Next Agent
 

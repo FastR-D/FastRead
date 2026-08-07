@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
 cd /d "%~dp0..\.."
-title ReelMind Status
+title FastRead Status
 
 set "APP_PORT=3015"
 if exist ".env" (
@@ -21,7 +21,7 @@ for /f "tokens=1 delims= " %%A in ("!APP_PORT!") do set "APP_PORT=%%A"
 
 echo.
 echo ========================================
-echo   ReelMind Status
+echo   FastRead Status
 echo ========================================
 echo.
 

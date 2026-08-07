@@ -19,11 +19,11 @@ Focus on unfinished P3/P5 frontend items:
 
 Inspect only the files needed under:
 
-- `reel-mind-frontend/src/pages/HomePage/components/`
-- `reel-mind-frontend/src/hooks/`
-- `reel-mind-frontend/src/services/`
-- `reel-mind-frontend/src/store/`
-- `reel-mind-frontend/package.json`
+- `fastread-frontend/src/pages/HomePage/components/`
+- `fastread-frontend/src/hooks/`
+- `fastread-frontend/src/services/`
+- `fastread-frontend/src/store/`
+- `fastread-frontend/package.json`
 - `readme/refactor-plan-2026-06-04.md`
 
 ## Deliverable
@@ -35,6 +35,6 @@ Include:
 - Best single slice to implement now.
 - Exact component boundaries and props if extraction is recommended.
 - Risks around state, event handling, or bundle splitting.
-- Verification command, preferably `npm run build` from `reel-mind-frontend`.
+- Verification command, preferably `npm run build` from `fastread-frontend`.
 
 Do not edit source files.

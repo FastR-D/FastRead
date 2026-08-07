@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import re
 import uuid
+from urllib.parse import urljoin
 
 from app.enmus.task_status_enums import TaskStatus
 from app.repositories.note_artifacts import NoteArtifactRepository
@@ -175,7 +176,45 @@ class PaperIngestService:
         model_name: str = "",
         overrides: dict | None = None,
     ) -> dict:
-        snapshot = fetch_source_snapshot(url, overrides or {})
+        landing_snapshot = fetch_source_snapshot(url, overrides or {})
+        snapshot = landing_snapshot
+        linked_pdf_url = urljoin(
+            str(landing_snapshot.get("url") or url),
+            str(landing_snapshot.get("pdf_url") or "").strip(),
+        )
+        if (
+            landing_snapshot.get("fetch_status") == "ok"
+            and linked_pdf_url
+            and linked_pdf_url != landing_snapshot.get("url")
+        ):
+            pdf_snapshot = fetch_source_snapshot(linked_pdf_url, overrides or {})
+            if pdf_snapshot.get("fetch_status") == "pdf_ok" and pdf_snapshot.get("text"):
+                snapshot = {
+                    **pdf_snapshot,
+                    "title": landing_snapshot.get("title") or pdf_snapshot.get("title"),
+                    "authors": landing_snapshot.get("authors") or pdf_snapshot.get("authors") or [],
+                    "author": landing_snapshot.get("author") or pdf_snapshot.get("author") or "",
+                    "published_at": (
+                        landing_snapshot.get("published_at")
+                        or pdf_snapshot.get("published_at")
+                        or ""
+                    ),
+                    "venue": landing_snapshot.get("venue") or pdf_snapshot.get("venue") or "",
+                    "doi": landing_snapshot.get("doi") or pdf_snapshot.get("doi") or "",
+                    "canonical_url": (
+                        landing_snapshot.get("canonical_url")
+                        or landing_snapshot.get("url")
+                        or url
+                    ),
+                    "pdf_url": linked_pdf_url,
+                    "landing_url": landing_snapshot.get("url") or url,
+                    "official_record_verified": bool(
+                        landing_snapshot.get("official_record_verified")
+                    ),
+                    "verified_academic_metadata": (
+                        landing_snapshot.get("verified_academic_metadata") or {}
+                    ),
+                }
         return self._persist(
             snapshot=snapshot,
             source_url=url,

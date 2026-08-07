@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: reel-mind-extension
+        working-directory: fastread-extension
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -33,7 +33,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: reel-mind-extension/pnpm-lock.yaml
+          cache-dependency-path: fastread-extension/pnpm-lock.yaml
 
       - name: Install
         run: pnpm install --frozen-lockfile
@@ -62,18 +62,18 @@ jobs:
       - name: Rename artifacts with version suffix
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
-          [ -f extension.zip ] && mv extension.zip "reel-mind-extension-${VERSION}.zip"
-          [ -f extension.xpi ] && mv extension.xpi "reel-mind-extension-${VERSION}.xpi"
-          [ -f extension.crx ] && mv extension.crx "reel-mind-extension-${VERSION}.crx"
+          [ -f extension.zip ] && mv extension.zip "fastread-extension-${VERSION}.zip"
+          [ -f extension.xpi ] && mv extension.xpi "fastread-extension-${VERSION}.xpi"
+          [ -f extension.crx ] && mv extension.crx "fastread-extension-${VERSION}.crx"
           ls -la *.zip *.xpi *.crx 2>/dev/null || true
 
       - name: Attach to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            reel-mind-extension/reel-mind-extension-*.zip
-            reel-mind-extension/reel-mind-extension-*.xpi
-            reel-mind-extension/reel-mind-extension-*.crx
+            fastread-extension/fastread-extension-*.zip
+            fastread-extension/fastread-extension-*.xpi
+            fastread-extension/fastread-extension-*.crx
           fail_on_unmatched_files: false
           generate_release_notes: false
 
@@ -86,7 +86,7 @@ jobs:
 #      - uses: actions/download-artifact@v4
 #      - uses: mnao305/chrome-extension-upload@v5
 #        with:
-#          file-path: reel-mind-extension/reel-mind-extension-${{ github.ref_name }}.zip
+#          file-path: fastread-extension/fastread-extension-${{ github.ref_name }}.zip
 #          extension-id: ${{ secrets.CHROME_EXTENSION_ID }}
 #          client-id: ${{ secrets.CHROME_CLIENT_ID }}
 #          client-secret: ${{ secrets.CHROME_CLIENT_SECRET }}
@@ -99,7 +99,7 @@ jobs:
 #      - uses: wdzeng/edge-addon@v2
 #        with:
 #          product-id: ${{ secrets.EDGE_PRODUCT_ID }}
-#          zip-path: reel-mind-extension/reel-mind-extension-${{ github.ref_name }}.zip
+#          zip-path: fastread-extension/fastread-extension-${{ github.ref_name }}.zip
 #          client-id: ${{ secrets.EDGE_CLIENT_ID }}
 #          api-key: ${{ secrets.EDGE_API_KEY }}
 #
@@ -110,6 +110,6 @@ jobs:
 #      - uses: trmcnvn/firefox-addon@v3
 #        with:
 #          uuid: ${{ secrets.FIREFOX_ADDON_UUID }}
-#          xpi: reel-mind-extension/reel-mind-extension-${{ github.ref_name }}.xpi
+#          xpi: fastread-extension/fastread-extension-${{ github.ref_name }}.xpi
 #          api-key: ${{ secrets.FIREFOX_API_KEY }}
 #          api-secret: ${{ secrets.FIREFOX_API_SECRET }}

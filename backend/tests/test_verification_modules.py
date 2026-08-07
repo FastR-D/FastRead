@@ -453,6 +453,25 @@ def test_source_intel_flags_fake_authority_domain():
     assert "fake_authority" in source["risk_flags"]
 
 
+def test_source_intel_flags_fake_authority_title_impersonation():
+    source = source_intel.classify_source(
+        {
+            "url": "https://health-news-example.com/aspartame",
+            "title": "WHO official release on aspartame",
+        },
+        {
+            "url": "https://health-news-example.com/aspartame",
+            "canonical_url": "https://health-news-example.com/aspartame",
+            "title": "WHO official release on aspartame",
+            "fetch_status": "ok",
+            "text": "This page claims to be an official WHO release.",
+        },
+    )
+
+    assert source["trust_tier"] == "D"
+    assert "fake_authority" in source["risk_flags"]
+
+
 def test_source_intel_blocks_local_domains_even_with_ports():
     source = source_intel.classify_source(
         {"url": "http://localhost:8000/internal", "title": "Local"},

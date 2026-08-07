@@ -1,0 +1,369 @@
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Bubble, Sender } from '@ant-design/x'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Trash2, ChevronDown, ChevronUp, BookOpen, UserRound, Bot, Maximize2, Minimize2, Library, ExternalLink } from 'lucide-react'
+import { toast } from 'react-hot-toast'
+import { useChatStore } from '@/store/chatStore'
+import { useTaskStore } from '@/store/taskStore'
+import { useModelStore } from '@/store/modelStore'
+import { askQuestion, getChatStatus, indexTask, type ChatSource, type IndexStatus } from '@/services/chat'
+import { resolve_backend_resource_url } from '@/services/note'
+
+type ChatMode = 'half' | 'full'
+
+interface ChatPanelProps {
+  taskId: string
+  mode: ChatMode
+  onModeChange: (mode: ChatMode) => void
+}
+
+function SourceBadges({ sources }: { sources: ChatSource[] }) {
+  const [expanded, setExpanded] = useState(false)
+
+  if (!sources || sources.length === 0) return null
+
+  return (
+    <div className="mt-1.5">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-1 text-xs text-neutral-400 hover:text-neutral-600"
+      >
+        <BookOpen className="h-3 w-3" />
+        <span>引用来源 ({sources.length})</span>
+        {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+      </button>
+      {expanded && (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {sources.map((source, index) => {
+            const pageLabel = source.page_start
+              ? `第 ${source.page_start}${source.page_end && source.page_end !== source.page_start ? `–${source.page_end}` : ''} 页`
+              : '论文原文'
+            const typeLabel = source.source_type === 'paper_page'
+              ? pageLabel
+              : source.source_type === 'reading_report'
+                ? '阅读报告'
+                : source.source_type === 'verification'
+                  ? '核验证据'
+                  : source.source_type === 'markdown'
+                    ? source.section_title || '笔记'
+                    : source.source_type === 'meta'
+                      ? '信息'
+                      : source.start_time != null && source.end_time != null
+                        ? `${source.start_time.toFixed(0)}s ~ ${source.end_time.toFixed(0)}s`
+                        : '原文'
+            const label = source.title ? `${source.title.slice(0, 24)} · ${typeLabel}` : typeLabel
+            const href = resolve_backend_resource_url(source.source_url)
+              || (source.doi ? `https://doi.org/${source.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')}` : '')
+            const badge = (
+              <Badge variant="outline" className="gap-1 text-xs font-normal">
+                {label}
+                {href && <ExternalLink className="h-2.5 w-2.5" />}
+              </Badge>
+            )
+
+            return href ? (
+              <a key={`${source.source_url || source.doi || index}`} href={href} target="_blank" rel="noreferrer" title="打开引用原文">
+                {badge}
+              </a>
+            ) : (
+              <span key={index}>{badge}</span>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps) {
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null)
+  const [scope, setScope] = useState<'task' | 'library'>('task')
+  const chatKey = scope === 'library' ? 'library' : taskId
+
+  const storedMessages = useChatStore(state => state.chatHistory[chatKey])
+  const messages = useMemo(() => storedMessages ?? [], [storedMessages])
+  const addMessage = useChatStore(state => state.addMessage)
+  const clearChat = useChatStore(state => state.clearChat)
+
+  const tasks = useTaskStore(state => state.tasks)
+  const task = useMemo(
+    () => tasks.find(item => item.id === taskId) ?? null,
+    [tasks, taskId],
+  )
+  const modelList = useModelStore(state => state.modelList)
+  const loadEnabledModels = useModelStore(state => state.loadEnabledModels)
+
+  useEffect(() => {
+    if (modelList.length === 0) loadEnabledModels()
+  }, [loadEnabledModels, modelList.length])
+
+  const model = useMemo(() => {
+    const reportModel = task?.insights?.reading_report?.model
+    const providerId = task?.formData?.provider_id || reportModel?.provider_id
+    const modelName = task?.formData?.model_name || reportModel?.model_name
+    if (providerId || modelName) {
+      return modelList.find(item =>
+        item.provider_id === providerId && item.model_name === modelName
+      )
+    }
+    return modelList[0]
+  }, [modelList, task?.formData?.model_name, task?.formData?.provider_id, task?.insights?.reading_report?.model])
+  const suggestedQuestions = task?.insights?.reading_report?.suggested_questions || []
+
+  // 检查索引状态。索引只是增强能力，不能阻塞基础问答。
+  useEffect(() => {
+    if (scope === 'library') {
+      setIndexStatus('indexed')
+      return
+    }
+    if (!taskId) return
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const poll = async () => {
+      try {
+        const res = await getChatStatus(taskId)
+        if (cancelled) return
+        setIndexStatus(res.status)
+
+        if (res.status === 'indexing') {
+          timer = setTimeout(poll, 2000)
+        }
+      } catch {
+        if (!cancelled) setIndexStatus('idle')
+      }
+    }
+
+    poll()
+    return () => {
+      cancelled = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [taskId, scope])
+
+  const handleSend = useCallback(
+    async (value: string) => {
+      const question = value.trim()
+      if (!question || loading) return
+
+      const providerId = model?.provider_id
+      const modelName = model?.model_name
+      if (!providerId || !modelName) {
+        toast.error('无法获取模型配置，请确认任务已完成')
+        return
+      }
+
+      addMessage(chatKey, { role: 'user', content: question })
+      setInput('')
+      setLoading(true)
+
+      try {
+        const history = messages.map(m => ({ role: m.role, content: m.content }))
+        const res = await askQuestion({
+          task_id: scope === 'task' ? taskId : undefined,
+          scope,
+          question,
+          history,
+          provider_id: providerId,
+          model_name: modelName,
+        })
+        addMessage(chatKey, {
+          role: 'assistant',
+          content: res.answer,
+          sources: res.sources,
+        })
+      } catch {
+        toast.error('问答请求失败')
+      } finally {
+        setLoading(false)
+      }
+    },
+    [loading, taskId, chatKey, scope, model, messages, addMessage],
+  )
+
+  // 转换为 Bubble.List 的数据格式
+  const bubbleItems = useMemo(() => {
+    const items = messages.map((msg, i) => ({
+      key: `msg-${i}`,
+      role: msg.role === 'user' ? ('user' as const) : ('ai' as const),
+      content: msg.content,
+      footer:
+        msg.role === 'assistant' && msg.sources ? (
+          <SourceBadges sources={msg.sources} />
+        ) : undefined,
+    }))
+
+    if (loading) {
+      items.push({
+        key: 'loading',
+        role: 'ai' as const,
+        content: '思考中...',
+        loading: true,
+      } as any)
+    }
+
+    return items
+  }, [messages, loading])
+
+  // Bubble 角色配置
+  const roles = useMemo(
+    () => ({
+      user: {
+        placement: 'end' as const,
+        avatar: (
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-blue-500 text-white">
+            <UserRound className="h-4 w-4" />
+          </div>
+        ),
+        variant: 'filled' as const,
+        styles: { content: { background: '#3b82f6', color: '#fff' } },
+      },
+      ai: {
+        placement: 'start' as const,
+        avatar: (
+          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-neutral-500 text-white">
+            <Bot className="h-4 w-4" />
+          </div>
+        ),
+        variant: 'outlined' as const,
+        contentRender: (content: any) => (
+          <div className="markdown-body prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-headings:my-2">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {typeof content === 'string' ? content : String(content)}
+            </ReactMarkdown>
+          </div>
+        ),
+      },
+    }),
+    [],
+  )
+
+  return (
+    <div className="flex h-full min-h-0 flex-col overflow-hidden border-l bg-white">
+      {/* 头部 */}
+      <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
+        <div className="min-w-0">
+          <span className="text-sm font-medium">{scope === 'task' ? '带页码追问' : '跨论文问答'}</span>
+          {scope === 'task' && indexStatus !== 'indexed' && (
+            <span className="ml-2 text-xs text-amber-600">
+              {indexStatus === 'indexing' ? '索引构建中，基础问答可用' : '基础检索模式'}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          <Button
+            variant={scope === 'library' ? 'default' : 'ghost'}
+            size="sm"
+            className="h-7 px-2"
+            onClick={() => setScope(scope === 'task' ? 'library' : 'task')}
+            title={scope === 'task' ? '切换到跨论文问答' : '切换到当前论文问答'}
+          >
+            {scope === 'task' ? <BookOpen className="h-3.5 w-3.5" /> : <Library className="h-3.5 w-3.5" />}
+            <span className="ml-1 text-xs">{scope === 'task' ? '当前' : '知识库'}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-neutral-400 hover:text-neutral-600"
+            onClick={() => onModeChange(mode === 'half' ? 'full' : 'half')}
+            title={mode === 'half' ? '全屏' : '半屏'}
+          >
+            {mode === 'half' ? (
+              <Maximize2 className="h-3.5 w-3.5" />
+            ) : (
+              <Minimize2 className="h-3.5 w-3.5" />
+            )}
+          </Button>
+          {messages.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-neutral-400 hover:text-red-500"
+              onClick={() => clearChat(chatKey)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* 消息列表 */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {scope === 'task' && indexStatus !== 'indexed' && (
+          <div className="mx-3 mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                {indexStatus === 'indexing'
+                  ? '向量索引正在后台构建，当前仍会检索论文分页原文。'
+                  : '当前使用逐页关键词检索；需要更准召回时可建立向量索引。'}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 shrink-0 border-amber-300 bg-white px-2 text-xs hover:bg-amber-100"
+                disabled={indexStatus === 'indexing'}
+                onClick={async () => {
+                  setIndexStatus('indexing')
+                  try {
+                    await indexTask(taskId)
+                  } catch {
+                    toast.error('索引请求失败')
+                    setIndexStatus('failed')
+                  }
+                }}
+              >
+                {indexStatus === 'indexing' ? '索引中' : '建立索引'}
+              </Button>
+            </div>
+          </div>
+        )}
+        {messages.length === 0 && !loading ? (
+          <div className="flex h-full items-center justify-center text-center text-sm text-neutral-400">
+            <div>
+              <p>针对论文与阅读报告持续追问</p>
+              <p className="mt-1 text-xs">
+                {scope === 'task' ? '回答会优先引用论文原文页码。' : '可跨论文比较共同结论与差异。'}
+              </p>
+              {scope === 'task' && suggestedQuestions.length > 0 && (
+                <div className="mx-auto mt-4 flex max-w-md flex-wrap justify-center gap-2 px-4">
+                  {suggestedQuestions.slice(0, 4).map(question => (
+                    <button
+                      key={question}
+                      type="button"
+                      onClick={() => handleSend(question)}
+                      className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-left text-xs text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                    >
+                      {question}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <Bubble.List
+            items={bubbleItems}
+            role={roles}
+            style={{ minHeight: '100%', padding: '12px' }}
+          />
+        )}
+      </div>
+
+      {/* 输入区域 */}
+      <div className="shrink-0 border-t bg-white px-3 py-2">
+        <Sender
+          value={input}
+          onChange={setInput}
+          onSubmit={handleSend}
+          loading={loading}
+          placeholder="输入你的问题..."
+        />
+      </div>
+    </div>
+  )
+}

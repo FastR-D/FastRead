@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: reel-mind-frontend
+        working-directory: fastread-frontend
 
     steps:
       - name: Checkout
@@ -57,7 +57,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: reel-mind-frontend/pnpm-lock.yaml
+          cache-dependency-path: fastread-frontend/pnpm-lock.yaml
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile

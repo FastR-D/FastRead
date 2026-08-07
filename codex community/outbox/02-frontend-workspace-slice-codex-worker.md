@@ -19,7 +19,7 @@ Current evidence:
 
 ## Recommended Patch
 
-Create `reel-mind-frontend/src/pages/HomePage/components/WorkspacePanels.tsx`.
+Create `fastread-frontend/src/pages/HomePage/components/WorkspacePanels.tsx`.
 
 Recommended props:
 
@@ -63,14 +63,14 @@ Keep these in `MarkdownViewer` for now:
 
 - version selection and `selectedContent` derivation
 - copy/download handlers
-- `reelmind:workspace-command` event listener
+- `fastread:workspace-command` event listener
 - `MarkdownHeader`
 - loading/idle/failed top-level status branches
 
 Exact files likely to change:
 
-- `reel-mind-frontend/src/pages/HomePage/components/MarkdownViewer.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/WorkspacePanels.tsx`
+- `fastread-frontend/src/pages/HomePage/components/MarkdownViewer.tsx`
+- `fastread-frontend/src/pages/HomePage/components/WorkspacePanels.tsx`
 
 Follow-up, not in this slice:
 
@@ -89,7 +89,7 @@ Follow-up, not in this slice:
 Suggested verification:
 
 ```powershell
-cd reel-mind-frontend
+cd fastread-frontend
 pnpm run build
 ```
 
@@ -101,9 +101,9 @@ pnpm run lint
 
 Commands run for this report:
 
-- `rg --files reel-mind-frontend/src/pages/HomePage/components reel-mind-frontend/src/hooks reel-mind-frontend/src/services reel-mind-frontend/src/store`
-- `rg -n "import\\(|MarkmapEditor|ChatPanel|KnowledgeCardsView|TranscriptViewer|viewMode|showChat|showTranscribe|WorkspaceCommand|MarkdownHeader|currentVerId|selectedContent" reel-mind-frontend/src/pages/HomePage/components/MarkdownViewer.tsx`
-- `rg -n "markmap|lottie|manualChunks|chunkSizeWarningLimit|dynamic import|React\\.lazy|lazy\\(" reel-mind-frontend/src reel-mind-frontend/vite.config.ts reel-mind-frontend/package.json`
+- `rg --files fastread-frontend/src/pages/HomePage/components fastread-frontend/src/hooks fastread-frontend/src/services fastread-frontend/src/store`
+- `rg -n "import\\(|MarkmapEditor|ChatPanel|KnowledgeCardsView|TranscriptViewer|viewMode|showChat|showTranscribe|WorkspaceCommand|MarkdownHeader|currentVerId|selectedContent" fastread-frontend/src/pages/HomePage/components/MarkdownViewer.tsx`
+- `rg -n "markmap|lottie|manualChunks|chunkSizeWarningLimit|dynamic import|React\\.lazy|lazy\\(" fastread-frontend/src fastread-frontend/vite.config.ts fastread-frontend/package.json`
 - Read-only inspection of the files listed below.
 
 Tests were not run; this was a read-only worker investigation.
@@ -111,11 +111,11 @@ Tests were not run; this was a read-only worker investigation.
 ## Files Inspected
 
 - `readme/refactor-plan-2026-06-04.md`
-- `reel-mind-frontend/src/pages/HomePage/components/MarkdownViewer.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/MarkdownHeader.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/MarkdownDocument.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/MarkmapComponent.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/ChatPanel.tsx`
-- `reel-mind-frontend/src/pages/HomePage/components/KnowledgeCardsView.tsx`
-- `reel-mind-frontend/vite.config.ts`
-- `reel-mind-frontend/package.json`
+- `fastread-frontend/src/pages/HomePage/components/MarkdownViewer.tsx`
+- `fastread-frontend/src/pages/HomePage/components/MarkdownHeader.tsx`
+- `fastread-frontend/src/pages/HomePage/components/MarkdownDocument.tsx`
+- `fastread-frontend/src/pages/HomePage/components/MarkmapComponent.tsx`
+- `fastread-frontend/src/pages/HomePage/components/ChatPanel.tsx`
+- `fastread-frontend/src/pages/HomePage/components/KnowledgeCardsView.tsx`
+- `fastread-frontend/vite.config.ts`
+- `fastread-frontend/package.json`

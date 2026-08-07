@@ -1,264 +1,97 @@
-# ReelMind 使用说明
+# FastRead 使用说明
 
-更新时间：2026-06-21
-
-## 当前主流程
-
-ReelMind 当前优先解决一个问题：
+FastRead 的默认路径只有一条：
 
 ```text
-这句话到底有没有可靠联网证据支持？
+PDF / 论文 URL -> 分页原文 -> 关键问题报告 -> 方法与贡献
+-> 300 字总结 -> 带页码持续追问
 ```
 
-P0 主流程是：
+## 1. 启动
 
-1. 打开 Web 工作台。
-2. 粘贴待核实文本，或输入网页 URL。
-3. 系统拆分 atomic claims。
-4. 多查询、多来源联网检索。
-5. 抓取网页/PDF 正文。
-6. 判断信源等级、独立性和风险。
-7. 抽取正文证据片段。
-8. 输出可审计核验报告。
-
-搜索结果摘要只用于召回候选来源，不能单独产生 `supported`。最终判定必须来自已抓取正文证据和规则引擎。
-
-## 启动方式
-
-推荐优先使用 Windows 本地脚本，不再默认要求 Docker。
-
-### 本地脚本
-
-首次运行前需要准备：
-
-- `backend\.venv`
-- `reel-mind-frontend\node_modules`
-
-缺少后端虚拟环境时，在仓库根目录执行：
-
-```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-cd ..
-```
-
-缺少前端依赖时，在仓库根目录执行：
-
-```powershell
-cd reel-mind-frontend
-corepack enable
-pnpm install
-cd ..
-```
-
-启动：
-
-```powershell
-.\run.bat
-```
-
-打开：
-
-```text
-http://127.0.0.1:3015/
-```
-
-本地后端默认监听：
-
-```text
-http://127.0.0.1:8483/api/sys_check
-http://127.0.0.1:8483/api/sys_health
-```
-
-常用脚本参数：
+在仓库根目录运行：
 
 ```powershell
 .\run.bat --no-open
-.\run.bat --status
+```
+
+访问 `http://127.0.0.1:3015/`。
+
+## 2. 导入论文
+
+优先点击“选择 PDF 并导入”。本地 PDF 能最稳定地保留分页信息。
+
+也可以粘贴：
+
+- 直接 PDF URL；
+- 带 `citation_pdf_url` 的论文详情页；
+- 能返回完整论文正文的公开页面。
+
+扫描版、加密、空白或无法提取文字的 PDF 不会继续生成报告。
+
+## 3. 检查分页原文
+
+导入后首先进入“分页原文”：
+
+- 左侧按页切换并搜索；
+- 右侧查看该页完整文本；
+- 顶部可打开原 PDF；
+- 如果只解析了部分页面，界面会显示截断边界。
+
+页码是后续报告引用和问答来源的基础。原文页没有对应文字时，不应接受模型补写。
+
+## 4. 生成关键问题报告
+
+打开“关键问题”，点击“一键生成阅读报告”。报告固定覆盖：
+
+1. 研究问题；
+2. 方法与主要过程；
+3. 主要贡献；
+4. 实验或证据；
+5. 局限与证据边界。
+
+每条保留的引用都包含逐字引文和页码。模型提供但无法在指定页面匹配的引用会被丢弃。
+
+## 5. 写 300 字总结
+
+打开“300 字总结”，用自己的话记录：
+
+- 论文解决什么问题；
+- 方法主线是什么；
+- 最重要的贡献是什么；
+- 仍有什么疑点。
+
+总结最多 300 字，与 AI 报告分开保存。
+
+## 6. 带页码持续追问
+
+打开“持续追问”。回答应优先使用论文分页原文，并在来源中显示页码。
+
+推荐问题：
+
+- 论文的方法分成哪几个步骤？分别见哪些页？
+- 作者如何证明核心贡献？
+- 实验设计中最重要的对照是什么？
+- 哪些结论只是作者陈述，尚未得到外部支持？
+- 局限是否会影响我关心的使用场景？
+
+如果召回的分页原文不足，系统应直接说明“原文证据不足”。
+
+## 7. 可选证据审计
+
+只有需要判断外部支持、反证、信源风险或撤稿状态时，才打开“可选证据层”。
+
+联网核验不会替代：
+
+- 论文原文页码；
+- 论文身份 Gate；
+- 实验复现证据；
+- 用户自己的 300 字总结。
+
+独立网页 / 文本证据审计入口收在论文输入区底部，不与论文导入并列。
+
+## 8. 停止
+
+```powershell
 .\run.bat --stop
-.\run.bat --check
 ```
-
-### 手动开发启动
-
-后端：
-
-```powershell
-cd backend
-.\.venv\Scripts\python.exe main.py
-```
-
-前端：
-
-```powershell
-cd reel-mind-frontend
-$env:VITE_API_BASE_URL="/api"
-pnpm run dev -- --host 0.0.0.0 --port 3015
-```
-
-不要直接打开 `http://127.0.0.1:8483`；那是 API 根路径，返回 `{"detail":"Not Found"}` 是正常现象。
-
-### 可选 Docker
-
-Docker 只作为可选部署或高级演示路径：
-
-```powershell
-docker compose up -d --build
-```
-
-Docker 模式下通过前端/Nginx 访问：
-
-```text
-http://127.0.0.1:3015/
-http://127.0.0.1:3015/api/sys_check
-```
-
-## 联网核实文本
-
-1. 打开 `http://127.0.0.1:3015`。
-2. 在左侧输入框粘贴一段文字。
-3. 点击 `开始联网核实`。
-4. 等待状态经过解析输入、联网检索、抓取信源、评估证据、生成报告。
-5. 在报告中查看：
-   - 总体判定
-   - 每条 atomic claim
-   - 正文证据片段
-   - 支持/反驳/背景 stance
-   - 信源 tier
-   - canonical URL、publisher、author、published_at
-   - 风险旗标和审计信息
-
-## 联网核实 URL
-
-输入网页 URL 后，系统会先抓取输入源正文，再从正文中拆分主张并核实。
-
-报告顶部会展示输入源审计信息，包括：
-
-- requested URL
-- fetched URL
-- canonical URL
-- redirect chain
-- fetch status
-- publisher/author/date
-- text chars
-
-如果输入源无法抓取，系统应保守返回非 `supported` 结果，并在报告里展示失败状态或风险旗标。
-
-## 重新核实
-
-报告支持两类重跑：
-
-- 整个任务重跑：默认重试失败或未完成的联网阶段。
-- 单条主张重跑：只重跑目标 claim，复用其他已完成 claim 的结果。
-
-重跑期间旧报告会保留，界面显示进度条和当前阶段。
-
-## 历史任务
-
-资料库中的任务分为两类：
-
-- 已有核验报告：显示 `支持`、`反证`、`混合`、`证据不足`、`数据空缺` 或 `信源风险`。
-- 旧笔记/历史任务：如果没有 `verification_result`，会显示 `未联网核实`，并进入 `需复核`。
-
-打开旧笔记后，联网核实视图会提供 `发起联网核实`，用于把旧笔记升级为可审计核验报告。
-
-## 兼容能力
-
-旧的视频笔记能力仍保留为次级产物：
-
-- 抖音精选链接解析
-- 音频转写
-- Markdown 笔记
-- 思维导图
-- 知识卡片
-- 基于笔记内容的 AI 问答
-
-这些能力不再是 P0。旧笔记不能默认视为已经联网核实。
-
-## 抖音输入诊断
-
-如果继续使用旧抖音视频笔记流程，可能仍需要 Cookie。
-
-检查接口：
-
-```text
-http://127.0.0.1:8483/api/downloader_cookie_status/douyin
-```
-
-Docker 模式：
-
-```text
-http://127.0.0.1:3015/api/downloader_cookie_status/douyin
-```
-
-浏览器扩展当前发布范围是 popup：
-
-- 提交当前页面 URL 或粘贴文本到 `/api/verification_tasks`
-- 打开 Web 工作台深链
-- 提供抖音输入诊断入口
-
-## 结果位置
-
-结果文件默认写入：
-
-```text
-backend/note_results/
-```
-
-核验任务会保存：
-
-```text
-_verification/<task_id>/claims/<claim_id>.json
-```
-
-常用接口：
-
-```text
-POST http://127.0.0.1:8483/api/verification_tasks
-GET  http://127.0.0.1:8483/api/verification_tasks/{task_id}
-POST http://127.0.0.1:8483/api/verification_tasks/{task_id}/rerun
-POST http://127.0.0.1:8483/api/verification_tasks/{task_id}/claims/{claim_id}/rerun
-GET  http://127.0.0.1:8483/api/verification_tasks
-```
-
-兼容旧任务接口：
-
-```text
-GET http://127.0.0.1:8483/api/task_status/{task_id}
-GET http://127.0.0.1:8483/api/tasks
-```
-
-## 常见问题
-
-### 页面一直显示后端初始化
-
-确认前端 API 地址：
-
-```powershell
-$env:VITE_API_BASE_URL="http://127.0.0.1:8483/api"
-```
-
-然后重启前端。浏览器缓存旧代码时按 `Ctrl + F5`。
-
-### 报告没有 supported
-
-这通常是正确的保守行为。以下情况不能输出 `supported`：
-
-- 只有搜索摘要，没有正文证据。
-- 抓取失败或正文为空。
-- 只有论坛、社交、SEO、榜单、营销页。
-- 信源疑似伪权威、重定向异常、canonical 异常。
-- 降级搜索不可用。
-
-### 旧笔记显示未联网核实
-
-旧任务没有可审计 `verification_result`。打开任务后点击 `发起联网核实`，系统会尝试基于旧任务内容补充证据报告。
-
-## 下一步重点
-
-1. 继续扩充真实 GEO/language disagreement fixtures。
-2. 扩展 prompt injection、SEO farm、fake authority、repost、data void 测试。
-3. 处理 standalone `tsc --noEmit` 里的历史前端类型错误。
-4. 决定扩展是否激活 sidepanel/content script；如果激活，必须转向进度/证据/选中文本核验。
-5. 持续清理旧文档里的 note-first 和 Cookie-first 叙事。

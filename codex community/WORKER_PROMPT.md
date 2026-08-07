@@ -1,6 +1,6 @@
 # Worker Prompt
 
-You are a worker Codex terminal in the Reel Mind repository.
+You are a worker Codex terminal in the FastRead repository.
 
 Read:
 

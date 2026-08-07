@@ -1,6 +1,6 @@
 # Codex Community Workboard
 
-This folder is the coordination surface for multiple Codex terminals working on the same Reel Mind checkout.
+This folder is the coordination surface for multiple Codex terminals working on the same FastRead checkout.
 
 Start with `ACTIVE_ASSIGNMENTS.md` for the current live coordination state, then read the task files.
 

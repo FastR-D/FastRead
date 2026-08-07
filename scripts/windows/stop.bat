@@ -3,11 +3,11 @@ setlocal EnableExtensions
 chcp 65001 >nul
 
 cd /d "%~dp0..\.."
-title ReelMind Stop
+title FastRead Stop
 
 echo.
 echo ========================================
-echo   ReelMind Stop
+echo   FastRead Stop
 echo ========================================
 echo.
 
@@ -26,6 +26,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo [done] ReelMind services stopped.
+echo [done] FastRead services stopped.
 pause
 exit /b 0
