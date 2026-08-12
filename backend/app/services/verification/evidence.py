@@ -15,7 +15,7 @@ def _sentences(text: str) -> list[tuple[int, int, str]]:
         return []
     chunks = []
     start = 0
-    for match in re.finditer(r"[。！？!?；;]\s+|(?<=\.)\s+(?=[A-Z0-9])", cleaned):
+    for match in re.finditer(r"[。！？!?；;]+\s*|(?<=\.)\s+(?=[A-Z0-9])", cleaned):
         end = match.end()
         sentence = cleaned[start:end].strip()
         if sentence:

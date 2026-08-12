@@ -3,7 +3,6 @@ import { toast } from 'react-hot-toast'
 import WorkspaceStatusView from '@/pages/HomePage/components/WorkspaceStatusView.tsx'
 import TaskFailureView from '@/pages/HomePage/components/TaskFailureView.tsx'
 import { useTaskStore } from '@/store/taskStore'
-import { noteStyles } from '@/constant/note.ts'
 import { MarkdownHeader } from '@/pages/HomePage/components/MarkdownHeader.tsx'
 import WorkspacePanels from '@/pages/HomePage/components/WorkspacePanels.tsx'
 
@@ -21,9 +20,8 @@ interface MarkdownViewerProps {
 }
 
 type WorkspaceCommand = {
-  viewMode?: 'report' | 'verify' | 'map' | 'preview' | 'cards'
+  viewMode?: 'report' | 'verify' | 'preview'
   chat?: false | 'half' | 'full'
-  transcribe?: boolean | 'toggle'
   action?: 'copy' | 'download'
 }
 
@@ -40,15 +38,13 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const [currentVerId, setCurrentVerId] = useState<string>('')
   const [selectedContent, setSelectedContent] = useState<string>('')
   const [modelName, setModelName] = useState<string>('')
-  const [style, setStyle] = useState<string>('')
   const [createTime, setCreateTime] = useState<string>('')
   const currentTask = useTaskStore(state => state.getCurrentTask())
   const taskStatus = currentTask?.status || 'PENDING'
   const retryTask = useTaskStore.getState().retryTask
   const isMultiVersion = Array.isArray(currentTask?.markdown)
-  const [showTranscribe, setShowTranscribe] = useState(false)
   const [showChat, setShowChat] = useState<false | 'half' | 'full'>(false)
-  const [viewMode, setViewMode] = useState<'report' | 'verify' | 'map' | 'preview' | 'cards'>('report')
+  const [viewMode, setViewMode] = useState<'report' | 'verify' | 'preview'>('report')
   const hasVerificationReport = Boolean(currentTask?.insights?.verification)
 
   // 多版本内容处理
@@ -58,7 +54,6 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     if (!isMultiVersion) {
       setCurrentVerId('') // 清空旧版本 ID
       setModelName(currentTask.formData.model_name)
-      setStyle(currentTask.formData.style)
       setCreateTime(currentTask.createdAt)
       setSelectedContent(currentTask?.markdown)
     } else {
@@ -77,7 +72,6 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
     const currentVer = currentTask.markdown.find(v => v.ver_id === currentVerId)
     if (currentVer) {
       setModelName(currentVer.model_name)
-      setStyle(currentVer.style)
       setCreateTime(currentVer.created_at || '')
       setSelectedContent(currentVer.content)
     }
@@ -112,12 +106,6 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
       if (command.chat !== undefined) {
         if (!command.viewMode && command.chat === 'full') setViewMode('report')
         setShowChat(command.chat)
-      }
-      if (command.transcribe !== undefined) {
-        setViewMode('preview')
-        setShowTranscribe(prev =>
-          command.transcribe === 'toggle' ? !prev : Boolean(command.transcribe)
-        )
       }
       if (command.action === 'copy') {
         handleCopy()
@@ -167,13 +155,9 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
         currentVerId={currentVerId}
         setCurrentVerId={setCurrentVerId}
         modelName={modelName}
-        style={style}
-        noteStyles={noteStyles}
         onCopy={handleCopy}
         onDownload={handleDownload}
         createAt={createTime}
-        showTranscribe={showTranscribe}
-        setShowTranscribe={setShowTranscribe}
         showChat={showChat}
         setShowChat={setShowChat}
         viewMode={viewMode}
@@ -183,7 +167,6 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
       <WorkspacePanels
         viewMode={viewMode}
         showChat={showChat}
-        showTranscribe={showTranscribe}
         selectedContent={selectedContent}
         currentTask={currentTask}
         setShowChat={setShowChat}

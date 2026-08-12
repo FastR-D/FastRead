@@ -10,31 +10,24 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFi
 from pydantic import BaseModel, field_validator, model_validator
 
 from app.core.settings import get_settings
-from app.enmus.exception import NoteErrorEnum
-from app.enmus.note_enums import DownloadQuality
-from app.exceptions.note import NoteError
 from app.repositories.note_artifacts import NoteArtifactRepository
-from app.services.note import logger
 from app.utils.local_access import require_local_request
 from app.services.note_task_service import NoteTaskService
 from app.services.paper_ingest_service import PaperIngestService
 from app.services.reading_report_service import ReadingReportService
 from app.utils.response import ResponseWrapper as R
-from app.validators.video_url_validator import SUPPORTED_PLATFORMS, is_supported_video_url
+from app.utils.logger import get_logger
 from fastapi import Request
 from fastapi.responses import Response
 import httpx
 
-# from app.services.downloader import download_raw_audio
-# from app.services.whisperer import transcribe_audio
+logger = get_logger(__name__)
 
 router = APIRouter()
 
 
 class RecordRequest(BaseModel):
-    task_id: Optional[str] = None
-    video_id: Optional[str] = None
-    platform: str = "douyin"
+    task_id: str
 
 
 class CollectionUpdateRequest(BaseModel):
@@ -115,44 +108,6 @@ class PaperUrlRequest(BaseModel):
         return value
 
 
-class VideoRequest(BaseModel):
-    video_url: str
-    platform: str = "douyin"
-    quality: DownloadQuality
-    screenshot: Optional[bool] = False
-    link: Optional[bool] = False
-    model_name: str
-    provider_id: str
-    task_id: Optional[str] = None
-    format: Optional[list] = []
-    style: str = None
-    extras: Optional[str]=None
-    collection_folder: Optional[str] = None
-    collection_tags: Optional[list[str] | str] = None
-    collection_note: Optional[str] = None
-    video_understanding: Optional[bool] = False
-    video_interval: Optional[int] = 0
-    grid_size: Optional[list] = []
-    # 客户端（如浏览器插件）已经在用户浏览器里抓到字幕，直接传给后端复用，
-    # 跳过 download_subtitles 和音频转写。形如：
-    #   {"language": "zh", "full_text": "...", "segments": [{"start","end","text"}, ...]}
-    prefetched_transcript: Optional[dict] = None
-
-    @field_validator("platform")
-    def validate_platform(cls, v):
-        if v not in SUPPORTED_PLATFORMS:
-            raise NoteError(code=NoteErrorEnum.PLATFORM_NOT_SUPPORTED.code,
-                            message="当前仅支持抖音精选、B站、快手视频")
-        return v
-
-    @model_validator(mode="after")
-    def validate_supported_url(self):
-        if not is_supported_video_url(str(self.video_url), self.platform):
-            raise NoteError(code=NoteErrorEnum.PLATFORM_NOT_SUPPORTED.code,
-                            message="请输入所选平台的视频链接")
-        return self
-
-
 settings = get_settings()
 UPLOAD_DIR = settings.uploads_dir
 UPLOADS_PATH = settings.uploads_path
@@ -211,36 +166,10 @@ def _assert_public_image_url(raw_url: str) -> str:
     return raw_url
 
 
-def run_note_task(task_id: str, video_url: str, platform: str, quality: DownloadQuality,
-                  link: bool = False, screenshot: bool = False, model_name: str = None, provider_id: str = None,
-                  _format: list = None, style: str = None, extras: str = None, video_understanding: bool = False,
-                  video_interval=0, grid_size=[]
-                  ):
-
-    if not model_name or not provider_id:
-        raise HTTPException(status_code=400, detail="请选择模型和提供者")
-    NOTE_TASKS.execute_generation_task(
-        task_id=task_id,
-        video_url=video_url,
-        platform=platform,
-        quality=quality,
-        link=link,
-        screenshot=screenshot,
-        model_name=model_name,
-        provider_id=provider_id,
-        formats=_format,
-        style=style,
-        extras=extras,
-        video_understanding=video_understanding,
-        video_interval=video_interval,
-        grid_size=grid_size,
-    )
-
-
 @router.post('/delete_task')
 def delete_task(data: RecordRequest):
     try:
-        NOTE_TASKS.delete_task(task_id=data.task_id, video_id=data.video_id, platform=data.platform)
+        NOTE_TASKS.delete_task(task_id=data.task_id)
         return R.success(msg='删除成功')
     except Exception as e:
         return R.error(msg=e)
@@ -429,61 +358,6 @@ async def ingest_paper_upload(
             stored_pdf.unlink()
         logger.error(f"导入 PDF 失败: {exc}", exc_info=True)
         return R.error(msg=f"导入 PDF 失败: {exc}")
-
-
-@router.post("/upload")
-async def upload(_: None = Depends(require_local_request), file: UploadFile = File(...)):
-    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    ext = _safe_upload_extension(file.filename or "")
-    safe_name = f"{uuid.uuid4().hex}{ext}"
-    file_location = UPLOAD_DIR / safe_name
-    temp_location = file_location.with_suffix(f"{file_location.suffix}.part")
-    total = 0
-
-    try:
-        with open(temp_location, "wb") as f:
-            while True:
-                chunk = await file.read(IO_CHUNK_SIZE)
-                if not chunk:
-                    break
-                total += len(chunk)
-                if total > MAX_UPLOAD_BYTES:
-                    raise HTTPException(status_code=413, detail="文件过大")
-                f.write(chunk)
-        os.replace(temp_location, file_location)
-    except Exception:
-        if temp_location.exists():
-            temp_location.unlink()
-        raise
-
-    return R.success({"url": f"{UPLOADS_PATH.rstrip('/')}/{safe_name}"})
-
-
-@router.post("/generate_note")
-def generate_note(data: VideoRequest, background_tasks: BackgroundTasks):
-    try:
-        if data.task_id:
-            task_id = data.task_id
-            logger.info(f"重试模式，复用已有 task_id={task_id}")
-        else:
-            task_id = str(uuid.uuid4())
-
-        NOTE_TASKS.prepare_generation_task(
-            video_url=data.video_url,
-            platform=data.platform,
-            task_id=task_id,
-            collection_folder=data.collection_folder or "默认收藏夹",
-            collection_tags=data.collection_tags,
-            collection_note=data.collection_note or "",
-            prefetched_transcript=data.prefetched_transcript,
-        )
-
-        background_tasks.add_task(run_note_task, task_id, data.video_url, data.platform, data.quality, data.link,
-                                  data.screenshot, data.model_name, data.provider_id, data.format, data.style,
-                                  data.extras, data.video_understanding, data.video_interval, data.grid_size)
-        return R.success({"task_id": task_id})
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/tasks")

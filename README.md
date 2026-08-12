@@ -422,15 +422,13 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 ├── reel-mind-frontend/     # React Web 前端
 ├── reel-mind-extension/    # 浏览器扩展
 ├── doc/                   # 文档图片和产品资料
+├── docs/                  # 产品需求文档
 ├── nginx/                 # Docker 反向代理配置
-├── readme/                # 阶段交接与补充文档
-├── task/                  # PRD 汇报版和使用指南
 ├── docker-compose.yml     # Docker Compose 部署
 ├── OPEN_ME_FIRST.md       # 给非技术人员的最短说明
 ├── run.bat                # 唯一 Windows 本地入口：启动/检查/状态/停止
 ├── pytest.ini             # 后端 pytest 配置
-├── DEPLOYMENT.md          # 面向非技术人员的部署说明
-└── README-usage.md        # 当前 demo 的详细使用说明
+└── DEPLOYMENT.md          # 面向非技术人员的部署说明
 ```
 
 ## 路线图
@@ -452,12 +450,8 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 
 ## 相关文档
 
-- [PRD 技术汇报版](./task/ReelMind_PRD_汇报版.md)
-- [产品使用指南](./task/ReelMind_使用指南.md)
-- [详细使用说明](./README-usage.md)
-- [贡献指南](./CONTRIBUTING.md)
-- [更新日志](./CHANGELOG.md)
-- [发布说明](./RELEASING.md)
+- [产品需求文档](./docs/FASTREAD_REQUIREMENTS.md)
+- [部署说明](./DEPLOYMENT.md)
 
 ## 许可证
 

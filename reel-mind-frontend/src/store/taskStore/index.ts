@@ -2,7 +2,6 @@ import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import {
   delete_task,
-  generateNote,
   list_generated_tasks,
   rerun_verification_task,
   update_task_collection,
@@ -622,7 +621,7 @@ export const useTaskStore = create<TaskStore>()(
         if (!task) return
 
         const newFormData = payload || task.formData
-        if (task.platform === 'verification' || newFormData?.input_mode) {
+        if (task.platform === 'verification' || newFormData?.input_mode === 'verification' || newFormData?.input_mode === 'text' || newFormData?.input_mode === 'url') {
           await rerun_verification_task(id)
 
           set(state => ({
@@ -642,25 +641,7 @@ export const useTaskStore = create<TaskStore>()(
           return
         }
 
-        await generateNote({
-          ...newFormData,
-          task_id: id,
-        })
-
-        set(state => ({
-          tasks: state.tasks.map(t =>
-            t.id === id
-              ? {
-                  ...t,
-                  formData: newFormData,
-                  collection: getCollectionFromForm(newFormData),
-                  status: 'PENDING',
-                  message: undefined,
-                  error: undefined,
-                }
-              : t
-          ),
-        }))
+        toast.error('该任务类型暂不支持重试')
       },
 
       removeTask: async id => {
@@ -675,11 +656,7 @@ export const useTaskStore = create<TaskStore>()(
 
         if (task) {
           try {
-            await delete_task({
-              task_id: task.id,
-              video_id: task.audioMeta.video_id,
-              platform: task.platform,
-            })
+            await delete_task({ task_id: task.id })
           } catch (error) {
             set({
               tasks: previousTasks,

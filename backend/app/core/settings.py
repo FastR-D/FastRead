@@ -65,15 +65,10 @@ class AppSettings:
         self.static_dir = _resolve_backend_path(os.getenv("STATIC_DIR", "static"))
         self.uploads_path = os.getenv("UPLOADS_PATH", "/uploads")
         self.uploads_dir = _resolve_backend_path(os.getenv("UPLOAD_DIR", "uploads"))
-        self.screenshot_output_dir = _resolve_backend_path(os.getenv("OUT_DIR", "./static/screenshots"))
-        self.image_base_url = os.getenv("IMAGE_BASE_URL", "/static/screenshots")
         self.note_output_dir = _resolve_backend_path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
         self.data_dir = _resolve_backend_path(os.getenv("DATA_DIR", "data"))
         self.export_output_dir = _resolve_backend_path(os.getenv("EXPORT_OUTPUT_DIR", "data/note_output"))
         self.vector_db_dir = _resolve_backend_path(os.getenv("VECTOR_DB_DIR", "vector_db"))
-        ffmpeg_bin_path = os.getenv("FFMPEG_BIN_PATH", "").strip()
-        self.ffmpeg_bin_path = _resolve_backend_path(ffmpeg_bin_path) if ffmpeg_bin_path else None
-        self.ffmpeg_runtime_dir = _resolve_backend_path(os.getenv("FFMPEG_RUNTIME_DIR", ".runtime/ffmpeg"))
 
         self.max_upload_bytes = _get_int("MAX_UPLOAD_BYTES", 10 * 1024 * 1024)
         self.max_image_proxy_bytes = _get_int("MAX_IMAGE_PROXY_BYTES", 15 * 1024 * 1024)
@@ -83,25 +78,14 @@ class AppSettings:
             if host.strip()
         }
 
-        self.cookie_config_path = _resolve_backend_path(
-            os.getenv("DOWNLOADER_CONFIG_PATH", "config/downloader.json")
-        )
-        self.transcriber_config_path = _resolve_backend_path(
-            os.getenv("TRANSCRIBER_CONFIG_PATH", "config/transcriber.json")
-        )
-
     def ensure_runtime_dirs(self) -> None:
         for path in (
             self.static_dir,
             self.uploads_dir,
-            self.screenshot_output_dir,
             self.note_output_dir,
             self.data_dir,
             self.export_output_dir,
             self.vector_db_dir,
-            self.ffmpeg_runtime_dir,
-            self.cookie_config_path.parent,
-            self.transcriber_config_path.parent,
         ):
             path.mkdir(parents=True, exist_ok=True)
 

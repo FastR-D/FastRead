@@ -604,7 +604,11 @@ def test_source_intel_annotates_content_farm_cluster():
     assert all("content_farm_cluster" in source["risk_flags"] for source in annotated)
 
 
-def test_fetching_records_redirect_chain():
+def test_fetching_records_redirect_chain(monkeypatch):
+    # 该用例验证重定向链记录,与 SSRF 校验无关;example.com 的 DNS 解析结果
+    # 随运行环境变化(FakeIP 代理会返回保留地址),这里直接绕过公网校验
+    monkeypatch.setattr(fetching, "_validate_public_url", lambda url: url)
+
     class Response:
         url = "https://example.com/final"
         headers = {"content-type": "text/html"}

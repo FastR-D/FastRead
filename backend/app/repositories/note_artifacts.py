@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import tempfile
 import threading
@@ -23,8 +24,16 @@ IGNORED_RESULT_SUFFIXES = (
     "_markdown.status.json",
 )
 VERIFICATION_CACHE_KINDS = {"serp", "snapshot", "evidence"}
+# task_id / claim_id 会被拼进文件路径,只允许安全字符,防止路径穿越
+_SAFE_ID_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _TASK_LOCKS_GUARD = threading.Lock()
 _TASK_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _validate_safe_id(value: str, label: str) -> str:
+    if not _SAFE_ID_PATTERN.fullmatch(value or ""):
+        raise ValueError(f"非法的{label}: {value!r}")
+    return value
 
 
 def _task_lock(path: Path) -> threading.RLock:
@@ -57,25 +66,26 @@ class NoteArtifactRepository:
         return self.output_dir.exists()
 
     def result_path(self, task_id: str) -> Path:
-        return self.output_dir / f"{task_id}.json"
+        return self.output_dir / f"{_validate_safe_id(task_id, '任务 ID')}.json"
 
     def status_path(self, task_id: str) -> Path:
-        return self.output_dir / f"{task_id}.status.json"
+        return self.output_dir / f"{_validate_safe_id(task_id, '任务 ID')}.status.json"
 
     def transcript_cache_path(self, task_id: str) -> Path:
-        return self.output_dir / f"{task_id}_transcript.json"
+        return self.output_dir / f"{_validate_safe_id(task_id, '任务 ID')}_transcript.json"
 
     def audio_cache_path(self, task_id: str) -> Path:
-        return self.output_dir / f"{task_id}_audio.json"
+        return self.output_dir / f"{_validate_safe_id(task_id, '任务 ID')}_audio.json"
 
     def markdown_cache_path(self, task_id: str) -> Path:
-        return self.output_dir / f"{task_id}_markdown.md"
+        return self.output_dir / f"{_validate_safe_id(task_id, '任务 ID')}_markdown.md"
 
     def verification_task_dir(self, task_id: str) -> Path:
-        return self.output_dir / "_verification" / task_id
+        return self.output_dir / "_verification" / _validate_safe_id(task_id, "任务 ID")
 
     def verification_claim_path(self, task_id: str, claim_id: str) -> Path:
-        return self.verification_task_dir(task_id) / "claims" / f"{claim_id}.json"
+        safe_claim_id = _validate_safe_id(claim_id, "论断 ID")
+        return self.verification_task_dir(task_id) / "claims" / f"{safe_claim_id}.json"
 
     def verification_cache_path(self, kind: str, key: str) -> Path:
         if kind not in VERIFICATION_CACHE_KINDS:

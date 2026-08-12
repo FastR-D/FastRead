@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react'
 import {
-  BrainCircuit,
   BookOpenCheck,
   Copy,
   Download,
@@ -10,7 +9,6 @@ import {
   MessageSquare,
   SearchCheck,
   ShieldCheck,
-  SquareStack,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
@@ -42,17 +40,13 @@ interface NoteHeaderProps {
   currentVerId: string
   setCurrentVerId: (id: string) => void
   modelName: string
-  style: string
-  noteStyles: { value: string; label: string }[]
   onCopy: () => void
   onDownload: () => void
   createAt?: string | Date
-  showTranscribe: boolean
-  setShowTranscribe: (show: boolean) => void
   showChat?: false | 'half' | 'full'
   setShowChat?: (mode: false | 'half' | 'full') => void
-  viewMode: 'report' | 'verify' | 'map' | 'preview' | 'cards'
-  setViewMode: (mode: 'report' | 'verify' | 'map' | 'preview' | 'cards') => void
+  viewMode: 'report' | 'verify' | 'preview'
+  setViewMode: (mode: 'report' | 'verify' | 'preview') => void
 }
 
 const VERDICT_TONE: Record<string, string> = {
@@ -70,13 +64,9 @@ export function MarkdownHeader({
   currentVerId,
   setCurrentVerId,
   modelName,
-  style,
-  noteStyles,
   onCopy,
   onDownload,
   createAt,
-  showTranscribe,
-  setShowTranscribe,
   showChat,
   setShowChat,
   viewMode,
@@ -96,8 +86,6 @@ export function MarkdownHeader({
     onCopy()
     setCopied(true)
   }
-
-  const styleName = noteStyles.find(v => v.value === style)?.label || style
 
   const formatDate = (date: string | Date | undefined) => {
     if (!date) return ''
@@ -175,11 +163,6 @@ export function MarkdownHeader({
             {modelName}
           </span>
         )}
-        {styleName && (
-          <span className="inline-flex items-center rounded-sm border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-600">
-            {styleName}
-          </span>
-        )}
 
         {createAt && (
           <span className="font-mono text-[11px] text-slate-400">{formatDate(createAt)}</span>
@@ -220,43 +203,13 @@ export function MarkdownHeader({
           viewMode === 'preview',
           () => setViewMode('preview'),
           <FileText className="h-3.5 w-3.5" />,
-          'Markdown',
-          'Markdown 笔记',
-        )}
-        {viewBtn(
-          viewMode === 'map',
-          () => setViewMode(viewMode === 'map' ? 'preview' : 'map'),
-          <BrainCircuit className="h-3.5 w-3.5" />,
-          '导图',
-          '思维导图',
-        )}
-        {viewBtn(
-          viewMode === 'cards',
-          () => setViewMode(viewMode === 'cards' ? 'preview' : 'cards'),
-          <SquareStack className="h-3.5 w-3.5" />,
-          '卡片',
-          '知识卡片',
+          '全文',
+          '论文全文 Markdown',
         )}
 
         <div className="mx-1 h-5 w-px bg-slate-200" />
 
         {/* 工具操作 */}
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={() => setShowTranscribe(!showTranscribe)}
-                variant={showTranscribe ? 'secondary' : 'ghost'}
-                size="sm"
-                className="h-8 px-2 text-xs"
-              >
-                <span>原文参照</span>
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>打开转写文本</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-
         {setShowChat && (
           <TooltipProvider>
             <Tooltip>

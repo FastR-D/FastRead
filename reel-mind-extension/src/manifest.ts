@@ -18,9 +18,9 @@ export async function getManifest() {
   // can also be conditional based on your need
   const manifest: ManifestWithBrowserSettings = {
     manifest_version: 3,
-    name: 'ReelMind Verification',
+    name: 'FastRead 论文导入',
     version: pkg.version,
-    description: 'Start ReelMind online verification tasks from the current page or selected text.',
+    description: 'Send the current paper to FastRead for a reading report.',
     action: {
       default_icon: {
         16: 'assets/icon-16.png',
@@ -37,10 +37,8 @@ export async function getManifest() {
     permissions: [
       'tabs',
       'storage',
-      'cookies',
     ],
     host_permissions: [
-      '*://*.douyin.com/*',
       'http://localhost/*',
       'http://127.0.0.1/*',
     ],
@@ -52,7 +50,7 @@ export async function getManifest() {
     },
     browser_specific_settings: {
       gecko: {
-        id: 'reelmind-verification@local',
+        id: 'fastread-import@local',
       },
     },
   }

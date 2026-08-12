@@ -12,7 +12,7 @@ from app.services.verification.text_utils import domain, tokenize
 
 UNIT_PATTERN = (
     r"billion\s+people|million\s+people|billion|million|"
-    r"亿人|万人|人|亿|万|"
+    r"亿人|万人|万亿|亿|万|人|"
     r"mg/kg|mg\/kg|%|种|个|项|倍|元|分钟|小时|天|年|proteins?|protein entries|entries"
 )
 
@@ -26,6 +26,8 @@ def normalize_number(value: str) -> float | None:
 
 def normalize_number_with_unit(value: float, unit: str) -> float:
     normalized_unit = (unit or "").strip().lower()
+    if normalized_unit == "万亿":
+        return value * 1_000_000_000_000
     if normalized_unit in {"亿", "亿人"}:
         return value * 100_000_000
     if normalized_unit in {"万", "万人"}:

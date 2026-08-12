@@ -76,6 +76,35 @@ BLOCKED_DOMAIN_HINTS = (
     "0.0.0.0",
 )
 
+
+def _domain_tokens(domain: str) -> set[str]:
+    return {token for token in re.split(r"[.\-]+", domain.lower()) if token}
+
+
+def _domain_hint_matches(domain: str, hints) -> bool:
+    """按域名标签边界匹配提示词,避免 "notgov.cn" 命中 "gov.cn"、
+    "courtyard-times.com" 命中 "court" 这类子串误判。
+
+    - ".gov" 这类点前缀提示按后缀匹配;
+    - "nature.com"、"gov.cn" 这类域名提示要求完整域名或子域名边界;
+    - "court"、"blog" 这类裸关键词要求作为独立的点/连字符分隔标签出现。
+    """
+    domain = (domain or "").lower().split(":", 1)[0]
+    if not domain:
+        return False
+    tokens = _domain_tokens(domain)
+    for raw_hint in hints:
+        hint = raw_hint.lower()
+        if hint.startswith("."):
+            if domain.endswith(hint):
+                return True
+        elif "." in hint:
+            if domain == hint or domain.endswith("." + hint):
+                return True
+        elif hint in tokens:
+            return True
+    return False
+
 LISTICLE_TITLE_HINTS = (
     "十大",
     "排行榜",
@@ -201,19 +230,19 @@ def classify_source(result: dict, fetched: dict | None = None) -> dict:
 
     tier = "D"
     reasons = []
-    if any(hint in source_domain for hint in BLOCKED_DOMAIN_HINTS):
+    if _domain_hint_matches(source_domain, BLOCKED_DOMAIN_HINTS):
         tier = "blocked"
         reasons.append("blocked or local domain")
     elif registry_match:
         tier = registry_match["tier"]
         reasons.append(f"source registry matched {registry_match['domain']} ({registry_match['label']})")
-    elif any(hint in source_domain for hint in A_TIER_DOMAIN_HINTS):
+    elif _domain_hint_matches(source_domain, A_TIER_DOMAIN_HINTS):
         tier = "A"
         reasons.append("primary official, regulator, statistics, court, or original research domain")
-    elif any(hint in source_domain for hint in B_TIER_DOMAIN_HINTS):
+    elif _domain_hint_matches(source_domain, B_TIER_DOMAIN_HINTS):
         tier = "B"
         reasons.append("recognized institution, publisher, database, or mainstream reporting domain")
-    elif any(hint in source_domain for hint in C_TIER_DOMAIN_HINTS):
+    elif _domain_hint_matches(source_domain, C_TIER_DOMAIN_HINTS):
         tier = "C"
         reasons.append("tertiary, encyclopedia, blog, or republished source")
     elif result.get("trusted"):
@@ -222,7 +251,7 @@ def classify_source(result: dict, fetched: dict | None = None) -> dict:
     else:
         reasons.append("weak or unverified source identity")
 
-    if any(hint in source_domain for hint in D_TIER_DOMAIN_HINTS):
+    if _domain_hint_matches(source_domain, D_TIER_DOMAIN_HINTS):
         tier = "D" if tier != "blocked" else "blocked"
         reasons.append("forum, social, SEO, portal, or ranking/listicle domain")
 

@@ -192,67 +192,11 @@ export const normalizeTaskSnapshot = (payload: unknown): TaskSnapshot | null => 
   }
 }
 
-export const generateNote = async (data: {
-  video_url: string
-  platform: string
-  quality: string
-  model_name: string
-  provider_id: string
-  task_id?: string
-  format: Array<string>
-  style: string
-  extras?: string
-  collection_folder?: string
-  collection_tags?: string
-  collection_note?: string
-  video_understand?: boolean
-  video_interval?: number
-  grid_size: Array<number>
-}) => {
+export const delete_task = async ({ task_id }: { task_id: string }) => {
   try {
-    console.log('generateNote', data)
-    const response = await request.post('/generate_note', data)
-
-    if (!response) {
-      toast.error('笔记生成任务提交失败')
-      return null
-    }
-    toast.success('笔记生成任务已提交！')
-
-    console.log('res', response)
-    // 成功提示
-
-    return response
-  } catch (e: any) {
-    console.error('❌ 请求出错', e)
-
-    // 错误提示
-    // toast.error('笔记生成失败，请稍后重试')
-
-    throw e // 抛出错误以便调用方处理
-  }
-}
-
-export const delete_task = async ({
-  task_id,
-  video_id,
-  platform,
-}: {
-  task_id?: string
-  video_id?: string
-  platform: string
-}) => {
-  try {
-    const data = {
-      task_id,
-      video_id,
-      platform,
-    }
-    const res = await request.post('/delete_task', data)
-
-
-      toast.success('任务已成功删除')
-      return res
+    const res = await request.post('/delete_task', { task_id })
+    toast.success('任务已成功删除')
+    return res
   } catch (e) {
     toast.error('请求异常，删除任务失败')
     console.error('❌ 删除任务失败:', e)
@@ -287,18 +231,22 @@ export const create_verification_task = async (data: {
   source_policy?: string
   model_name?: string
   provider_id?: string
-}) => {
+}): Promise<{ task_id: string }> => {
   return await request.post('/verification_tasks', {
     goal: 'verify',
     verification_depth: 'deep',
     source_policy: 'authoritative',
     max_claims: 50,
     ...data,
-  }, { timeout: 600000 })
+  }, { timeout: 600000 }) as any
 }
 
-export const rerun_verification_task = async (task_id: string, retry_failed_only = true) => {
-  return await request.post(`/verification_tasks/${task_id}/rerun`, { retry_failed_only }, { timeout: 600000 })
+export const rerun_verification_task = async (task_id: string, retry_failed_only = true): Promise<TaskSnapshot> => {
+  const snapshot = normalizeTaskSnapshot(
+    await request.post(`/verification_tasks/${task_id}/rerun`, { retry_failed_only }, { timeout: 600000 }),
+  )
+  if (!snapshot) throw new Error('重跑核实任务响应格式异常')
+  return snapshot
 }
 
 export const rerun_verification_claim = async (task_id: string, claim_id: string) => {

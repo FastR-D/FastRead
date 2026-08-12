@@ -14,7 +14,6 @@ import { z } from 'zod'
 import { toast } from 'react-hot-toast'
 
 import { BookOpenCheck, ChevronDown, FileUp, Info, Loader2, Plus, SearchCheck } from 'lucide-react'
-import { Alert, AlertDescription } from '@/components/ui/alert.tsx'
 import {
   create_verification_task,
   ingest_paper_pdf,
@@ -30,7 +29,6 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip.tsx'
-import { Checkbox } from '@/components/ui/checkbox.tsx'
 import { Button } from '@/components/ui/button.tsx'
 import {
   Select,
@@ -41,7 +39,6 @@ import {
 } from '@/components/ui/select.tsx'
 import { Input } from '@/components/ui/input.tsx'
 import { Textarea } from '@/components/ui/textarea.tsx'
-import { noteStyles, noteFormats, videoPlatforms } from '@/constant/note.ts'
 import { useNavigate } from 'react-router-dom'
 
 const extractFirstUrl = (value: string) =>
@@ -61,24 +58,11 @@ const isHttpUrl = (value: string) => {
 const formSchema = z
   .object({
     video_url: z.string().optional(),
-    platform: z.enum(['douyin', 'bilibili', 'kuaishou']),
-    quality: z.enum(['fast', 'medium', 'slow']),
-    screenshot: z.boolean().optional(),
-    link: z.boolean().optional(),
     model_name: z.string().nonempty('请选择模型'),
-    provider_id: z.string().default(''),
-    format: z.array(z.string()).default([]),
-    style: z.string().default('minimal'),
-    extras: z.string().optional(),
+    provider_id: z.string().optional(),
     collection_folder: z.string().optional(),
     collection_tags: z.string().optional(),
     collection_note: z.string().optional(),
-    video_understanding: z.boolean().optional(),
-    video_interval: z.coerce.number().min(1).max(30).default(6).optional(),
-    grid_size: z
-      .tuple([z.coerce.number().min(1).max(10), z.coerce.number().min(1).max(10)])
-      .default([2, 2])
-      .optional(),
   })
   .superRefine(({ video_url }, ctx) => {
     if (!video_url) {
@@ -90,22 +74,12 @@ const formSchema = z
 export type NoteFormValues = z.infer<typeof formSchema>
 
 const createEmptyFormValues = (modelName = '', providerId = ''): NoteFormValues => ({
-  platform: 'douyin',
-  quality: 'medium',
   model_name: modelName,
   provider_id: providerId,
-  style: 'minimal',
-  video_interval: 6,
-  grid_size: [2, 2],
-  format: [],
   collection_folder: '核验历史',
   collection_tags: '',
   collection_note: '',
   video_url: '',
-  extras: '',
-  screenshot: false,
-  link: false,
-  video_understanding: false,
 })
 
 /* -------------------- 可复用子组件 -------------------- */
@@ -125,31 +99,6 @@ const SectionHeader = ({ title, tip }: { title: string; tip?: string }) => (
   </div>
 )
 
-const CheckboxGroup = ({
-  value = [],
-  onChange,
-  disabledMap,
-}: {
-  value?: string[]
-  onChange: (v: string[]) => void
-  disabledMap: Record<string, boolean>
-}) => (
-  <div className="flex flex-wrap gap-x-3 gap-y-2">
-    {noteFormats.map(({ label, value: v }) => (
-      <label key={v} className="flex items-center gap-1.5 text-sm text-slate-700">
-        <Checkbox
-          checked={value.includes(v)}
-          disabled={disabledMap[v]}
-          onCheckedChange={checked =>
-            onChange(checked ? [...value, v] : value.filter(x => x !== v))
-          }
-        />
-        <span>{label}</span>
-      </label>
-    ))}
-  </div>
-)
-
 /* -------------------- 主组件 -------------------- */
 const NoteForm = () => {
   const navigate = useNavigate();
@@ -166,7 +115,6 @@ const NoteForm = () => {
   const currentTask = getCurrentTask()
 
   /* ---- 派生状态（只 watch 一次，提高性能） ---- */
-  const videoUnderstandingEnabled = useWatch({ control: form.control, name: 'video_understanding' })
   const selectedModelName = useWatch({ control: form.control, name: 'model_name' })
   const selectedProviderId = useWatch({ control: form.control, name: 'provider_id' })
   const editing = currentTask && currentTask.id
@@ -198,24 +146,12 @@ const NoteForm = () => {
     const reportModel = task.insights?.reading_report?.model
 
     form.reset({
-      platform: ['douyin', 'bilibili', 'kuaishou'].includes(formData.platform)
-        ? formData.platform as 'douyin' | 'bilibili' | 'kuaishou'
-        : 'douyin',
       video_url: formData.video_url || '',
       model_name: formData.model_name || reportModel?.model_name || '',
       provider_id: formData.provider_id || reportModel?.provider_id || '',
-      style: formData.style || 'minimal',
-      quality: formData.quality || 'medium',
-      extras: formData.extras || '',
       collection_folder: formData.collection_folder || task.collection?.folder || '核验历史',
       collection_tags: formData.collection_tags || task.collection?.tags?.join('，') || '',
       collection_note: formData.collection_note || task.collection?.note || '',
-      screenshot: formData.screenshot ?? false,
-      link: formData.link ?? false,
-      video_understanding: formData.video_understanding ?? false,
-      video_interval: formData.video_interval ?? 6,
-      grid_size: formData.grid_size ?? [2, 2],
-      format: formData.format ?? [],
     })
     setSubmissionMode(formData.input_mode === 'paper' || task.platform === 'paper' ? 'paper_url' : 'verification')
   }, [currentTaskId, form, getCurrentTask])
@@ -348,7 +284,7 @@ const NoteForm = () => {
         error: undefined,
       })
       try {
-        const snapshot = await rerun_verification_task(currentTaskId) as TaskSnapshot
+        const snapshot = await rerun_verification_task(currentTaskId)
         const insights = snapshot.result?.insights || snapshot.insights
         const nextTask = {
           status: snapshot.status,
@@ -381,11 +317,9 @@ const NoteForm = () => {
   }
   const onInvalid = (errors: FieldErrors<NoteFormValues>) => {
     console.warn('表单校验失败：', errors)
-    // message.error('请完善所有必填项后再提交')
   }
   const handleCreateNew = () => {
     // 🔁 这里清空当前任务状态
-    // 比如调用 resetCurrentTask() 或者 navigate 到一个新页面
     setCurrentTask(null)
   }
 
@@ -586,7 +520,7 @@ const NoteForm = () => {
             )}
           </div>
 
-          {/* 次级：辅助产物与视频专项（可折叠） */}
+          {/* 归档信息（可折叠） */}
           <div className="rounded-md border border-slate-200">
             <button
               type="button"
@@ -594,7 +528,7 @@ const NoteForm = () => {
               className="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-left transition hover:bg-slate-50"
             >
               <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
-                辅助产物与视频专项
+                归档信息
               </span>
               <ChevronDown
                 className={`h-3.5 w-3.5 text-slate-400 transition-transform ${showNoteOptions ? 'rotate-180' : ''}`}
@@ -603,57 +537,6 @@ const NoteForm = () => {
 
             {showNoteOptions && (
               <div className="space-y-4 border-t border-slate-200 px-3 py-3">
-                {/* 辅助笔记风格 */}
-                <FormField
-                  control={form.control}
-                  name="style"
-                  render={({ field }) => (
-                    <FormItem>
-                      <SectionHeader title="辅助笔记风格" tip="仅影响次级笔记产物，不参与联网核实判定" />
-                      <Select
-                        value={field.value}
-                        onValueChange={field.onChange}
-                        defaultValue={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="w-full min-w-0 truncate">
-                            <SelectValue />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {noteStyles.map(({ label, value }) => (
-                            <SelectItem key={value} value={value}>
-                              {label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {/* 辅助产物 */}
-                <FormField
-                  control={form.control}
-                  name="format"
-                  render={({ field }) => (
-                    <FormItem>
-                      <SectionHeader title="辅助产物" tip="核验报告始终生成；这里仅控制附带的阅读产物" />
-                      <CheckboxGroup
-                        value={field.value}
-                        onChange={field.onChange}
-                        disabledMap={{
-                          link: false,
-                          screenshot: !videoUnderstandingEnabled,
-                        }}
-                      />
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                {/* 归档信息 */}
                 <div>
                   <SectionHeader title="归档信息" tip="用于在核验历史里分类和检索" />
                   <div className="space-y-2">
@@ -692,122 +575,6 @@ const NoteForm = () => {
                     />
                   </div>
                 </div>
-
-                {/* 视频理解 */}
-                <div>
-                  <SectionHeader title="视频与平台诊断" tip="仅在输入抖音/B站/快手视频时使用；普通网页和文本核验不依赖这里" />
-                  <div className="flex flex-col gap-2">
-                    <FormField
-                      control={form.control}
-                      name="platform"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel className="text-xs text-slate-600">视频平台</FormLabel>
-                          <Select
-                            disabled={!!editing}
-                            value={field.value}
-                            onValueChange={field.onChange}
-                            defaultValue={field.value}
-                          >
-                            <FormControl>
-                              <SelectTrigger className="w-full">
-                                <SelectValue />
-                              </SelectTrigger>
-                            </FormControl>
-                            <SelectContent>
-                              {videoPlatforms?.map(p => (
-                                <SelectItem key={p.value} value={p.value}>
-                                  <div className="flex items-center justify-center gap-2">
-                                    <div className="h-4 w-4">{p.logo()}</div>
-                                    <span>{p.label}</span>
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="video_understanding"
-                      render={() => (
-                        <FormItem>
-                          <div className="flex items-center gap-2">
-                            <FormLabel className="text-xs text-slate-600">启用</FormLabel>
-                            <Checkbox
-                              checked={videoUnderstandingEnabled}
-                              onCheckedChange={v => form.setValue('video_understanding', v)}
-                            />
-                          </div>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-
-                    <div className="grid grid-cols-2 gap-3">
-                      {/* 采样间隔 */}
-                      <FormField
-                        control={form.control}
-                        name="video_interval"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel className="text-xs text-slate-600">采样间隔（秒）</FormLabel>
-                            <Input disabled={!videoUnderstandingEnabled} type="number" {...field} />
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                      {/* 拼图大小 */}
-                      <FormField
-                        control={form.control}
-                        name="grid_size"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel className="text-xs text-slate-600">拼图尺寸（列 × 行）</FormLabel>
-                            <div className="flex items-center space-x-2">
-                              <Input
-                                disabled={!videoUnderstandingEnabled}
-                                type="number"
-                                value={field.value?.[0] || 3}
-                                onChange={e => field.onChange([+e.target.value, field.value?.[1] || 3])}
-                                className="w-16"
-                              />
-                              <span className="text-slate-400">×</span>
-                              <Input
-                                disabled={!videoUnderstandingEnabled}
-                                type="number"
-                                value={field.value?.[1] || 3}
-                                onChange={e => field.onChange([field.value?.[0] || 3, +e.target.value])}
-                                className="w-16"
-                              />
-                            </div>
-                            <FormMessage />
-                          </FormItem>
-                        )}
-                      />
-                    </div>
-                    <Alert variant="warning" className="text-xs">
-                      <AlertDescription>
-                        <strong>提示：</strong>视频理解功能必须使用多模态模型。
-                      </AlertDescription>
-                    </Alert>
-                  </div>
-                </div>
-
-                {/* 备注 */}
-                <FormField
-                  control={form.control}
-                  name="extras"
-                  render={({ field }) => (
-                    <FormItem>
-                      <SectionHeader title="备注" tip="可在 Prompt 结尾附加自定义说明" />
-                      <Textarea placeholder="笔记需要罗列出 xxx 关键点…" {...field} />
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
               </div>
             )}
           </div>

@@ -15,9 +15,6 @@ from app.exceptions.exception_handlers import register_exception_handlers
 # from app.db.provider_dao import init_provider_table
 from app.utils.logger import get_logger
 from app import create_app
-from app.services.transcriber_config_manager import TranscriberConfigManager
-from events import register_handler
-from ffmpeg_helper import ensure_ffmpeg_or_raise
 
 logger = get_logger(__name__)
 settings = get_settings()
@@ -25,12 +22,7 @@ settings.ensure_runtime_dirs()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    register_handler()
     init_db()
-    # 转写器不再在启动时强制初始化，而是在首次生成笔记时按需创建
-    # 如果配置了不可用的类型（如 mlx-whisper 未安装），会在使用时报错而非静默回退
-    _cfg = TranscriberConfigManager().get_config()
-    logger.info(f"当前转写器配置: type={_cfg['transcriber_type']}, model_size={_cfg['whisper_model_size']}")
     seed_default_providers()
     yield
 

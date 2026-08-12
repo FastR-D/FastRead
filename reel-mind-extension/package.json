@@ -1,10 +1,10 @@
 {
-  "name": "reel-mind-extension",
-  "displayName": "ReelMind Verification",
+  "name": "fastread-extension",
+  "displayName": "FastRead 论文导入",
   "version": "0.1.0",
   "private": true,
   "packageManager": "npm@11.12.1",
-  "description": "Start ReelMind online verification tasks from the current page or selected text.",
+  "description": "Send the current paper to FastRead for a reading report.",
   "scripts": {
     "dev": "npm run clear && cross-env NODE_ENV=development run-p dev:prepare dev:web",
     "dev-firefox": "npm run clear && cross-env NODE_ENV=development EXTENSION=firefox run-p dev:prepare dev:web",
@@ -63,12 +63,6 @@
     "vue-demi": "^0.14.10",
     "vue-tsc": "^2.0.29",
     "web-ext": "^8.2.0",
-    "webext-bridge": "^6.0.1",
     "webextension-polyfill": "^0.12.0"
-  },
-  "dependencies": {
-    "markdown-it": "^14.1.0",
-    "markmap-lib": "^0.18.12",
-    "markmap-view": "^0.18.12"
   }
 }

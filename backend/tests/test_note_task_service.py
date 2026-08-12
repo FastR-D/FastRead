@@ -1,45 +1,10 @@
+import os
 from datetime import datetime
 
 from app.enmus.task_status_enums import TaskStatus
 from app.repositories.note_artifacts import NoteArtifactRepository
 from app.services.note_task_service import NoteTaskService
 from app.services.verification import pipeline
-
-
-def test_persist_prefetched_transcript_cleans_segments(tmp_path):
-    service = NoteTaskService(NoteArtifactRepository(tmp_path))
-
-    service.persist_prefetched_transcript(
-        "task-a",
-        {
-            "segments": [
-                {"start": "1.5", "end": 2, "text": " hello "},
-                {"start": 2, "end": 3, "text": "   "},
-                {"start": 3, "end": 4, "text": "world"},
-            ],
-        },
-    )
-
-    cached = service.artifacts.read_transcript_cache("task-a")
-    assert cached == {
-        "language": "zh",
-        "full_text": "hello world",
-        "segments": [
-            {"start": 1.5, "end": 2.0, "text": "hello"},
-            {"start": 3.0, "end": 4.0, "text": "world"},
-        ],
-    }
-
-
-def test_persist_prefetched_transcript_rejects_empty_segments(tmp_path):
-    service = NoteTaskService(NoteArtifactRepository(tmp_path))
-
-    try:
-        service.persist_prefetched_transcript("task-a", {"segments": [{"text": "  "}]})
-    except ValueError as exc:
-        assert "没有可用的 segments" in str(exc)
-    else:
-        raise AssertionError("expected ValueError")
 
 
 def test_get_task_status_returns_success_result_when_status_file_succeeds(tmp_path):
@@ -187,7 +152,7 @@ def test_verify_task_online_attaches_claim_artifact_refs(monkeypatch, tmp_path):
     assert artifact["status"] == "completed"
     assert online["claim_artifact_path"].endswith("claim-1-test.json")
     assert online["audit"]["claim_artifact_path"] == online["claim_artifact_path"]
-    assert saved["verification_result"]["audit"]["artifact_root"].endswith("_verification\\task-a")
+    assert saved["verification_result"]["audit"]["artifact_root"].endswith(os.path.join("_verification", "task-a"))
 
 
 def test_delete_task_artifacts_deletes_files_and_calls_delete_index(tmp_path):

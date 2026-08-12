@@ -1,15 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { addProvider, addModel, getProviderList, testConnection } from '@/services/model'
-import { updateTranscriberConfig } from '@/services/transcriber'
 import logo from '@/assets/icon.png'
 
-// 桌面端首启 4 步引导。完成后写 localStorage('reel-mind-onboarded') = '1'，路由守卫不再拦。
+// 桌面端首启 2 步引导。完成后写 localStorage('reel-mind-onboarded') = '1'，路由守卫不再拦。
 //
 // 1. 后端连通性自检
 // 2. LLM 供应商 + 模型（最简：只引导填一个 OpenAI 兼容供应商 + 一个 model 名）
-// 3. 转写引擎选择（优先中文场景友好的在线引擎）
-// 4. （可选）Cookie 同步说明（主要面向抖音精选等需要登录态的页面）
 
 const ONBOARD_KEY = 'reel-mind-onboarded'
 const LEGACY_ONBOARD_KEY = 'bilinote-onboarded'
@@ -37,10 +34,6 @@ const Onboarding = () => {
   const [baseUrl, setBaseUrl] = useState('https://dashscope.aliyuncs.com/compatible-mode/v1')
   const [modelName, setModelName] = useState('qwen-plus')
   const [savingProvider, setSavingProvider] = useState(false)
-
-  // step 3
-  const [transcriberType, setTranscriberType] = useState<string>('bcut')
-  const [savingTranscriber, setSavingTranscriber] = useState(false)
 
   function next() {
     setError('')
@@ -99,33 +92,13 @@ const Onboarding = () => {
         // 测试失败不阻断流程，让用户自己决定继续
         console.warn('测试连接失败：', e?.message ?? e)
       }
-      next()
+      finish()
     }
     catch (e: any) {
       setError(`保存失败：${e?.message ?? e}`)
     }
     finally {
       setSavingProvider(false)
-    }
-  }
-
-  async function saveTranscriber() {
-    setError('')
-    setSavingTranscriber(true)
-    try {
-      // fast-whisper / mlx-whisper 需指定 model size；在线 (groq/bcut) 不用
-      const needsSize = transcriberType === 'fast-whisper' || transcriberType === 'mlx-whisper'
-      await updateTranscriberConfig({
-        transcriber_type: transcriberType,
-        ...(needsSize ? { whisper_model_size: 'tiny' } : {}),
-      } as any)
-      next()
-    }
-    catch (e: any) {
-      setError(`保存失败：${e?.message ?? e}`)
-    }
-    finally {
-      setSavingTranscriber(false)
     }
   }
 
@@ -140,19 +113,19 @@ const Onboarding = () => {
         <div className="flex items-center gap-3 mb-4">
           <img src={logo} alt="logo" className="h-10 w-10" />
           <div>
-            <h1 className="text-xl font-bold">欢迎使用 Reel Mind</h1>
-            <p className="text-xs text-gray-500">先把运行环境接好，再开始整理抖音精选知识视频。</p>
+            <h1 className="text-xl font-bold">欢迎使用 FastRead</h1>
+            <p className="text-xs text-gray-500">先把运行环境接好，再开始导入论文、生成阅读报告。</p>
           </div>
         </div>
 
         {/* Stepper */}
         <div className="mb-5 flex items-center gap-2 text-xs text-gray-500">
-          {[1, 2, 3, 4].map(s => (
+          {[1, 2].map(s => (
             <div key={s} className="flex items-center gap-2">
               <div
                 className={`flex h-6 w-6 items-center justify-center rounded-full border ${step >= s ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-gray-400'}`}
               >{s}</div>
-              {s < 4 && <div className={`h-px w-8 ${step > s ? 'bg-blue-600' : 'bg-gray-300'}`} />}
+              {s < 2 && <div className={`h-px w-8 ${step > s ? 'bg-blue-600' : 'bg-gray-300'}`} />}
             </div>
           ))}
         </div>
@@ -201,56 +174,7 @@ const Onboarding = () => {
             <div className="flex gap-2 justify-between">
               <button className="text-sm text-gray-500 hover:text-gray-800" onClick={prev}>上一步</button>
               <button className="px-4 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50" disabled={savingProvider} onClick={saveProvider}>
-                {savingProvider ? '保存中…' : '保存并下一步'}
-              </button>
-            </div>
-          </section>
-        )}
-
-        {step === 3 && (
-          <section className="flex flex-col gap-3">
-            <h2 className="font-semibold">第 3 步 · 音频转写引擎</h2>
-            <p className="text-sm text-gray-600">把视频音频转成文字。当前场景以中文知识视频为主，优先建议在线转写。</p>
-            <div className="grid gap-2">
-              {[
-                { value: 'bcut', title: '必剪（在线，推荐）', desc: '中文场景友好，无需本地模型，适合作为当前默认选项。' },
-                { value: 'groq', title: 'Groq（在线，通用）', desc: '速度快，适合通用或英文内容；对当前产品不是首选。' },
-                { value: 'fast-whisper', title: 'Faster Whisper（本地）', desc: '完全离线但首次需下载 ~75MB（tiny）至 ~3GB（large-v3）的模型。CPU 慢。' },
-              ].map(opt => (
-                <label key={opt.value} className={`flex gap-3 p-3 rounded border cursor-pointer ${transcriberType === opt.value ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}>
-                  <input type="radio" name="transcriber" value={opt.value} checked={transcriberType === opt.value} onChange={e => setTranscriberType(e.target.value)} />
-                  <div>
-                    <div className="text-sm font-medium">{opt.title}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">{opt.desc}</div>
-                  </div>
-                </label>
-              ))}
-            </div>
-            {error && <div className="text-xs text-red-600">{error}</div>}
-            <div className="flex gap-2 justify-between">
-              <button className="text-sm text-gray-500 hover:text-gray-800" onClick={prev}>上一步</button>
-              <button className="px-4 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50" disabled={savingTranscriber} onClick={saveTranscriber}>
-                {savingTranscriber ? '保存中…' : '保存并下一步'}
-              </button>
-            </div>
-          </section>
-        )}
-
-        {step === 4 && (
-          <section className="flex flex-col gap-3">
-            <h2 className="font-semibold">第 4 步 · Cookie 同步（可选）</h2>
-            <p className="text-sm text-gray-600">
-              当前项目优先面向 <strong>抖音精选</strong> 页面。遇到需要登录态的内容时，在浏览器登录抖音精选后，把 Cookie 复制到「下载配置」页同步到后端。
-              <br />
-              这一步可以先跳过，后面接真实页面时再补。
-            </p>
-            <div className="rounded bg-gray-50 p-3 text-xs text-gray-600">
-              提示：普通 Web 页面不能直接读取其他站点 Cookie。前端现在提供剪贴板导入、状态校验和同步保存入口。
-            </div>
-            <div className="flex gap-2 justify-between">
-              <button className="text-sm text-gray-500 hover:text-gray-800" onClick={prev}>上一步</button>
-              <button className="px-4 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700" onClick={finish}>
-                完成，进入 Reel Mind
+                {savingProvider ? '保存中…' : '保存并完成'}
               </button>
             </div>
           </section>

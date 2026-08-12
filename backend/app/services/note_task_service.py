@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 import re
@@ -11,28 +10,20 @@ from urllib.parse import urlparse
 
 from app.db.video_task_dao import (
     delete_task_by_task_id,
-    delete_task_by_video,
-    list_task_ids_by_video,
     list_video_tasks,
     update_task_collection,
-    upsert_video_task,
 )
 from app.core.settings import get_settings
-from app.enmus.note_enums import DownloadQuality
 from app.enmus.task_status_enums import TaskStatus
 from app.models.task_snapshot import TaskSnapshot
 from app.repositories.note_artifacts import NoteArtifactRepository
 from app.services.error_classifier import classify_generation_error
-from app.services.insight_extractor import build_insights
-from app.services.note import NoteGenerator
 from app.services.online_verifier import verify_claims_online
-from app.services.task_serial_executor import task_serial_executor
 from app.services.verification import claim_pipeline
 from app.services.verification import fetching as verification_fetching
 from app.services.verification import pipeline as verification_pipeline
 from app.services.verification.schemas import utc_now_iso
 from app.utils.logger import get_logger
-from app.utils.url_parser import extract_video_id
 
 logger = get_logger(__name__)
 
@@ -85,94 +76,12 @@ class NoteTaskService:
         if task_id:
             self.artifacts.write_status(task_id, status, message=message)
 
-    def prepare_generation_task(
-        self,
-        *,
-        video_url: str,
-        platform: str,
-        task_id: str,
-        collection_folder: Optional[str] = None,
-        collection_tags=None,
-        collection_note: Optional[str] = None,
-        prefetched_transcript: Optional[dict] = None,
-    ) -> str:
-        video_id = extract_video_id(video_url, platform)
-        upsert_video_task(
-            video_id=video_id or "",
-            platform=platform,
-            task_id=task_id,
-            video_url=video_url,
-            collection_folder=collection_folder or "默认收藏夹",
-            collection_tags=self.parse_collection_tags(collection_tags),
-            collection_note=collection_note or "",
-        )
-        self.update_status(task_id, TaskStatus.PENDING)
-
-        if prefetched_transcript:
-            try:
-                self.persist_prefetched_transcript(task_id, prefetched_transcript)
-            except Exception as exc:
-                logger.warning(f"写入预取字幕失败 (task_id={task_id}): {exc}")
-        return task_id
-
-    def execute_generation_task(
-        self,
-        *,
-        task_id: str,
-        video_url: str,
-        platform: str,
-        quality: DownloadQuality,
-        link: bool = False,
-        screenshot: bool = False,
-        model_name: str | None = None,
-        provider_id: str | None = None,
-        formats: list | None = None,
-        style: str | None = None,
-        extras: str | None = None,
-        video_understanding: bool = False,
-        video_interval: int = 0,
-        grid_size: list | None = None,
-    ) -> None:
-        def _execute_note_task():
-            return NoteGenerator().generate(
-                video_url=video_url,
-                platform=platform,
-                quality=quality,
-                task_id=task_id,
-                model_name=model_name,
-                provider_id=provider_id,
-                link=link,
-                _format=formats,
-                style=style,
-                extras=extras,
-                screenshot=screenshot,
-                video_understanding=video_understanding,
-                video_interval=video_interval,
-                grid_size=grid_size or [],
-            )
-
-        logger.info(f"任务进入执行队列 (task_id={task_id})")
-        note = task_serial_executor.run(_execute_note_task)
-        logger.info(f"Note generated: {task_id}")
-        if not note or not note.markdown:
-            logger.warning(f"任务 {task_id} 执行失败，跳过保存")
-            return
-
-        self.artifacts.write_result(task_id, asdict(note))
-        self.index_task(task_id)
-
-    def delete_task(self, *, task_id: str | None = None, video_id: str | None = None, platform: str = "douyin") -> int:
+    def delete_task(self, *, task_id: str | None = None) -> int:
         deleted = 0
         if task_id:
             deleted += delete_task_by_task_id(task_id)
             self.delete_task_artifacts(task_id)
             return deleted
-
-        if video_id:
-            task_ids = list_task_ids_by_video(video_id, platform)
-            deleted += delete_task_by_video(video_id, platform)
-            for item_task_id in task_ids:
-                self.delete_task_artifacts(item_task_id)
         return deleted
 
     def delete_task_artifacts(self, task_id: str) -> int:
@@ -763,30 +672,6 @@ class NoteTaskService:
         except Exception as exc:
             logger.warning(f"向量索引失败（不影响笔记）: {exc}")
 
-    def persist_prefetched_transcript(self, task_id: str, transcript: dict) -> None:
-        segments = transcript.get("segments") or []
-        cleaned_segments = []
-        for segment in segments:
-            text = (segment.get("text") or "").strip()
-            if not text:
-                continue
-            cleaned_segments.append({
-                "start": float(segment.get("start", 0)),
-                "end": float(segment.get("end", 0)),
-                "text": text,
-            })
-        if not cleaned_segments:
-            raise ValueError("prefetched_transcript 没有可用的 segments")
-
-        full_text = transcript.get("full_text") or " ".join(segment["text"] for segment in cleaned_segments)
-        payload = {
-            "language": transcript.get("language") or "zh",
-            "full_text": full_text,
-            "segments": cleaned_segments,
-        }
-        target = self.artifacts.write_transcript_cache(task_id, payload)
-        logger.info(f"已写入客户端预取字幕缓存: {target} ({len(cleaned_segments)} 段)")
-
     def attach_note_insights(self, result: dict) -> dict:
         insights = self.get_note_insights(result)
         if insights:
@@ -794,22 +679,13 @@ class NoteTaskService:
         return result
 
     def get_note_insights(self, result: dict) -> Optional[dict]:
-        if result.get("insights") and any(
-            result["insights"].get(key)
+        insights = result.get("insights")
+        if insights and any(
+            insights.get(key)
             for key in ("verification", "reading_report", "academic_gate")
         ):
-            return result.get("insights")
-
-        markdown = result.get("markdown") or ""
-        transcript = result.get("transcript") or {}
-        audio_meta = result.get("audio_meta") or {}
-        if not markdown and not transcript and not audio_meta:
-            return None
-        try:
-            return build_insights(markdown, transcript, audio_meta)
-        except Exception as exc:
-            logger.warning(f"生成历史笔记洞察失败: {exc}")
-            return None
+            return insights
+        return None
 
     def _build_verification_seed(self, *, text: str, url: str = "", max_claims: int = 50) -> dict:
         atomic_claims = claim_pipeline.split_atomic_claims(text or url, max_claims=max_claims)

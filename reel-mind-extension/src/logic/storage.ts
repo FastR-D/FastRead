@@ -1,17 +1,8 @@
-import browser from 'webextension-polyfill'
-import { BILINOTE_SETTINGS_KEY, DEFAULT_BACKEND_URL, DEFAULT_SETTINGS, LEGACY_SETTINGS_KEY, MAX_TASKS, SETTINGS_KEY, TASKS_KEY } from './constants'
 import type { Settings, TaskRecord } from './types'
+import { DEFAULT_BACKEND_URL, DEFAULT_SETTINGS, MAX_TASKS, SETTINGS_KEY, TASKS_KEY } from './constants'
 import { useWebExtensionStorage } from '~/composables/useWebExtensionStorage'
 
 export { DEFAULT_BACKEND_URL, DEFAULT_SETTINGS }
-
-void browser.storage.local.get([SETTINGS_KEY, LEGACY_SETTINGS_KEY, BILINOTE_SETTINGS_KEY]).then((stored) => {
-  if (stored[SETTINGS_KEY])
-    return
-  const legacy = stored[LEGACY_SETTINGS_KEY] || stored[BILINOTE_SETTINGS_KEY]
-  if (legacy)
-    return browser.storage.local.set({ [SETTINGS_KEY]: legacy })
-})
 
 export const { data: settings, dataReady: settingsReady } = useWebExtensionStorage<Settings>(
   SETTINGS_KEY,

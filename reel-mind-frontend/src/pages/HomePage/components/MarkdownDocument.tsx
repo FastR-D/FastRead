@@ -12,13 +12,9 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import 'github-markdown-css/github-markdown-light.css'
 import { ScrollArea } from '@/components/ui/scroll-area.tsx'
-import VideoBanner from '@/pages/HomePage/components/VideoBanner.tsx'
-import type { AudioMeta } from '@/store/taskStore'
 
 interface MarkdownDocumentProps {
   selectedContent: string
-  audioMeta?: AudioMeta
-  videoUrl?: string
 }
 
 const remarkPlugins = [gfm, remarkMath]
@@ -242,11 +238,7 @@ function createMarkdownComponents(baseURL: string) {
   }
 }
 
-const MarkdownDocument: FC<MarkdownDocumentProps> = ({
-  selectedContent,
-  audioMeta,
-  videoUrl,
-}) => {
+const MarkdownDocument: FC<MarkdownDocumentProps> = ({ selectedContent }) => {
   // 确保baseURL没有尾部斜杠
   const baseURL = (
     String(import.meta.env.VITE_API_BASE_URL || '').replace('/api', '') || ''
@@ -257,9 +249,6 @@ const MarkdownDocument: FC<MarkdownDocumentProps> = ({
 
   return (
     <ScrollArea className="min-w-0 flex-1">
-      <div className="px-2">
-        <VideoBanner audioMeta={audioMeta} videoUrl={videoUrl} />
-      </div>
       <div className={'markdown-body w-full px-2'}>
         <ReactMarkdown
           remarkPlugins={remarkPlugins}
