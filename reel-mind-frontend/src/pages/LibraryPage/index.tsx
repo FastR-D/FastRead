@@ -388,10 +388,17 @@ export default function LibraryPage() {
     <div className="h-screen overflow-y-auto bg-white text-neutral-950">
       <header className="sticky top-0 z-20 flex h-16 items-center justify-between bg-white/95 px-7 backdrop-blur">
         <Link to="/" className="flex items-center gap-3">
-          <img src={logo} alt="Reel Mind" className="h-9 w-9 rounded-md" />
-          <span className="text-2xl font-semibold tracking-normal">Reel Mind</span>
+          <img src={logo} alt="FastRead" className="h-9 w-9 rounded-md" />
+          <span className="text-2xl font-semibold tracking-normal">FastRead</span>
         </Link>
         <div className="flex items-center gap-3">
+          <Link
+            to="/search"
+            className="inline-flex h-10 items-center gap-2 rounded-full border border-neutral-200 px-4 text-sm font-medium text-neutral-900 transition hover:bg-neutral-50"
+          >
+            <Search className="h-4 w-4" />
+            论文检索
+          </Link>
           <Link
             to="/settings"
             className="inline-flex h-10 items-center gap-2 rounded-full border border-neutral-200 px-4 text-sm font-medium text-neutral-900 transition hover:bg-neutral-50"
@@ -405,7 +412,7 @@ export default function LibraryPage() {
             className="inline-flex h-10 items-center gap-2 rounded-full bg-black px-5 text-sm font-medium text-white transition hover:bg-neutral-800"
           >
             <Plus className="h-4 w-4" />
-            开始核实
+            导入论文
           </button>
         </div>
       </header>

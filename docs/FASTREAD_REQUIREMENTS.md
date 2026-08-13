@@ -78,11 +78,22 @@ an academic-grade label.
 
 ## P1: scoped paper search
 
+**Status: implemented** (`backend/app/services/paper_search_service.py`, `POST /api/papers/search`).
+
 The search corpus is restricted to the four security conferences above plus a configurable systems-conference allowlist whose papers pass a security-topic Gate. Search metadata must retain title, abstract, authors, venue, year, DOI, official URL, and PDF URL. AI-extracted keywords are additive fields and never replace source metadata.
 
 Elasticsearch remains the target inverted-index backend for the group deployment. Its absence must be reported explicitly; the generic web-verification search is not equivalent to the paper search engine.
 
+Current implementation notes:
+
+- Corpus source is the arXiv API (`cs.CR` for security; `cs.OS`/`cs.DC`/`cs.NI`/`cs.AR` for systems). A paper enters results **only** when `comments` or `journal_ref` matches the venue allowlist; otherwise it is reported under `venue_unconfirmed` and never silently promoted.
+- The allowlist lives in `academic_evidence.py` (`TOP_SECURITY_VENUES`, `SYSTEMS_VENUES`) and is narrowable via `PAPER_SEARCH_SECURITY_VENUES` / `PAPER_SEARCH_SYSTEMS_VENUES`.
+- Ranking uses a local TF-IDF inverted index (`InvertedIndex`), shaped to ES semantics so it can be swapped for a real ES client. Every response carries `search_backend` and `elasticsearch_available: false` so the absence is explicit, per the rule above.
+- Keyword extraction from abstracts is currently heuristic (deterministic, no LLM round-trip). An LLM enrichment pass may later overwrite `keywords` without changing the index contract.
+
+Known gap: arXiv is not an exhaustive index of the four conferences — papers without an arXiv preprint, or preprints whose authors never annotated the venue, are not reachable. Closing this requires a DBLP / official-proceedings corpus.
+
 ## P2: presentation generation and group collaboration
 
-- Generate a `.pptx` from the reading report, covering problem, method, contributions, evaluation, limitations, and references with page/source citations.
+- **Implemented**: generate a `.pptx` from the reading report (`backend/app/services/ppt_service.py`, `GET /api/reading_reports/{task_id}/pptx`), covering problem, method/process, contributions, evaluation evidence, limitations, terms and follow-up questions, with page citations carried onto the slides.
 - Add shared group libraries, access control, comments, and review workflows only after the single-paper journey and scoped search are stable.

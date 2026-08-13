@@ -5,6 +5,7 @@ import {
   FileQuestion,
   Loader2,
   MessageSquareText,
+  Presentation,
   RefreshCw,
   Save,
   ShieldCheck,
@@ -13,6 +14,7 @@ import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  export_reading_report_pptx,
   generate_reading_report,
   resolve_backend_resource_url,
   save_personal_summary,
@@ -116,6 +118,7 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
   const { modelList, loadEnabledModels } = useModelStore()
   const [generating, setGenerating] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [exportingPpt, setExportingPpt] = useState(false)
   const report = task?.insights?.reading_report
   const [personalSummary, setPersonalSummary] = useState(
     task?.insights?.personal_summary?.content || '',
@@ -184,6 +187,31 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
     }
   }
 
+  const handleExportPpt = async () => {
+    if (!task) return
+    setExportingPpt(true)
+    try {
+      const blob = await export_reading_report_pptx(task.id)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      const safeTitle = (report?.title || task.audioMeta?.title || 'reading-report')
+        .replace(/[^\w一-龥-]+/g, '_').slice(0, 60) || 'reading-report'
+      link.download = `${safeTitle}.pptx`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(url)
+      toast.success('PPT 已导出')
+    }
+    catch {
+      toast.error('导出 PPT 失败，请确认已生成阅读报告')
+    }
+    finally {
+      setExportingPpt(false)
+    }
+  }
+
   if (!task) {
     return (
       <div className="flex h-full w-full items-center justify-center text-sm text-slate-500">
@@ -237,6 +265,16 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
               <Button variant="outline" size="sm" onClick={() => handleGenerate(true)} disabled={generating}>
                 <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${generating ? 'animate-spin' : ''}`} />
                 重新生成
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportPpt}
+                disabled={exportingPpt}
+                title="将阅读报告导出为 PowerPoint"
+              >
+                {exportingPpt ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Presentation className="mr-1.5 h-3.5 w-3.5" />}
+                导出 PPT
               </Button>
               <Button size="sm" onClick={emitChat}>
                 <MessageSquareText className="mr-1.5 h-3.5 w-3.5" />

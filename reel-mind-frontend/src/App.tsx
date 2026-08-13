@@ -13,6 +13,7 @@ import LibraryPage from '@/pages/LibraryPage'
 
 // 非首屏页面使用 React.lazy 按需加载
 const Onboarding = lazy(() => import('@/pages/Onboarding'))
+const SearchPage = lazy(() => import('@/pages/SearchPage'))
 const SettingPage = lazy(() => import('./pages/SettingPage/index.tsx'))
 const ONBOARD_KEY = 'reel-mind-onboarded'
 const LEGACY_ONBOARD_KEY = 'bilinote-onboarded'
@@ -87,6 +88,7 @@ function App() {
             <Route path="/onboarding" element={<Onboarding />} />
             <Route path="/" element={<OnboardingGuard><Index /></OnboardingGuard>}>
               <Route index element={<LibraryPage />} />
+              <Route path="search" element={<SearchPage />} />
               <Route path="workspace" element={<HomePage />} />
               <Route path="settings" element={<SettingPage />}>
                 <Route index element={<Navigate to="model" replace />} />

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from urllib.parse import unquote, urlparse
 
@@ -36,6 +37,135 @@ TOP_SECURITY_VENUES = {
         ),
     },
 }
+
+SYSTEMS_VENUES = {
+    "usenix_osdi": {
+        "name": "USENIX Symposium on Operating Systems Design and Implementation",
+        "short_name": "OSDI",
+        "patterns": (
+            r"\b(?:usenix\s+)?(?:symposium\s+on\s+)?operating\s+systems\s+design\s+and\s+implementation\b",
+            r"\bosdi\b",
+        ),
+    },
+    "acm_sosp": {
+        "name": "ACM Symposium on Operating Systems Principles",
+        "short_name": "SOSP",
+        "patterns": (
+            r"\b(?:acm\s+)?symposium\s+on\s+operating\s+systems\s+principles\b",
+            r"\bsosp\b",
+        ),
+    },
+    "asplos": {
+        "name": "ACM International Conference on Architectural Support for Programming Languages and Operating Systems",
+        "short_name": "ASPLOS",
+        "patterns": (
+            r"\barchitectural\s+support\s+for\s+programming\s+languages\s+and\s+operating\s+systems\b",
+            r"\basplos\b",
+        ),
+    },
+    "eurosys": {
+        "name": "European Conference on Computer Systems",
+        "short_name": "EuroSys",
+        "patterns": (
+            r"\beuropean\s+conference\s+on\s+computer\s+systems\b",
+            r"\beurosys\b",
+        ),
+    },
+    "usenix_atc": {
+        "name": "USENIX Annual Technical Conference",
+        "short_name": "USENIX ATC",
+        "patterns": (
+            r"\busenix\s+annual\s+technical\s+conference\b",
+            r"\busenix\s+atc\b",
+            r"\batc\s*'?\d{2}\b",
+        ),
+    },
+    "sigcomm": {
+        "name": "ACM Special Interest Group on Data Communication",
+        "short_name": "SIGCOMM",
+        "patterns": (
+            r"\b(?:acm\s+)?sigcomm\b",
+            r"\bspecial\s+interest\s+group\s+on\s+data\s+communication\b",
+        ),
+    },
+    "nsdi": {
+        "name": "USENIX Symposium on Networked Systems Design and Implementation",
+        "short_name": "NSDI",
+        "patterns": (
+            r"\b(?:usenix\s+)?(?:symposium\s+on\s+)?networked\s+systems\s+design\s+and\s+implementation\b",
+            r"\bnsdi\b",
+        ),
+    },
+    "fast": {
+        "name": "USENIX Conference on File and Storage Technologies",
+        "short_name": "USENIX FAST",
+        "patterns": (
+            r"\b(?:usenix\s+)?conference\s+on\s+file\s+and\s+storage\s+technologies\b",
+            r"\bfast\s*'?\d{2}\b",
+        ),
+    },
+}
+
+
+def _configured_venue_ids(env_name: str, default_ids: tuple[str, ...]) -> tuple[str, ...]:
+    """Read a comma-separated venue-id allowlist from the environment."""
+    raw = os.getenv(env_name, "").strip()
+    if not raw:
+        return default_ids
+    requested = tuple(item.strip().lower() for item in raw.split(",") if item.strip())
+    return requested or default_ids
+
+
+def security_venue_ids() -> tuple[str, ...]:
+    """The security "big four" — overridable via PAPER_SEARCH_SECURITY_VENUES."""
+    return _configured_venue_ids(
+        "PAPER_SEARCH_SECURITY_VENUES", tuple(TOP_SECURITY_VENUES.keys())
+    )
+
+
+def systems_venue_ids() -> tuple[str, ...]:
+    """Systems top conferences — overridable via PAPER_SEARCH_SYSTEMS_VENUES."""
+    return _configured_venue_ids(
+        "PAPER_SEARCH_SYSTEMS_VENUES", tuple(SYSTEMS_VENUES.keys())
+    )
+
+
+def allowed_venue_catalog() -> dict[str, dict]:
+    """Merged {venue_id: metadata} for the configured security + systems allowlist."""
+    catalog: dict[str, dict] = {}
+    for venue_id in security_venue_ids():
+        if venue_id in TOP_SECURITY_VENUES:
+            catalog[venue_id] = {**TOP_SECURITY_VENUES[venue_id], "track": "security"}
+    for venue_id in systems_venue_ids():
+        if venue_id in SYSTEMS_VENUES:
+            catalog[venue_id] = {**SYSTEMS_VENUES[venue_id], "track": "systems"}
+    return catalog
+
+
+def match_allowed_venue(*values: str | None) -> dict:
+    """Match any free-text venue hint against the configured allowlist.
+
+    Returns ``{"id", "name", "short_name", "track", "raw"}`` on a hit, else an
+    empty-id dict. Used by paper search to keep results inside the big-four +
+    systems-conference corpus.
+    """
+    catalog = allowed_venue_catalog()
+    for value in values:
+        text = re.sub(r"\s+", " ", str(value or "")).strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        for venue_id, metadata in catalog.items():
+            if any(re.search(p, lowered, re.IGNORECASE) for p in metadata["patterns"]):
+                return {
+                    "id": venue_id,
+                    "name": metadata["name"],
+                    "short_name": metadata["short_name"],
+                    "track": metadata["track"],
+                    "raw": text,
+                }
+    return {"id": "", "name": "", "short_name": "", "track": "", "raw": ""}
+
 
 OFFICIAL_ACADEMIC_HOSTS = {
     "dl.acm.org",

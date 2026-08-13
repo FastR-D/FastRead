@@ -15,6 +15,8 @@ from app.utils.local_access import require_local_request
 from app.services.note_task_service import NoteTaskService
 from app.services.paper_ingest_service import PaperIngestService
 from app.services.reading_report_service import ReadingReportService
+from app.services.ppt_service import PresentationService
+from app.services.paper_search_service import PaperSearchService
 from app.utils.response import ResponseWrapper as R
 from app.utils.logger import get_logger
 from fastapi import Request
@@ -89,6 +91,35 @@ class PersonalSummaryRequest(BaseModel):
         return value
 
 
+class PaperSearchRequest(BaseModel):
+    query: str
+    tracks: list[str] = ["security", "systems"]
+    venue_ids: list[str] = []
+    limit: int = 20
+    include_unconfirmed: bool = False
+    refresh: bool = True
+
+    @field_validator("query")
+    @classmethod
+    def validate_query(cls, value: str) -> str:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            raise ValueError("检索关键词不能为空")
+        return cleaned[:200]
+
+    @field_validator("tracks")
+    @classmethod
+    def validate_tracks(cls, value: list[str]) -> list[str]:
+        allowed = {"security", "systems"}
+        cleaned = [t for t in (value or []) if t in allowed]
+        return cleaned or ["security", "systems"]
+
+    @field_validator("limit")
+    @classmethod
+    def validate_limit(cls, value: int) -> int:
+        return max(1, min(int(value or 20), 50))
+
+
 class PaperUrlRequest(BaseModel):
     url: str
     provider_id: str = ""
@@ -123,6 +154,8 @@ ARTIFACTS = NoteArtifactRepository(settings.note_output_dir)
 NOTE_TASKS = NoteTaskService(ARTIFACTS)
 READING_REPORTS = ReadingReportService(ARTIFACTS)
 PAPERS = PaperIngestService(ARTIFACTS)
+PRESENTATIONS = PresentationService(ARTIFACTS)
+PAPER_SEARCH = PaperSearchService()
 
 
 def _safe_upload_extension(filename: str) -> str:
@@ -281,6 +314,62 @@ def save_personal_summary(task_id: str, data: PersonalSummaryRequest):
         return R.success({"task_id": task_id, "personal_summary": summary})
     except ValueError as exc:
         return R.error(msg=str(exc), code=400)
+
+
+@router.get("/reading_reports/{task_id}/pptx")
+def export_reading_report_pptx(task_id: str):
+    """One-click: project the task's reading report into a .pptx deck."""
+    try:
+        deck_bytes, filename = PRESENTATIONS.build_for_task(task_id)
+    except ValueError as exc:
+        return R.error(msg=str(exc), code=404)
+    except Exception as exc:
+        logger.error(f"导出阅读报告 PPT 失败 (task_id={task_id}): {exc}", exc_info=True)
+        return R.error(msg=f"导出 PPT 失败: {exc}")
+    return Response(
+        content=deck_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/papers/search")
+def search_papers(data: PaperSearchRequest):
+    """Search security/systems top-conference papers (venue-filtered)."""
+    try:
+        return R.success(
+            PAPER_SEARCH.search(
+                query=data.query,
+                tracks=tuple(data.tracks),
+                venue_ids=tuple(data.venue_ids),
+                limit=data.limit,
+                include_unconfirmed=data.include_unconfirmed,
+                refresh=data.refresh,
+            )
+        )
+    except Exception as exc:
+        logger.error(f"论文检索失败 (query={data.query}): {exc}", exc_info=True)
+        return R.error(msg=f"论文检索失败: {exc}")
+
+
+@router.get("/papers/search/venues")
+def list_search_venues():
+    """The configured venue allowlist, for building search filters in the UI."""
+    from app.services.academic_evidence import allowed_venue_catalog
+
+    return R.success(
+        {
+            "venues": [
+                {
+                    "id": venue_id,
+                    "name": meta["name"],
+                    "short_name": meta["short_name"],
+                    "track": meta["track"],
+                }
+                for venue_id, meta in allowed_venue_catalog().items()
+            ]
+        }
+    )
 
 
 @router.post("/papers/from_url")

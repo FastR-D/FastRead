@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import axios from 'axios'
 import toast from 'react-hot-toast'
 import type {
   AudioMeta,
@@ -267,6 +268,74 @@ export const save_personal_summary = async (taskId: string, summary: string): Pr
   personal_summary: { content: string; updated_at: string; max_chars: number }
 }> => {
   return await request.put(`/reading_reports/${taskId}/personal_summary`, { summary }) as any
+}
+
+export const export_reading_report_pptx = async (taskId: string): Promise<Blob> => {
+  // Binary endpoint: bypass the JSON-unwrapping request instance.
+  const baseURL = import.meta.env.VITE_API_BASE_URL || '/api'
+  const response = await axios.get(`${baseURL}/reading_reports/${taskId}/pptx`, {
+    responseType: 'blob',
+    timeout: 120000,
+  })
+  return response.data
+}
+
+export type SearchVenue = {
+  id: string
+  name: string
+  short_name: string
+  track: 'security' | 'systems' | string
+}
+
+export type PaperSearchResult = {
+  id: string
+  title: string
+  abstract: string
+  authors: string[]
+  categories: string[]
+  comment: string
+  journal_ref: string
+  doi: string
+  year: number | null
+  published_at: string
+  source_url: string
+  pdf_url: string
+  source: string
+  keywords: string[]
+  venue: SearchVenue & { raw?: string }
+  venue_confirmed: boolean
+  relevance: number
+}
+
+export type PaperSearchResponse = {
+  query: string
+  tracks: string[]
+  search_backend: string
+  elasticsearch_available: boolean
+  venue_allowlist: SearchVenue[]
+  results: PaperSearchResult[]
+  result_count: number
+  venue_unconfirmed_count: number
+  venue_unconfirmed: PaperSearchResult[]
+  fetched_this_run: number
+  index_stats: { documents: number; terms: number }
+  retrieved_at: string
+  coverage_note: string
+}
+
+export const search_papers = async (data: {
+  query: string
+  tracks?: string[]
+  venue_ids?: string[]
+  limit?: number
+  include_unconfirmed?: boolean
+  refresh?: boolean
+}): Promise<PaperSearchResponse> => {
+  return await request.post('/papers/search', data, { timeout: 60000 }) as any
+}
+
+export const list_search_venues = async (): Promise<{ venues: SearchVenue[] }> => {
+  return await request.get('/papers/search/venues') as any
 }
 
 export const ingest_paper_pdf = async (data: {

@@ -89,6 +89,7 @@ pyphen==0.17.2
 pyreadline3==3.5.4
 python-dateutil==2.9.0.post0
 python-docx==1.2.0
+python-pptx==1.0.2
 python-dotenv==1.1.0
 python-multipart==0.0.20
 pytz==2025.2
@@ -124,5 +125,4 @@ weasyprint==65.1
 webencodings==0.5.1
 websockets==15.0.1
 yarl==1.19.0
-yt-dlp==2025.1.26
 zopfli==0.2.3.post1
