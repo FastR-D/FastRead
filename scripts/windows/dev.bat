@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
 cd /d "%~dp0..\.."
-title ReelMind Local Starter
+title FastRead Local Starter
 
 set "BACKEND_PORT=8483"
 set "FRONTEND_PORT=3015"
@@ -54,14 +54,14 @@ for /f "tokens=1 delims= " %%A in ("!BACKEND_PORT!") do set "BACKEND_PORT=%%A"
 for /f "tokens=1 delims= " %%A in ("!FRONTEND_PORT!") do set "FRONTEND_PORT=%%A"
 
 set "BACKEND_PY=%CD%\backend\.venv\Scripts\python.exe"
-set "FRONTEND_DIR=%CD%\reel-mind-frontend"
+set "FRONTEND_DIR=%CD%\fastread-frontend"
 set "APP_URL=http://127.0.0.1:%FRONTEND_PORT%/"
 set "HEALTH_URL=http://127.0.0.1:%BACKEND_PORT%/api/sys_health"
 set "FRONTEND_API_BASE=/api"
 
 echo.
 echo ========================================
-echo   ReelMind Local Starter
+echo   FastRead Local Starter
 echo ========================================
 echo.
 echo Docker is not required.
@@ -81,7 +81,7 @@ if not exist "%BACKEND_PY%" (
 if not exist "%FRONTEND_DIR%\node_modules" (
   echo [error] frontend dependencies not found: %FRONTEND_DIR%\node_modules
   echo Install them first:
-  echo   cd reel-mind-frontend
+  echo   cd fastread-frontend
   echo   pnpm install
   goto FAIL
 )
@@ -104,7 +104,7 @@ if errorlevel 1 (
 )
 
 echo [start] Backend window...
-start "ReelMind Backend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:PYTHONUTF8='1'; Set-Location '%CD%\backend'; .\.venv\Scripts\python.exe main.py"
+start "FastRead Backend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:PYTHONUTF8='1'; Set-Location '%CD%\backend'; .\.venv\Scripts\python.exe main.py"
 
 echo [wait] Backend health check...
 for /l %%I in (1,1,60) do (
@@ -119,7 +119,7 @@ goto FAIL
 :BACKEND_READY
 echo [ok] Backend is ready.
 echo [start] Frontend window...
-start "ReelMind Frontend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:VITE_API_BASE_URL='%FRONTEND_API_BASE%'; $env:VITE_SCREENSHOT_BASE_URL='/static/screenshots'; $env:VITE_FRONTEND_PORT='%FRONTEND_PORT%'; $env:BACKEND_PORT='%BACKEND_PORT%'; $env:VITE_ENV_DIR='%FRONTEND_DIR%'; Set-Location '%FRONTEND_DIR%'; pnpm dev -- --host 0.0.0.0 --port %FRONTEND_PORT%"
+start "FastRead Frontend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:VITE_API_BASE_URL='%FRONTEND_API_BASE%'; $env:VITE_SCREENSHOT_BASE_URL='/static/screenshots'; $env:VITE_FRONTEND_PORT='%FRONTEND_PORT%'; $env:BACKEND_PORT='%BACKEND_PORT%'; $env:VITE_ENV_DIR='%FRONTEND_DIR%'; Set-Location '%FRONTEND_DIR%'; pnpm dev -- --host 0.0.0.0 --port %FRONTEND_PORT%"
 
 echo [wait] Frontend dev server...
 for /l %%I in (1,1,60) do (
@@ -133,7 +133,7 @@ goto FAIL
 
 :READY
 echo.
-echo [done] ReelMind local dev is ready.
+echo [done] FastRead local dev is ready.
 echo Open: %APP_URL%
 echo.
 if "%NO_OPEN%"=="0" start "" "%APP_URL%"

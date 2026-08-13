@@ -2,7 +2,7 @@
 
 Use this project on Windows with the local startup script.
 
-1. Make sure `backend\.venv` and `reel-mind-frontend\node_modules` already exist.
+1. Make sure `backend\.venv` and `fastread-frontend\node_modules` already exist.
 2. Double click `run.bat`.
 3. If startup fails, open `README.md` and check the local dependency setup steps.
 

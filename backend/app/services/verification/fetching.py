@@ -22,7 +22,7 @@ from app.services.academic_evidence import OFFICIAL_ACADEMIC_HOSTS
 FETCH_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 ReelMindVerifier/2.0"
+        "(KHTML, like Gecko) Chrome/124.0 Safari/537.36 FastReadVerifier/2.0"
     ),
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf;q=0.8,*/*;q=0.5",
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",

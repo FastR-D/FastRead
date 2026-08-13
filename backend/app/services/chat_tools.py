@@ -1,6 +1,6 @@
 """
 Chat function calling 工具定义与执行。
-提供给 LLM 调用，用于主动查询视频原文、笔记、元信息。
+提供给 LLM 调用，用于主动查询论文原文、阅读报告、元信息。
 """
 
 import json
@@ -25,26 +25,26 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "lookup_transcript",
-            "description": "查询视频原始转录文本。可按时间范围筛选、按关键词搜索、或获取指定位置的内容。",
+            "description": "查询当前任务的原始文本。可按关键词搜索，或获取指定位置的内容。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "start_time": {
                         "type": "number",
-                        "description": "起始时间（秒），例如 0 表示视频开头，60 表示第1分钟",
+                        "description": "起始偏移（兼容字段，论文任务可忽略）",
                     },
                     "end_time": {
                         "type": "number",
-                        "description": "结束时间（秒），不传则到末尾",
+                        "description": "结束偏移（兼容字段，论文任务可忽略）",
                     },
                     "keyword": {
                         "type": "string",
-                        "description": "搜索关键词，返回包含该关键词的转录片段",
+                        "description": "搜索关键词，返回包含该关键词的原文片段",
                     },
                     "position": {
                         "type": "string",
                         "enum": ["start", "end"],
-                        "description": "快捷位置：start=视频开头前30句，end=视频结尾后30句",
+                        "description": "快捷位置：start=开头，end=结尾",
                     },
                 },
                 "required": [],
@@ -55,7 +55,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_video_info",
-            "description": "获取视频的完整元信息，包括标题、作者、简介、标签、时长、播放量等。",
+            "description": "获取当前论文/任务的完整元信息，包括标题、作者、简介等。",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -67,7 +67,7 @@ TOOLS = [
         "type": "function",
         "function": {
             "name": "get_note_content",
-            "description": "获取 AI 生成的完整笔记内容（Markdown 格式）。",
+            "description": "获取 AI 生成的完整阅读报告（Markdown 格式）。",
             "parameters": {
                 "type": "object",
                 "properties": {},

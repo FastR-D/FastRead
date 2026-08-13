@@ -13,7 +13,6 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License" />
   <img src="https://img.shields.io/badge/frontend-React%2019-61dafb" alt="React" />
   <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="FastAPI" />
   <img src="https://img.shields.io/badge/extension-Vue%203-42b883" alt="Vue" />
@@ -25,7 +24,6 @@
 ## 目录
 
 - [项目亮点](#项目亮点)
-- [界面预览](#界面预览)
 - [技术栈](#技术栈)
 - [快速开始](#快速开始)
 - [测试](#测试)
@@ -37,7 +35,6 @@
 - [项目结构](#项目结构)
 - [路线图](#路线图)
 - [相关文档](#相关文档)
-- [许可证](#许可证)
 
 ## 项目亮点
 
@@ -72,25 +69,11 @@ FastRead 当前的 P0 是完成一篇论文的可审计阅读闭环：
 - **缓存与审计**：SERP、snapshot、evidence 缓存会记录 hit/miss，方便复查任务为什么得到某个结论。
 - **规则判定**：最终 verdict 来自规则证据矩阵，不允许 LLM 自由判断覆盖证据。
 
-## 界面预览
-
-<p align="center">
-  <img src="./doc/image1.png" alt="FastRead Preview 1" width="860" />
-</p>
-
-<p align="center">
-  <img src="./doc/image3.png" alt="FastRead Preview 2" width="860" />
-</p>
-
-<p align="center">
-  <img src="./doc/image4.png" alt="FastRead Preview 3" width="860" />
-</p>
-
 ## 技术栈
 
 | 模块 | 技术 |
 | --- | --- |
-| Web 前端 | React 19、Vite、TypeScript、Tailwind CSS、Radix UI、Zustand |
+| Web 前端 | React 19、Vite、TypeScript、Tailwind CSS、Radix UI、Zustand、Markmap |
 | 后端服务 | Python、FastAPI、SQLAlchemy、SQLite、Uvicorn |
 | 论文解析 | PyMuPDF（分页正文）、python-pptx（幻灯片导出） |
 | 检索 | arXiv API、本地倒排索引（Elasticsearch 预留可替换） |
@@ -112,7 +95,7 @@ run.bat --stop    停止本地前后端进程
 run.bat --check   检查本地依赖
 ```
 
-第一次启动前需要准备好 `backend\.venv` 和 `reel-mind-frontend\node_modules`。详细说明见 [笨蛋部署说明](./DEPLOYMENT.md)。
+第一次启动前需要准备好 `backend\.venv` 和 `fastread-frontend\node_modules`。详细说明见 [笨蛋部署说明](./DEPLOYMENT.md)。
 
 ### 方式一：本地脚本启动（推荐）
 
@@ -158,7 +141,7 @@ cd ..
 #### 准备前端
 
 ```powershell
-cd reel-mind-frontend
+cd fastread-frontend
 corepack enable
 pnpm install
 cd ..
@@ -181,7 +164,7 @@ cd backend
 启动前端：
 
 ```powershell
-cd reel-mind-frontend
+cd fastread-frontend
 $env:VITE_API_BASE_URL="/api"
 pnpm run dev -- --host 0.0.0.0 --port 3015
 ```
@@ -217,7 +200,7 @@ docker compose logs --tail=80 backend
 docker compose down
 ```
 
-如果本地还残留旧容器名，执行一次完整重建即可切换到 `reel-mind-backend`、`reel-mind-frontend`、`reel-mind-nginx`：
+如果本地还残留旧容器名，执行一次完整重建即可切换到 `fastread-backend`、`fastread-frontend`、`fastread-nginx`：
 
 ```powershell
 docker compose down
@@ -243,10 +226,10 @@ backend\.venv\Scripts\python.exe -m pytest
 前端和扩展构建检查：
 
 ```powershell
-cd reel-mind-frontend
+cd fastread-frontend
 pnpm run build
 
-cd ..\reel-mind-extension
+cd ..\fastread-extension
 pnpm run build
 ```
 
@@ -361,12 +344,12 @@ PAPER_SEARCH_SYSTEMS_VENUES=usenix_osdi
 
 ## 浏览器扩展
 
-扩展目录位于 `reel-mind-extension/`。当前可发布范围是 verification-first popup：从当前标签页 URL 或粘贴文本创建 FastRead 联网核实任务，并打开 Web 工作台报告。
+扩展目录位于 `fastread-extension/`。当前可发布范围是 verification-first popup：从当前标签页 URL 或粘贴文本创建 FastRead 联网核实任务，并打开 Web 工作台报告。
 
 安装依赖：
 
 ```powershell
-cd reel-mind-extension
+cd fastread-extension
 pnpm install
 ```
 
@@ -385,7 +368,7 @@ pnpm build
 构建产物会输出到：
 
 ```text
-reel-mind-extension/extension/
+fastread-extension/extension/
 ```
 
 当前 manifest 只声明 popup；`background`、`contentScripts`、`options` 和 `sidepanel` 仍是后续完整扩展草稿，不属于当前发布产物。扩展默认连接：
@@ -457,8 +440,8 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 │   ├── app/services/       #   paper_ingest / reading_report / ppt / paper_search / verification
 │   ├── app/routers/        #   note（论文与报告）、chat（追问）、model、provider、config
 │   └── note_results/       #   任务产物与缓存
-├── reel-mind-frontend/     # React Web 前端（资料库、检索、阅读工作台）
-├── reel-mind-extension/    # 浏览器扩展
+├── fastread-frontend/      # React Web 前端（资料库、检索、阅读工作台）
+├── fastread-extension/     # 浏览器扩展
 ├── doc/                    # 文档图片和产品资料
 ├── docs/                   # 产品需求文档
 ├── nginx/                  # Docker 反向代理配置
@@ -468,11 +451,6 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 ├── pytest.ini              # 后端 pytest 配置
 └── DEPLOYMENT.md           # 面向非技术人员的部署说明
 ```
-
-> **关于目录命名**：远端 `origin/main` 上有一个把 `reel-mind-*` 改名为 `fastread-*` 的提交，
-> 本地分支尚未合入（两边各有 1 个提交分叉）。本地代码仍使用 `reel-mind-*` 路径，
-> 且视频链路已在本地移除、远端尚未移除。合并时应以本地的「已删除视频链路」为准，
-> 再单独执行一次目录改名，不要用远端版本覆盖本地清理结果。
 
 ## 路线图
 
@@ -514,7 +492,3 @@ Invoke-RestMethod http://127.0.0.1:3015/api/sys_check
 
 - [产品需求文档](./docs/FASTREAD_REQUIREMENTS.md)
 - [部署说明](./DEPLOYMENT.md)
-
-## 许可证
-
-本项目基于 [MIT License](./LICENSE) 开源。

@@ -57,7 +57,7 @@ class AppSettings:
         self.db_pool_size = _get_int("DB_POOL_SIZE", 10)
         self.db_max_overflow = _get_int("DB_MAX_OVERFLOW", 20)
         self.database_url = _normalize_database_url(
-            os.getenv("DATABASE_URL") or _sqlite_url_from_path(_resolve_backend_path("reel_mind.db"))
+            os.getenv("DATABASE_URL") or _sqlite_url_from_path(_resolve_backend_path("fastread.db"))
         )
         self.sqlite_db_path = self._sqlite_path_from_url(self.database_url)
 
@@ -92,7 +92,7 @@ class AppSettings:
     @staticmethod
     def _sqlite_path_from_url(database_url: str) -> Path:
         if not database_url.startswith("sqlite:///"):
-            return BACKEND_ROOT / "reel_mind.db"
+            return BACKEND_ROOT / "fastread.db"
 
         raw_path = database_url.removeprefix("sqlite:///")
         if raw_path.startswith("/") and not raw_path.startswith("//"):

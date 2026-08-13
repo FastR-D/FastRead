@@ -10,7 +10,7 @@
 .env.*
 !.env.example
 !.env.*.example
-!reel-mind-frontend/.env.tauri
+!fastread-frontend/.env.tauri
 .venv/
 venv/
 env/
@@ -26,7 +26,6 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
-BiliNote/pnpm-lock.yaml
 # Runtime data
 pids
 *.pid
@@ -87,21 +86,17 @@ backend/config/*.local.json
 !backend/config/*.example.json
 
 # Build artifacts and generated packages
-reel-mind-frontend/src-tauri/target/
-reel-mind-frontend/src-tauri/bin/
-reel-mind-extension/extension/dist/
-reel-mind-extension/extension/manifest.json
-reel-mind-extension/extension.zip
-reel-mind-extension/extension.crx
-reel-mind-extension/extension.xpi
+fastread-frontend/src-tauri/target/
+fastread-frontend/src-tauri/bin/
+fastread-extension/extension/dist/
+fastread-extension/extension/manifest.json
+fastread-extension/extension.zip
+fastread-extension/extension.crx
+fastread-extension/extension.xpi
 *.tgz
 *.tar
 
-# Legacy local workspaces / archives
-BillNote_frontend/
-BillNote_extension/
-BiliNote_frontend/
-BiliNote/
+# Local archives
 _archives/
 
 # Local shell histories

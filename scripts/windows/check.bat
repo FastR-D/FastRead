@@ -3,7 +3,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 chcp 65001 >nul
 
 cd /d "%~dp0..\.."
-title ReelMind Requirements Check
+title FastRead Requirements Check
 
 set "APP_PORT=3015"
 if exist ".env" (
@@ -21,7 +21,7 @@ for /f "tokens=1 delims= " %%A in ("!APP_PORT!") do set "APP_PORT=%%A"
 
 echo.
 echo ========================================
-echo   ReelMind Requirements Check
+echo   FastRead Requirements Check
 echo ========================================
 echo.
 
@@ -64,7 +64,7 @@ if errorlevel 1 (
 
 echo.
 echo [check] App port %APP_PORT%
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$port=%APP_PORT%; $listeners = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if ($listeners) { Write-Output \"[warn] Port $port is already in use. If ReelMind is not already running, edit .env and change APP_PORT.\"; exit 2 } else { Write-Output \"[ok] Port $port is free.\" }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$port=%APP_PORT%; $listeners = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if ($listeners) { Write-Output \"[warn] Port $port is already in use. If FastRead is not already running, edit .env and change APP_PORT.\"; exit 2 } else { Write-Output \"[ok] Port $port is free.\" }"
 echo.
 
 echo [check] Free disk space
@@ -80,8 +80,8 @@ if not exist "backend\Dockerfile" (
   echo [fail] backend\Dockerfile is missing.
   goto SUMMARY_FAIL
 )
-if not exist "reel-mind-frontend\Dockerfile" (
-  echo [fail] reel-mind-frontend\Dockerfile is missing.
+if not exist "fastread-frontend\Dockerfile" (
+  echo [fail] fastread-frontend\Dockerfile is missing.
   goto SUMMARY_FAIL
 )
 echo [ok] Project files look complete.

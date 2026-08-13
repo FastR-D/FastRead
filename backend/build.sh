@@ -10,7 +10,7 @@ echo "当前工作目录：$(pwd)"
 
 # 清理旧的构建
 echo "清理旧的构建..."
-rm -rf backend/dist backend/build ./reel-mind-frontend/src-tauri/bin/*
+rm -rf backend/dist backend/build ./fastread-frontend/src-tauri/bin/*
 echo "清理完成。"
 
 TARGET_TRIPLE=$(rustc -Vv | grep host | cut -f2 -d' ')
@@ -26,9 +26,9 @@ cp .env.example backend/.env
 echo "开始 PyInstaller 打包..."
 pyinstaller \
   -y \
-  --name ReelMindBackend \
+  --name FastReadBackend \
   --paths backend \
-  --distpath ./reel-mind-frontend/src-tauri/bin \
+  --distpath ./fastread-frontend/src-tauri/bin \
   --workpath backend/build \
   --specpath backend \
   --hidden-import uvicorn \
@@ -47,11 +47,11 @@ rm backend/.env
 
 # 重命名主执行文件以包含目标平台信息
 mv \
- ./reel-mind-frontend/src-tauri/bin/ReelMindBackend/ReelMindBackend\
- ./reel-mind-frontend/src-tauri/bin/ReelMindBackend/ReelMindBackend-$TARGET_TRIPLE
+ ./fastread-frontend/src-tauri/bin/FastReadBackend/FastReadBackend\
+ ./fastread-frontend/src-tauri/bin/FastReadBackend/FastReadBackend-$TARGET_TRIPLE
 
 echo "PyInstaller 打包完成。"
 echo "打包后的目录内容："
-ls -l ./reel-mind-frontend/src-tauri/bin/ReelMindBackend
+ls -l ./fastread-frontend/src-tauri/bin/FastReadBackend
 
-echo "请检查 src-tauri/bin/ReelMindBackend 目录，确认其中包含了名为 .env 的【文件】。"
+echo "请检查 src-tauri/bin/FastReadBackend 目录，确认其中包含了名为 .env 的【文件】。"

@@ -27,13 +27,13 @@ def test_get_task_status_returns_success_result_when_status_file_succeeds(tmp_pa
 def test_get_task_status_classifies_failed_status(tmp_path):
     repo = NoteArtifactRepository(tmp_path)
     service = NoteTaskService(repo)
-    repo.write_status("task-a", TaskStatus.FAILED, "cookie expired")
+    repo.write_status("task-a", TaskStatus.FAILED, "pdf parse failed")
 
     payload = service.get_task_status("task-a")
 
     assert payload["status"] == TaskStatus.FAILED.value
     assert payload["result"] is None
-    assert payload["error"]["category"] == "cookie"
+    assert payload["error"]["category"] == "ingest"
 
 
 def test_list_tasks_merges_db_and_file_backed_tasks(monkeypatch, tmp_path):
