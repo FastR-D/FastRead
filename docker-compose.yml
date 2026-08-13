@@ -10,7 +10,8 @@ services:
         APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
         PIP_INDEX: ${PIP_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - BACKEND_PORT=${BACKEND_PORT:-8483}
       - BACKEND_HOST=${BACKEND_HOST:-0.0.0.0}
@@ -36,7 +37,8 @@ services:
         NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-mirror.gcr.io/library/node:20-alpine}
         NGINX_BASE_IMAGE: ${NGINX_BASE_IMAGE:-mirror.gcr.io/library/nginx:1.25-alpine}
     env_file:
-      - .env
+      - path: .env
+        required: false
     expose:
       - "80"  # 不暴露给宿主机，只供 nginx 访问
     restart: on-failure:3

@@ -76,9 +76,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare env file
+        run: cp .env.example .env
+
       - name: Validate compose config
         env:
           APP_PORT: 3015
           BACKEND_HOST: 0.0.0.0
           BACKEND_PORT: 8483
-        run: docker compose config
+        run: |
+          docker compose config
+          docker compose -f docker-compose.gpu.yml config
