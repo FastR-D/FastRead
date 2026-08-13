@@ -250,7 +250,7 @@ const SearchPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="h-screen overflow-y-auto bg-slate-50">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-3">
           <Link to="/" className="flex items-center gap-3">
@@ -422,6 +422,22 @@ const SearchPage = () => {
                           原文 <ExternalLink className="h-3 w-3" />
                         </a>
                       )}
+                    </div>
+                    <div className="mt-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={() => handleImport(paper)}
+                        disabled={importingId === paper.id}
+                      >
+                        {importingId === paper.id ? (
+                          <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
+                        ) : (
+                          <BookOpenCheck className="mr-1.5 h-3 w-3" />
+                        )}
+                        导入并阅读
+                      </Button>
                     </div>
                   </div>
                 ))}

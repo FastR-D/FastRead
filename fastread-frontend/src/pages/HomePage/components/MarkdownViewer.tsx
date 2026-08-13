@@ -123,7 +123,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
 
   if (status === 'loading' && !hasVerificationReport) {
     return (
-      <div className="flex h-screen w-full">
+      <div className="flex h-full w-full">
         <WorkspaceStatusView mode="loading" steps={steps} currentStep={taskStatus} />
       </div>
     )
@@ -148,7 +148,7 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   }
 
   return (
-    <div className="flex h-screen w-full flex-col overflow-hidden">
+    <div className="flex h-full w-full flex-col overflow-hidden">
       <MarkdownHeader
         currentTask={currentTask}
         isMultiVersion={isMultiVersion}

@@ -50,6 +50,12 @@ METADATA_HOSTS = {
     "instance-data.ec2.internal",
 }
 
+# Local proxy tools (Clash fake-IP, Surge enhanced mode) answer DNS with RFC 2544
+# benchmarking addresses (198.18.0.0/15) and transparently intercept the traffic.
+# These addresses are not routable to internal networks, so allowing them does not
+# weaken SSRF protection; rejecting them breaks every fetch behind such a proxy.
+FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+
 
 def _package_version(package: str) -> str:
     try:
@@ -87,7 +93,11 @@ def _validate_public_url(url: str) -> str:
     if not addresses:
         raise ValueError(f"source hostname cannot be resolved: {hostname}")
     for address in addresses:
-        if str(address) in {"169.254.169.254", "100.100.100.200"} or not address.is_global:
+        if str(address) in {"169.254.169.254", "100.100.100.200"}:
+            raise ValueError(f"non-public source address is not allowed: {address}")
+        if address in FAKE_IP_NETWORK:
+            continue
+        if not address.is_global:
             raise ValueError(f"non-public source address is not allowed: {address}")
     return parsed.geturl()
 

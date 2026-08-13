@@ -29,7 +29,6 @@ function OnboardingGuard({ children }: { children: React.ReactNode }) {
 }
 const Model = lazy(() => import('@/pages/SettingPage/Model.tsx'))
 const ProviderForm = lazy(() => import('@/components/Form/modelForm/Form.tsx'))
-const AboutPage = lazy(() => import('@/pages/SettingPage/about.tsx'))
 const NotFoundPage = lazy(() => import('@/pages/NotFoundPage'))
 
 function TaskDeepLinkHandler() {
@@ -95,7 +94,6 @@ function App() {
                   <Route path="new" element={<ProviderForm isCreate />} />
                   <Route path=":id" element={<ProviderForm />} />
                 </Route>
-                <Route path="about" element={<AboutPage />}></Route>
                 <Route path="*" element={<NotFoundPage />} />
               </Route>
               <Route path="*" element={<NotFoundPage />} />

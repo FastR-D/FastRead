@@ -5,6 +5,7 @@ from typing import Optional
 
 from app.repositories.note_artifacts import NoteArtifactRepository
 from app.services.gpt_provider import GPTProvider
+from app.services.llm_compat import create_chat_completion
 from app.services.vector_store import VectorStoreManager
 from app.services.chat_tools import TOOLS, execute_tool
 from app.utils.logger import get_logger
@@ -352,7 +353,8 @@ def library_chat(
 
     gpt = _get_gpt(provider_id, model_name)
     logger.info(f"Library Chat: model={model_name}, chunks={len(chunks)}")
-    response = gpt.client.chat.completions.create(
+    response = create_chat_completion(
+        gpt.client,
         model=gpt.model,
         messages=messages,
         temperature=0.7,
@@ -415,7 +417,8 @@ def chat(
     # Paper answers must stay inside page-aware retrieval. Legacy video tools return
     # unpaged transcript text, so exposing them here would weaken citation provenance.
     if is_paper:
-        response = gpt.client.chat.completions.create(
+        response = create_chat_completion(
+            gpt.client,
             model=gpt.model,
             messages=messages,
             temperature=0.3,
@@ -426,7 +429,8 @@ def chat(
     max_rounds = 3
     for round_i in range(max_rounds):
         try:
-            response = gpt.client.chat.completions.create(
+            response = create_chat_completion(
+                gpt.client,
                 model=gpt.model,
                 messages=messages,
                 tools=TOOLS,
@@ -434,7 +438,8 @@ def chat(
             )
         except Exception as exc:
             logger.warning(f"模型不支持工具调用或工具调用失败，退回普通问答: {exc}")
-            response = gpt.client.chat.completions.create(
+            response = create_chat_completion(
+                gpt.client,
                 model=gpt.model,
                 messages=messages,
                 temperature=0.7,
@@ -468,7 +473,8 @@ def chat(
             })
 
     # 超过最大轮次，做最后一次不带 tools 的调用
-    response = gpt.client.chat.completions.create(
+    response = create_chat_completion(
+        gpt.client,
         model=gpt.model,
         messages=messages,
         temperature=0.7,

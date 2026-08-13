@@ -20,11 +20,11 @@ const SettingLayout = ({ Menu }: ISettingLayoutProps) => {
         backgroundColor: 'var(--color-muted)',
       }}
     >
-      <div className="flex flex-1">
+      <div className="flex h-full min-h-0">
         {/* 左侧部分：Header + 表单 */}
-        <aside className="flex w-[300px] flex-col border-r border-neutral-200 bg-white">
+        <aside className="flex h-full w-[300px] shrink-0 flex-col border-r border-neutral-200 bg-white">
           {/* Header */}
-          <header className="flex h-16 items-center justify-between px-6">
+          <header className="flex h-16 shrink-0 items-center justify-between px-6">
             <div className="flex items-center gap-2">
               <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-2xl">
                 <img src={logo} alt="logo" className="h-full w-full object-contain" />
@@ -48,14 +48,14 @@ const SettingLayout = ({ Menu }: ISettingLayoutProps) => {
           </header>
 
           {/* 表单内容 */}
-          <div className="flex-1 overflow-auto p-4">
+          <div className="min-h-0 flex-1 overflow-auto p-4">
             {/*<NoteForm />*/}
             {Menu}
           </div>
         </aside>
 
         {/* 右侧预览区域 */}
-        <main className="h-screen flex-1 overflow-hidden">
+        <main className="h-full min-w-0 flex-1 overflow-hidden">
           <Outlet />
         </main>
       </div>

@@ -1,6 +1,7 @@
 from app.gpt.base import GPT
 from app.gpt.prompt_builder import generate_base_prompt
 from app.models.gpt_model import GPTSource
+from app.services.llm_compat import create_chat_completion
 import os
 import hashlib
 import json
@@ -198,10 +199,11 @@ class UniversalGPT(GPT):
         last_exc = None
         for attempt in range(self._max_retry_attempts):
             try:
-                return self.client.chat.completions.create(
+                return create_chat_completion(
+                    self.client,
                     model=self.model,
                     messages=messages,
-                    temperature=self.temperature
+                    temperature=self.temperature,
                 )
             except Exception as exc:
                 last_exc = exc

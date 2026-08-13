@@ -7,6 +7,7 @@ import re
 from app.repositories.note_artifacts import NoteArtifactRepository
 from app.services.academic_evidence import assess_academic_identity
 from app.services.gpt_provider import GPTProvider
+from app.services.llm_compat import create_chat_completion
 from app.utils.logger import get_logger
 
 
@@ -391,10 +392,10 @@ class ReadingReportService:
             "temperature": 0.2,
         }
         try:
-            response = gpt.client.chat.completions.create(**kwargs, response_format={"type": "json_object"})
+            response = create_chat_completion(gpt.client, **kwargs, response_format={"type": "json_object"})
         except Exception as exc:
             logger.warning(f"模型不支持 JSON response_format，回退普通 JSON 提示: {exc}")
-            response = gpt.client.chat.completions.create(**kwargs)
+            response = create_chat_completion(gpt.client, **kwargs)
 
         raw = response.choices[0].message.content or ""
         try:

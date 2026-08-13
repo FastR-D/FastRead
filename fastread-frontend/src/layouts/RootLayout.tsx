@@ -13,7 +13,7 @@ export const metadata = {
 
 const RootLayout: FC<RootLayoutProps> = ({ children }) => {
   return (
-    <div className="min-h-screen bg-neutral-100 font-sans text-neutral-900">
+    <div className="h-screen overflow-hidden bg-neutral-100 font-sans text-neutral-900">
       <Toaster
         position="top-center" // 顶部居中显示
         toastOptions={{

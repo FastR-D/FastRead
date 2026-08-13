@@ -1,6 +1,5 @@
 import {
   BotMessageSquare,
-  Info,
 } from 'lucide-react'
 import MenuBar, { IMenuProps } from '@/pages/SettingPage/components/menuBar.tsx'
 
@@ -11,12 +10,6 @@ const Menu = () => {
       name: 'AI 模型设置',
       icon: <BotMessageSquare />,
       path: '/settings/model',
-    },
-    {
-      id: 'about',
-      name: '关于',
-      icon: <Info />,
-      path: '/settings/about',
     },
   ]
   return (
