@@ -341,6 +341,46 @@ class EvidenceHubDAO:
             db.refresh(row)
             return evidence_dict(row)
 
+    def replace_model_classified_evidence(
+        self,
+        topic_id: str,
+        task_id: str,
+        payloads: list[dict],
+    ) -> list[dict]:
+        """Atomically replace only derived model classifications for one paper."""
+        with self.session_factory() as db:
+            db.query(TopicEvidenceItem).filter_by(
+                topic_id=topic_id,
+                task_id=task_id,
+                source_kind="model_classified",
+            ).delete()
+            rows = [TopicEvidenceItem(id=str(uuid.uuid4()), **payload) for payload in payloads]
+            db.add_all(rows)
+            db.commit()
+            for row in rows:
+                db.refresh(row)
+            return [evidence_dict(row) for row in rows]
+
+    def replace_report_evidence(
+        self,
+        topic_id: str,
+        task_id: str,
+        payloads: list[dict],
+    ) -> list[dict]:
+        """Atomically rebuild report-derived evidence without touching manual work."""
+        with self.session_factory() as db:
+            db.query(TopicEvidenceItem).filter_by(
+                topic_id=topic_id,
+                task_id=task_id,
+                source_kind="report",
+            ).delete()
+            rows = [TopicEvidenceItem(id=str(uuid.uuid4()), **payload) for payload in payloads]
+            db.add_all(rows)
+            db.commit()
+            for row in rows:
+                db.refresh(row)
+            return [evidence_dict(row) for row in rows]
+
     def delete_evidence(self, topic_id: str, evidence_id: str) -> bool:
         with self.session_factory() as db:
             row = db.query(TopicEvidenceItem).filter_by(id=evidence_id, topic_id=topic_id).first()

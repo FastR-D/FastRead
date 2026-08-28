@@ -13,6 +13,8 @@ from app.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
+PERSONAL_SUMMARY_MAX_CHARS = 20_000
+
 SYSTEM_PROMPT = """你是 FastRead 的学术论文阅读助手，报告风格优先参考 NotebookLM 的引导式理解方式。
 你的任务不是堆砌零散 bullet，而是围绕读者真正需要回答的关键问题，解释论文的研究问题、方法过程、贡献、证据和局限。
 
@@ -229,6 +231,130 @@ def _normalize_report(payload: dict, academic_gate: dict, evidence_sources: list
     }
 
 
+def _markdown_inline(value) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip()
+
+
+def _markdown_evidence(items, *, base_url: str = "") -> list[str]:
+    lines: list[str] = []
+    for item in _as_list(items, 24):
+        if not isinstance(item, dict):
+            continue
+        quote = _markdown_inline(item.get("exact_quote"))
+        if not quote:
+            continue
+        page_start = item.get("page_start")
+        page_end = item.get("page_end")
+        if page_start:
+            page_label = f"第 {page_start} 页"
+            if page_end and page_end != page_start:
+                page_label = f"第 {page_start}-{page_end} 页"
+        else:
+            page_label = "页码未记录"
+        source_url = _markdown_inline(item.get("source_url"))
+        source_link = ""
+        if source_url:
+            if source_url.startswith("/") and base_url:
+                source_url = f"{base_url}{source_url}"
+            href = source_url.replace(" ", "%20").replace(")", "%29")
+            if page_start and "#" not in href:
+                href = f"{href}#page={page_start}"
+            source_link = f" · [来源回跳]({href})"
+        lines.extend([f"> “{quote}”", f"> — {page_label}{source_link}", ""])
+    return lines
+
+
+def render_reading_report_markdown(result: dict, *, base_url: str = "") -> str:
+    """Render persisted, source-checked report data without another model call."""
+    paper = result.get("paper_document") or {}
+    insights = result.get("insights") or {}
+    report = insights.get("reading_report") or {}
+    if not report:
+        raise ValueError("当前论文还没有关键问题阅读报告")
+
+    title = _markdown_inline(report.get("title") or paper.get("title") or "FastRead 关键问题阅读报告")
+    paper_title = _markdown_inline(paper.get("title"))
+    model = report.get("model") or {}
+    lines = [f"# {title}", ""]
+    if paper_title and paper_title != title:
+        lines.extend([f"- 论文：{paper_title}"])
+    if report.get("generated_at"):
+        lines.append(f"- 报告生成时间：{_markdown_inline(report.get('generated_at'))}")
+    if model.get("model_name"):
+        provider = _markdown_inline(model.get("provider_id"))
+        model_name = _markdown_inline(model.get("model_name"))
+        lines.append(f"- 模型：{provider + ' / ' if provider else ''}{model_name}")
+    lines.extend(["", "## 报告总览", "", str(report.get("executive_summary") or "").strip() or "_暂无报告总览。_", ""])
+
+    personal_summary = str((insights.get("personal_summary") or {}).get("content") or "").strip()
+    lines.extend(["## 我的总结", "", personal_summary or "_尚未填写个人总结。_", ""])
+
+    lines.extend(["## 关键问题与回答", ""])
+    for index, item in enumerate(_as_list(report.get("key_questions"), 24), start=1):
+        if not isinstance(item, dict):
+            continue
+        lines.extend([
+            f"### {index}. {_markdown_inline(item.get('question'))}",
+            "",
+            str(item.get("answer") or "").strip(),
+            "",
+        ])
+        why_it_matters = str(item.get("why_it_matters") or "").strip()
+        if why_it_matters:
+            lines.extend([f"**为什么重要：** {why_it_matters}", ""])
+        evidence_lines = _markdown_evidence(item.get("evidence"), base_url=base_url)
+        if evidence_lines:
+            lines.extend(["**原文证据：**", "", *evidence_lines])
+
+    lines.extend(["## 方法过程", ""])
+    for index, item in enumerate(_as_list(report.get("process"), 24), start=1):
+        if not isinstance(item, dict):
+            continue
+        lines.extend([
+            f"### {index}. {_markdown_inline(item.get('step'))}",
+            "",
+            str(item.get("description") or "").strip(),
+            "",
+        ])
+        evidence_lines = _markdown_evidence(item.get("evidence"), base_url=base_url)
+        if evidence_lines:
+            lines.extend(["**原文证据：**", "", *evidence_lines])
+
+    lines.extend(["## 主要贡献", ""])
+    for index, item in enumerate(_as_list(report.get("contributions"), 24), start=1):
+        if not isinstance(item, dict):
+            continue
+        lines.extend([
+            f"### {index}. {_markdown_inline(item.get('title'))}",
+            "",
+            str(item.get("description") or "").strip(),
+            "",
+        ])
+        evidence_lines = _markdown_evidence(item.get("evidence"), base_url=base_url)
+        if evidence_lines:
+            lines.extend(["**原文证据：**", "", *evidence_lines])
+
+    limitations = [_markdown_inline(item) for item in _as_list(report.get("limitations"), 24) if _markdown_inline(item)]
+    lines.extend(["## 局限与证据边界", ""])
+    lines.extend([f"- {item}" for item in limitations] or ["_报告未列出局限。_"])
+    lines.append("")
+
+    terms = [item for item in _as_list(report.get("terms"), 24) if isinstance(item, dict)]
+    if terms:
+        lines.extend(["## 关键术语", ""])
+        for item in terms:
+            lines.append(f"- **{_markdown_inline(item.get('term'))}：** {str(item.get('explanation') or '').strip()}")
+        lines.append("")
+
+    suggested = [_markdown_inline(item) for item in _as_list(report.get("suggested_questions"), 24) if _markdown_inline(item)]
+    if suggested:
+        lines.extend(["## 建议继续追问", ""])
+        lines.extend([f"- {item}" for item in suggested])
+        lines.append("")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 class ReadingReportService:
     def __init__(self, artifacts: PaperArtifactRepository | None = None):
         self.artifacts = artifacts or PaperArtifactRepository()
@@ -352,12 +478,12 @@ class ReadingReportService:
 
     def save_personal_summary(self, *, task_id: str, summary: str) -> dict:
         summary = str(summary or "").strip()
-        if len(summary) > 300:
-            raise ValueError("个人总结不能超过 300 字")
+        if len(summary) > PERSONAL_SUMMARY_MAX_CHARS:
+            raise ValueError(f"个人总结不能超过 {PERSONAL_SUMMARY_MAX_CHARS} 字")
         personal_summary = {
             "content": summary,
             "updated_at": datetime.now(timezone.utc).isoformat(),
-            "max_chars": 300,
+            "max_chars": PERSONAL_SUMMARY_MAX_CHARS,
         }
 
         def merge_summary(latest: dict) -> dict:
@@ -368,3 +494,9 @@ class ReadingReportService:
 
         self.artifacts.update_result(task_id, merge_summary)
         return personal_summary
+
+    def export_markdown(self, *, task_id: str, base_url: str = "") -> str:
+        result = self.artifacts.read_result(task_id)
+        if not result:
+            raise ValueError("任务结果不存在")
+        return render_reading_report_markdown(result, base_url=base_url)

@@ -345,7 +345,7 @@ const Onboarding = () => {
               <p className="mt-2 text-sm leading-6 text-slate-600">
                 {importedTaskId
                   ? configuredModel
-                    ? '首篇论文已经导入。接下来逐页阅读、生成关键问题报告，再写自己的 300 字总结。'
+                    ? '首篇论文已经导入。接下来逐页阅读、生成关键问题报告，再写下自己的个人总结。'
                     : '首篇论文已经导入，可以立即逐页阅读。需要生成报告或持续追问时，再到设置中启用模型。'
                   : '你可以在工作台随时导入 PDF 或论文 URL；视频转写和 Cookie 不再是首次使用的前置条件。'}
               </p>

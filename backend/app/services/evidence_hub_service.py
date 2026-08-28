@@ -15,7 +15,39 @@ from app.services.gpt_provider import GPTProvider
 from app.services.llm_compat import create_chat_completion
 
 
-EVIDENCE_ROLES = {"question", "method", "experiment", "limitation", "other"}
+EVIDENCE_ROLE_ORDER = ("question", "method", "experiment", "limitation", "other")
+EVIDENCE_ROLES = set(EVIDENCE_ROLE_ORDER)
+EVIDENCE_CLASSIFICATION_PROMPT_VERSION = "topic-evidence-id-selection-v2"
+EVIDENCE_CANDIDATE_STRATEGY_VERSION = "page-balanced-verbatim-candidates-v4"
+
+TOPIC_EVIDENCE_CLASSIFICATION_PROMPT = """你是 FastRead 的轻量证据分类器。程序已经从一篇论文的分页原文中生成了固定候选 C1、C2……。
+
+你只负责选择候选编号并分类，不负责写引文、改写引文或推断页码。一个候选可以属于多个角色，但只有确实同时承担多种研究职责时才多选。
+
+角色定义：
+- question：论文明确提出或回答的研究问题、假设、评价目标。
+- method：算法、框架、数据采集、建模或分析步骤。
+- experiment：数据集、基准、对照、指标、消融、人类研究、实验设置或结果。
+- limitation：论文明确承认的约束、偏差、失败情形、外推边界或尚未解决的问题。
+- other：对理解论文重要、但不适合以上四类的背景或结论证据。
+
+约束：
+1. 只能使用输入中的 candidate_id；不要输出逐字引文、页码、论文 ID 或新编号。
+2. 每个角色最多选择 4 条，宁可少选，不要为了填满栏目而牵强归类。
+3. 允许跳过候选，并在 unresolved_roles 中列出当前候选不足以支持的角色。
+4. report_outline 只是检索提示，可能不准确，不能把它当证据；唯一可选证据是 candidates。
+5. reason 只解释为什么分类，保持一句短语；最终不会作为论文主张展示。
+6. 只选能独立读懂的完整学术陈述。不要选择论文标题、章节标题、页眉页脚、参考文献、公式残片、表格表头、纯图表数字串或断裂 OCR。
+7. question 必须明确陈述研究目标、研究问题或可检验假设；仅仅是标题、宽泛背景或“本文很重要”不属于 question。
+8. other 也必须有实质学术含义，例如关键结论、适用意义或必要背景；不要把无法分类的垃圾片段塞进 other。
+
+只输出以下 JSON，不要代码围栏：
+{
+  "selections": [
+    {"candidate_id": "C1", "roles": ["experiment"], "confidence": 0.85, "reason": "包含评测指标与结果"}
+  ],
+  "unresolved_roles": ["limitation"]
+}"""
 
 TOPIC_CHAT_PROMPT = """你是 FastRead 的专题知识库研究助手。你只能依据下方给出的专题成员论文分页原文回答。
 
@@ -163,6 +195,67 @@ def _sentence_candidates(text: str, max_chars: int = 650) -> list[str]:
         if fallback:
             candidates.append(fallback)
     return candidates
+
+
+_PDF_BOILERPLATE_PREFIXES = (
+    re.compile(r"^Published as a conference paper at ICLR\s+\d{4}\s*", re.IGNORECASE),
+    re.compile(r"^Under review as a conference paper at ICLR\s+\d{4}\s*", re.IGNORECASE),
+    re.compile(r"^Preprint\.?\s*", re.IGNORECASE),
+)
+_PDF_SECTION_PREFIX = re.compile(
+    r"^(?:\d+(?:\.\d+)*|[A-Z])\s+"
+    r"[A-Z][A-Z0-9][A-Z0-9 :/&()\-–—]{5,}?\s+"
+    r"(?=(?:We|Our|For|To|In|This|The|So|Throughout|Figure|Table)\b)"
+)
+
+
+def _clean_classification_candidate(value: str) -> str:
+    """Remove repeated PDF chrome while preserving a literal page substring."""
+    cleaned = re.sub(r"\s+", " ", str(value or "")).strip()
+    for pattern in _PDF_BOILERPLATE_PREFIXES:
+        cleaned = pattern.sub("", cleaned).strip()
+    cleaned = _PDF_SECTION_PREFIX.sub("", cleaned).strip()
+    return cleaned
+
+
+def _is_readable_academic_candidate(value: str) -> bool:
+    """Reject deterministic PDF noise before asking a weak model to classify IDs."""
+    text = str(value or "").strip()
+    if len(text) < 40:
+        return False
+    lexical = re.findall(r"[A-Za-z]+(?:[-'’][A-Za-z]+)*|[\u4e00-\u9fff]", text)
+    if len(lexical) < 8:
+        return False
+    alpha_words = re.findall(r"[A-Za-z]+", text)
+    if alpha_words:
+        uppercase_words = sum(1 for word in alpha_words if len(word) > 1 and word.isupper())
+        if len(alpha_words) <= 24 and uppercase_words / len(alpha_words) >= 0.72:
+            return False
+    numeric_tokens = re.findall(r"(?<![A-Za-z])\d+(?:\.\d+)?%?", text)
+    if len(numeric_tokens) > max(10, len(lexical) // 2):
+        return False
+    noisy_symbols = re.findall(r"[^\w\s.,;:!?%()\[\]{}'’\"“”/\-–—]", text, flags=re.UNICODE)
+    if len(noisy_symbols) / max(len(text), 1) > 0.12:
+        return False
+    if re.match(r"^(acknowledg(?:e)?ments?|references?|bibliography)\b", text, re.IGNORECASE):
+        return False
+    if re.match(r"^(table|figure)\s+\d+[.:]", text, re.IGNORECASE):
+        return False
+    if re.search(r"\bquestion it answers\b", text, re.IGNORECASE):
+        return False
+    if re.match(r"^\d+[A-Z]", text) or re.search(r"\s\d+$", text):
+        return False
+    if len(text) < 140 and re.search(r"\b(?:in|under) this (?:setting|case|regime)\b", text, re.IGNORECASE):
+        return False
+    capitalized_words = re.findall(r"\b[A-Z][a-z]{2,}\b", text)
+    has_clause_verb = re.search(
+        r"\b(is|are|was|were|has|have|shows?|finds?|proposes?|introduces?|evaluates?|uses?|reports?)\b",
+        text,
+        re.IGNORECASE,
+    )
+    if text.count(",") >= 2 and len(capitalized_words) >= 4 and not has_clause_verb:
+        return False
+    return True
 
 
 class EvidenceHubService:
@@ -336,7 +429,347 @@ class EvidenceHubService:
                 link["title"] = "论文任务已不可用"
                 link["missing"] = True
         topic["evidence_matrix"] = self._matrix(topic["evidence_items"])
+        topic["evidence_extraction_runs"] = self._load_evidence_extraction_runs(topic_id)
         return topic
+
+    def _evidence_extraction_dir(self, topic_id: str) -> Path:
+        topic_key = hashlib.sha256(topic_id.encode("utf-8")).hexdigest()[:24]
+        return self.data_dir / "evidence_extraction" / topic_key
+
+    def _evidence_extraction_path(self, topic_id: str, task_id: str) -> Path:
+        task_key = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:24]
+        return self._evidence_extraction_dir(topic_id) / f"{task_key}.json"
+
+    def _load_evidence_extraction_runs(self, topic_id: str) -> list[dict]:
+        directory = self._evidence_extraction_dir(topic_id)
+        if not directory.is_dir():
+            return []
+        runs = []
+        for path in directory.glob("*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError):
+                continue
+            if isinstance(payload, dict) and payload.get("topic_id") == topic_id:
+                runs.append(payload)
+        return sorted(runs, key=lambda item: str(item.get("generated_at") or ""), reverse=True)
+
+    @staticmethod
+    def _report_outline(report: dict) -> dict:
+        def text(value: object) -> str:
+            if isinstance(value, dict):
+                return " ".join(
+                    str(value.get(key) or "").strip()
+                    for key in ("question", "title", "step", "description", "content")
+                    if str(value.get(key) or "").strip()
+                )[:700]
+            return str(value or "").strip()[:700]
+
+        return {
+            "key_questions": [text(item) for item in (report.get("key_questions") or [])[:12] if text(item)],
+            "process": [text(item) for item in (report.get("process") or [])[:12] if text(item)],
+            "contributions": [text(item) for item in (report.get("contributions") or [])[:12] if text(item)],
+            "limitations": [text(item) for item in (report.get("limitations") or [])[:12] if text(item)],
+        }
+
+    def _classification_candidates(
+        self,
+        task_id: str,
+        paper: dict,
+        report: dict,
+        limit: int,
+    ) -> list[dict]:
+        """Build a long, page-balanced pool; classification remains the model's small task."""
+        candidates: list[dict] = []
+        seen: set[tuple[int, str]] = set()
+
+        def add(page_number: int, quote: str, origin: str) -> None:
+            if len(candidates) >= limit:
+                return
+            quote = _clean_classification_candidate(quote)
+            if page_number < 1 or not quote:
+                return
+            quote_key = re.sub(r"\W+", " ", quote.lower(), flags=re.UNICODE).strip()
+            title_key = re.sub(
+                r"\W+",
+                " ",
+                str(paper.get("title") or "").lower(),
+                flags=re.UNICODE,
+            ).strip()
+            if (
+                quote_key
+                and title_key
+                and len(quote_key) >= 24
+                and (quote_key.startswith(title_key) or title_key.startswith(quote_key))
+            ):
+                return
+            try:
+                page = self._page(paper, page_number)
+            except ValueError:
+                return
+            page_text = str(page.get("text") or "")
+            if (
+                quote not in page_text
+                or not _is_readable_academic_candidate(quote)
+                or (page_number, quote) in seen
+            ):
+                return
+            seen.add((page_number, quote))
+            candidates.append({
+                "candidate_id": f"C{len(candidates) + 1}",
+                "page": page_number,
+                "verbatim_evidence": quote,
+                "origin": origin,
+            })
+
+        # Keep already grounded report evidence in the pool before adding broader page coverage.
+        for section in ("key_questions", "contributions"):
+            for item in report.get(section) or []:
+                for evidence in (item.get("evidence") or [] if isinstance(item, dict) else []):
+                    if not isinstance(evidence, dict):
+                        continue
+                    add(
+                        int(evidence.get("page_start") or evidence.get("page") or 0),
+                        str(evidence.get("exact_quote") or ""),
+                        f"report:{section}",
+                    )
+
+        page_queues: list[list[tuple[int, str]]] = []
+        pages = [page for page in (paper.get("pages") or []) if int(page.get("page") or 0) > 0]
+        per_page_target = max(3, min(10, (limit + max(len(pages), 1) - 1) // max(len(pages), 1)))
+        for page in pages:
+            page_number = int(page.get("page") or 0)
+            spans = _sentence_candidates(str(page.get("text") or ""), max_chars=520)
+            if not spans:
+                continue
+            take = min(per_page_target, len(spans))
+            if take == 1:
+                indices = [0]
+            else:
+                indices = sorted({round(index * (len(spans) - 1) / (take - 1)) for index in range(take)})
+            page_queues.append([(page_number, spans[index]) for index in indices])
+
+        # Round-robin across pages prevents a long introduction from consuming the context window.
+        while page_queues and len(candidates) < limit:
+            remaining = []
+            for queue in page_queues:
+                if queue:
+                    page_number, quote = queue.pop(0)
+                    add(page_number, quote, "page_balanced")
+                if queue:
+                    remaining.append(queue)
+                if len(candidates) >= limit:
+                    break
+            page_queues = remaining
+        return candidates
+
+    def _classify_paper_evidence(
+        self,
+        *,
+        topic: dict,
+        task_id: str,
+        title: str,
+        result: dict,
+        paper: dict,
+        provider_id: str,
+        model_name: str,
+        max_candidates: int,
+        candidates: list[dict] | None = None,
+    ) -> dict:
+        report = ((result.get("insights") or {}).get("reading_report") or {})
+        candidates = candidates or self._classification_candidates(task_id, paper, report, max_candidates)
+        if not candidates:
+            raise ValueError("论文分页原文未生成可分类的逐字候选")
+        candidate_map = {item["candidate_id"]: item for item in candidates}
+        request_payload = {
+            "topic": {
+                "question": topic.get("question") or "",
+                "scope_statement": topic.get("scope_statement") or "",
+            },
+            "paper_title": title,
+            "report_outline": self._report_outline(report),
+            "candidates": candidates,
+            "limits": {"max_per_role": 4, "max_candidates": max_candidates},
+        }
+        gpt = GPTProvider.create(provider_id=provider_id, model_name=model_name)
+        response = create_chat_completion(
+            gpt.client,
+            model=gpt.model,
+            messages=[
+                {"role": "system", "content": TOPIC_EVIDENCE_CLASSIFICATION_PROMPT},
+                {"role": "user", "content": json.dumps(request_payload, ensure_ascii=False)},
+            ],
+            temperature=0.1,
+        )
+        raw = str(response.choices[0].message.content or "").strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=re.IGNORECASE).strip()
+        try:
+            proposal = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"证据分类模型输出不是有效 JSON: {exc}") from exc
+        if not isinstance(proposal, dict) or not isinstance(proposal.get("selections"), list):
+            raise ValueError("证据分类模型输出缺少 selections 数组")
+
+        role_counts = {role: 0 for role in EVIDENCE_ROLE_ORDER}
+        normalized = []
+        selected_pairs = set()
+        rejected_excess = []
+        for selection in proposal["selections"]:
+            if not isinstance(selection, dict):
+                raise ValueError("证据分类 selection 必须是 JSON 对象")
+            candidate_id = str(selection.get("candidate_id") or "")
+            if candidate_id not in candidate_map:
+                raise ValueError(f"证据分类模型使用了无效候选编号: {candidate_id or '<empty>'}")
+            roles = selection.get("roles")
+            if not isinstance(roles, list) or not roles:
+                raise ValueError(f"候选 {candidate_id} 缺少 roles")
+            invalid_roles = [str(role) for role in roles if str(role) not in EVIDENCE_ROLES]
+            if invalid_roles:
+                raise ValueError(f"候选 {candidate_id} 使用了未知角色: {', '.join(invalid_roles)}")
+            try:
+                confidence = float(selection.get("confidence", 0.5))
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"候选 {candidate_id} 的 confidence 无效") from exc
+            if not 0 <= confidence <= 1:
+                raise ValueError(f"候选 {candidate_id} 的 confidence 必须在 0 到 1 之间")
+            reason = str(selection.get("reason") or "").strip()[:500]
+            for role_value in dict.fromkeys(str(role) for role in roles):
+                pair = (candidate_id, role_value)
+                if pair in selected_pairs:
+                    continue
+                if role_counts[role_value] >= 4:
+                    rejected_excess.append({"candidate_id": candidate_id, "role": role_value})
+                    continue
+                selected_pairs.add(pair)
+                role_counts[role_value] += 1
+                candidate = candidate_map[candidate_id]
+                normalized.append({
+                    "candidate_id": candidate_id,
+                    "role": role_value,
+                    "confidence": confidence,
+                    "reason": reason,
+                    "page": int(candidate["page"]),
+                    "exact_quote": str(candidate["verbatim_evidence"]),
+                })
+
+        unresolved = [
+            str(role) for role in proposal.get("unresolved_roles") or []
+            if str(role) in EVIDENCE_ROLES
+        ]
+        generated_at = utc_now()
+        run_id = hashlib.sha256(
+            json.dumps({"request": request_payload, "response": proposal, "generated_at": generated_at}, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        ).hexdigest()[:24]
+        evidence_payloads = []
+        for item in normalized:
+            self.validate_quote(task_id, item["page"], item["exact_quote"])
+            evidence_payloads.append({
+                "topic_id": topic["id"],
+                "task_id": task_id,
+                "page": item["page"],
+                "exact_quote": item["exact_quote"],
+                "user_note": "",
+                "role": item["role"],
+                "source_kind": "model_classified",
+                "source_ref": f"model:{EVIDENCE_CLASSIFICATION_PROMPT_VERSION}:{run_id}:{item['candidate_id']}:{item['role']}",
+            })
+        self.dao.replace_model_classified_evidence(topic["id"], task_id, evidence_payloads)
+        run = {
+            "run_id": run_id,
+            "topic_id": topic["id"],
+            "task_id": task_id,
+            "title": title,
+            "status": "completed" if normalized else "completed_no_selection",
+            "provider_id": provider_id,
+            "model_name": model_name,
+            "prompt_version": EVIDENCE_CLASSIFICATION_PROMPT_VERSION,
+            "strategy_version": EVIDENCE_CANDIDATE_STRATEGY_VERSION,
+            "candidate_count": len(candidates),
+            "selected_count": len(normalized),
+            "selected_by_role": role_counts,
+            "unresolved_roles": list(dict.fromkeys(unresolved)),
+            "rejected_excess": rejected_excess,
+            "fallback_used": False,
+            "fallback_reason": "",
+            "generated_at": generated_at,
+        }
+        atomic_write_json(self._evidence_extraction_path(topic["id"], task_id), run)
+        return run
+
+    def extract_topic_evidence(self, topic_id: str, payload: dict) -> dict:
+        topic = self.get_topic(topic_id)
+        provider_id = str(payload.get("provider_id") or "").strip()
+        model_name = str(payload.get("model_name") or "").strip()
+        max_candidates = int(payload.get("max_candidates") or 120)
+        if not provider_id or not model_name:
+            raise ValueError("智能证据分类需要已启用的模型")
+        if not 40 <= max_candidates <= 160:
+            raise ValueError("证据候选数量必须在 40 到 160 之间")
+        runs = []
+        for link in topic["papers"]:
+            task_id = str(link["task_id"])
+            title = str(link.get("title") or task_id)
+            candidate_count = 0
+            try:
+                result, paper = self.paper_document(task_id)
+                report = ((result.get("insights") or {}).get("reading_report") or {})
+                candidates = self._classification_candidates(
+                    task_id,
+                    paper,
+                    report,
+                    max_candidates,
+                )
+                candidate_count = len(candidates)
+                run = self._classify_paper_evidence(
+                    topic=topic,
+                    task_id=task_id,
+                    title=title,
+                    result=result,
+                    paper=paper,
+                    provider_id=provider_id,
+                    model_name=model_name,
+                    max_candidates=max_candidates,
+                    candidates=candidates,
+                )
+            except Exception as exc:
+                generated_at = utc_now()
+                run_id = hashlib.sha256(
+                    json.dumps({
+                        "topic_id": topic_id,
+                        "task_id": task_id,
+                        "provider_id": provider_id,
+                        "model_name": model_name,
+                        "prompt_version": EVIDENCE_CLASSIFICATION_PROMPT_VERSION,
+                        "strategy_version": EVIDENCE_CANDIDATE_STRATEGY_VERSION,
+                        "candidate_count": candidate_count,
+                        "error": str(exc),
+                        "generated_at": generated_at,
+                    }, ensure_ascii=False, sort_keys=True).encode("utf-8")
+                ).hexdigest()[:24]
+                run = {
+                    "run_id": run_id,
+                    "topic_id": topic_id,
+                    "task_id": task_id,
+                    "title": title,
+                    "status": "failed",
+                    "provider_id": provider_id,
+                    "model_name": model_name,
+                    "prompt_version": EVIDENCE_CLASSIFICATION_PROMPT_VERSION,
+                    "strategy_version": EVIDENCE_CANDIDATE_STRATEGY_VERSION,
+                    "candidate_count": candidate_count,
+                    "selected_count": 0,
+                    "selected_by_role": {role: 0 for role in EVIDENCE_ROLE_ORDER},
+                    "unresolved_roles": list(EVIDENCE_ROLE_ORDER),
+                    "rejected_excess": [],
+                    "fallback_used": False,
+                    "fallback_reason": "model_call_or_validation_failed",
+                    "error": str(exc),
+                    "generated_at": generated_at,
+                }
+                atomic_write_json(self._evidence_extraction_path(topic_id, task_id), run)
+            runs.append(run)
+        return {"topic": self.get_topic(topic_id), "runs": runs}
 
     def delete_topic(self, topic_id: str) -> None:
         records = self.dao.delete_topic(topic_id)
@@ -592,28 +1025,30 @@ class EvidenceHubService:
             for index, process in enumerate(report.get("process") or []):
                 raw = process.get("evidence") or []
                 evidence_groups.append(("experiment", f"process:{index}", raw if isinstance(raw, list) else []))
+            report_payloads = []
             for role, prefix, evidences in evidence_groups:
                 for index, evidence in enumerate(evidences):
                     page_number = int(evidence.get("page_start") or evidence.get("page") or 0)
-                    quote = str(evidence.get("exact_quote") or "")
+                    quote = _clean_classification_candidate(str(evidence.get("exact_quote") or ""))
                     ref = f"report:{task_id}:{prefix}:{index}"
-                    if ref in existing_refs or not quote or page_number < 1:
+                    if not quote or page_number < 1 or not _is_readable_academic_candidate(quote):
                         continue
                     try:
-                        self.validate_quote(task_id, page_number, quote)
+                        paper, start, end = self.validate_quote(task_id, page_number, quote)
                     except ValueError:
                         continue
-                    self.dao.add_evidence({
+                    canonical_quote = str(self._page(paper, page_number).get("text") or "")[start:end]
+                    report_payloads.append({
                         "topic_id": topic_id,
                         "task_id": task_id,
                         "page": page_number,
-                        "exact_quote": quote,
+                        "exact_quote": canonical_quote,
                         "user_note": "",
                         "role": role,
                         "source_kind": "report",
                         "source_ref": ref,
                     })
-                    existing_refs.add(ref)
+            self.dao.replace_report_evidence(topic_id, task_id, report_payloads)
         return self.get_topic(topic_id)["evidence_items"]
 
     def delete_evidence(self, topic_id: str, evidence_id: str) -> None:

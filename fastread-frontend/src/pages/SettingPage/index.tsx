@@ -9,7 +9,7 @@ const SettingPage = () => {
     fetchProviderList()
   }, [fetchProviderList])
   return (
-    <div className="h-full w-full">
+    <div className="h-dvh min-h-0 w-full overflow-hidden">
       <SettingLayout Menu={<Menu />} />
     </div>
   )

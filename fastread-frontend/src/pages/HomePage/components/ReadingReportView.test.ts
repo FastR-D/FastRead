@@ -9,4 +9,11 @@ describe('academic identity gate disclosure', () => {
     expect(source).toContain('论文内声明已展示，仍需官方会议记录闭合正式身份')
     expect(source).not.toContain('未通过四大安全顶会正式论文 Gate')
   })
+
+  it('keeps the personal summary visible and exposes deterministic markdown export', () => {
+    expect(source).toContain('我的总结')
+    expect(source).toContain('导出 Markdown')
+    expect(source).toContain('get_reading_report_markdown_url(task.id)')
+    expect(source).not.toContain('写 300 字总结')
+  })
 })

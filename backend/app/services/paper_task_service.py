@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from app.core.settings import get_settings
 from app.db.evidence_dao import EvidenceHubDAO
 from app.db.paper_task_dao import (
+    delete_paper_collection,
     delete_paper_task,
     get_paper_task,
     list_paper_tasks,
@@ -17,6 +18,11 @@ from app.enmus.task_status_enums import TaskStatus
 from app.repositories.paper_artifacts import PaperArtifactRepository
 from app.services.vector_store import VectorStoreManager
 from app.utils.logger import get_logger
+from app.utils.collections import (
+    DEFAULT_COLLECTION_FOLDER,
+    normalize_collection_folder,
+    require_collection_folder,
+)
 
 
 logger = get_logger(__name__)
@@ -44,7 +50,7 @@ class PaperTaskService:
         result = result or self.artifacts.read_result(metadata["task_id"]) or {}
         status = self.artifacts.read_status_or_success(metadata["task_id"])
         collection = {
-            "folder": metadata.get("collection_folder") or "默认收藏夹",
+            "folder": metadata.get("collection_folder") or DEFAULT_COLLECTION_FOLDER,
             "tags": metadata.get("collection_tags") or [],
             "note": metadata.get("collection_note") or "",
         }
@@ -112,6 +118,18 @@ class PaperTaskService:
         except Exception as exc:
             logger.warning(f"删除论文向量索引失败: {exc}")
         return int(delete_paper_task(task_id))
+
+    def delete_collection(self, collection_folder: str) -> dict:
+        folder = require_collection_folder(collection_folder)
+        if normalize_collection_folder(folder).casefold() == DEFAULT_COLLECTION_FOLDER.casefold():
+            raise ValueError("默认收藏夹不能删除")
+        task_ids = delete_paper_collection(folder, replacement_folder=DEFAULT_COLLECTION_FOLDER)
+        return {
+            "collection_folder": folder,
+            "replacement_folder": DEFAULT_COLLECTION_FOLDER,
+            "updated_task_ids": task_ids,
+            "updated_count": len(task_ids),
+        }
 
     def _delete_owned_upload(self, task_id: str) -> int:
         result = self.artifacts.read_result(task_id) or {}

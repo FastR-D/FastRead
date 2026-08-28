@@ -38,6 +38,7 @@ import {
   createTopicSynthesis,
   deleteImport,
   deleteTopic,
+  extractTopicEvidence,
   getFastNewsCatalog,
   getFastWriteProjects,
   getFastWriteStatus,
@@ -80,6 +81,7 @@ const evidenceSourceLabels: Record<string, string> = {
   manual: '手工证据',
   annotation: '阅读批注',
   report: '阅读报告',
+  model_classified: '模型选证（逐字复核）',
 }
 
 export default function ResearchPage() {
@@ -306,6 +308,7 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
   const [evidenceQuote, setEvidenceQuote] = useState('')
   const [evidenceNote, setEvidenceNote] = useState('')
   const [evidenceRole, setEvidenceRole] = useState<'question' | 'method' | 'experiment' | 'limitation' | 'other'>('other')
+  const [evidenceContextSize, setEvidenceContextSize] = useState<80 | 120 | 160>(120)
   const [knowledgeInput, setKnowledgeInput] = useState('')
   const [knowledgeMessages, setKnowledgeMessages] = useState<KnowledgeMessage[]>([])
   const [selectedModelId, setSelectedModelId] = useState('')
@@ -464,10 +467,57 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
               <div className="flex flex-wrap items-end justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-900">证据矩阵</h3>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">按研究职责整理已通过页码和逐字引文校验的证据；空缺会保留，不由模型补写。</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">程序提供长上下文逐字候选，模型只选择编号并分类；页码、原文和论文成员关系仍由服务端复核。空缺会保留，不由模型补写。</p>
                 </div>
-                <span className="rounded bg-white px-2 py-1 text-[10px] text-slate-500">{topic.evidence_items?.length || 0} 条已校验证据</span>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <span className="rounded bg-white px-2 py-1 text-[10px] text-slate-500">{topic.evidence_items?.length || 0} 条已校验证据</span>
+                  <select
+                    aria-label="智能证据分类上下文规模"
+                    className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-600"
+                    value={evidenceContextSize}
+                    disabled={busy === 'evidence-extract'}
+                    onChange={event => setEvidenceContextSize(Number(event.target.value) as 80 | 120 | 160)}
+                  >
+                    <option value={80}>精简 · 每篇最多 80 条</option>
+                    <option value={120}>长上下文 · 每篇最多 120 条</option>
+                    <option value={160}>最大 · 每篇最多 160 条</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="secondary-button h-8"
+                    disabled={!model || busy === 'evidence-extract' || !(topic.papers || []).length}
+                    onClick={async () => {
+                      if (!model) return
+                      setBusy('evidence-extract')
+                      try {
+                        const result = await extractTopicEvidence(topic.id, {
+                          provider_id: model.provider_id,
+                          model_name: model.model_name,
+                          max_candidates: evidenceContextSize,
+                        })
+                        setTopic(result.topic)
+                        const completed = result.runs.filter(run => run.status !== 'failed').length
+                        const selected = result.runs.reduce((sum, run) => sum + run.selected_count, 0)
+                        if (completed) toast.success(`已分类 ${completed}/${result.runs.length} 篇，选中 ${selected} 条逐字证据`)
+                        if (completed < result.runs.length) toast.error('部分论文分类失败；旧证据已保留，可查看运行状态后重试')
+                      }
+                      finally { setBusy('') }
+                    }}
+                  >
+                    {busy === 'evidence-extract' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                    智能补全矩阵
+                  </button>
+                </div>
               </div>
+              {!!topic.evidence_extraction_runs?.length && (
+                <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-500">
+                  {topic.evidence_extraction_runs.map(run => (
+                    <span key={run.task_id} title={run.error || run.fallback_reason || ''} className={cn('rounded border px-2 py-1', run.status === 'failed' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700')}>
+                      {run.title} · {run.status === 'failed' ? '分类失败，未回退' : `${run.selected_count}/${run.candidate_count} 条`} · {run.model_name}
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="mt-4 grid gap-3 lg:grid-cols-2">
                 {Object.entries(roleLabels).map(([role, label]) => {
                   const items = topic.evidence_matrix?.[role] || []
@@ -491,7 +541,7 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
                             </button>
                           )
                         })}
-                        {!items.length && <p className="rounded border border-dashed border-slate-200 py-5 text-center text-[10px] text-slate-400">该维度暂无逐字证据</p>}
+                        {!items.length && <p className="rounded border border-dashed border-slate-200 px-3 py-5 text-center text-[10px] leading-5 text-slate-400">尚未选中可核验证据，不代表论文中不存在；可运行智能分类或手工补充。</p>}
                       </div>
                     </div>
                   )

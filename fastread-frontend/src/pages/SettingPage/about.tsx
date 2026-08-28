@@ -53,7 +53,7 @@ export default function AboutPage() {
               { title: '关键问题报告', desc: '集中回答研究问题、方法过程、评估证据和局限，避免只生成零散摘要。' },
               { title: '方法与贡献', desc: '将“论文怎么做”与“它新增了什么”分开呈现，并保留证据边界。' },
               { title: '可追溯引用', desc: '引文必须在标注页面的原文中匹配；无法核对的引文不会进入报告。' },
-              { title: '300 字个人总结', desc: '将你自己的理解与 AI 报告分开保存，并将长度限制在 300 字以内。' },
+              { title: '个人总结', desc: '将你自己的理解与 AI 报告分开保存；既可写成短摘要，也可展开为完整阅读笔记。' },
               { title: '带页码持续追问', desc: '围绕同一篇论文连续提问，实质结论回到分页原文；证据不足时直接说明。' },
             ].map((feature, index) => (
               <Card key={index} className="h-full">
@@ -109,7 +109,7 @@ export default function AboutPage() {
               <CardContent className="pt-6">
                 <h3 className="mb-3 text-xl font-semibold">形成自己的结论</h3>
                 <p className="text-sm text-muted-foreground">
-                  逐页核对关键问题、方法与贡献的证据，写下不超过 300 字的个人总结，
+                  逐页核对关键问题、方法与贡献的证据，写下可长可短的个人总结，
                   然后在同一篇论文上持续追问。对任何实质结论，都建议点击引用回到对应页面核对。
                 </p>
               </CardContent>

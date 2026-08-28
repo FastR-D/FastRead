@@ -9,7 +9,7 @@ from app.services import chat_service
 from app.services.academic_evidence import assess_academic_identity, normalize_venue
 from app.services.paper_ingest_service import PaperIngestService
 from app.services import paper_fetching
-from app.services.reading_report_service import ReadingReportService
+from app.services.reading_report_service import PERSONAL_SUMMARY_MAX_CHARS, ReadingReportService
 
 
 def _pdf_bytes(*page_texts: str) -> bytes:
@@ -340,10 +340,21 @@ def test_reading_report_requires_and_persists_verified_page_quotes(monkeypatch, 
     assert report["key_questions"][0]["evidence"][0]["verified_in_source"] is True
     assert repo.read_result(task_id)["insights"]["reading_report"]["title"] == "FastRead report"
 
-    summary = service.save_personal_summary(task_id=task_id, summary="我的 300 字内总结")
-    assert summary["content"] == "我的 300 字内总结"
-    with pytest.raises(ValueError, match="300"):
-        service.save_personal_summary(task_id=task_id, summary="长" * 301)
+    long_summary = "我的总结。" * 500
+    summary = service.save_personal_summary(task_id=task_id, summary=long_summary)
+    assert summary["content"] == long_summary
+    assert summary["max_chars"] == PERSONAL_SUMMARY_MAX_CHARS
+    with pytest.raises(ValueError, match=str(PERSONAL_SUMMARY_MAX_CHARS)):
+        service.save_personal_summary(task_id=task_id, summary="长" * (PERSONAL_SUMMARY_MAX_CHARS + 1))
+
+    markdown = service.export_markdown(task_id=task_id)
+    assert markdown.startswith("# FastRead report\n")
+    assert "## 我的总结" in markdown
+    assert long_summary in markdown
+    assert "### 1. What problem is studied?" in markdown
+    assert "> “The paper studies phishing detection.”" in markdown
+    assert "> — 第 1 页" in markdown
+    assert "## 局限与证据边界" in markdown
 
 
 def test_chat_chunks_include_paper_pages_with_page_metadata(monkeypatch, tmp_path):

@@ -80,6 +80,12 @@ class EvidenceCreate(BaseModel):
         return value
 
 
+class EvidenceExtractionRequest(BaseModel):
+    provider_id: str = Field(min_length=1, max_length=200)
+    model_name: str = Field(min_length=1, max_length=500)
+    max_candidates: int = Field(default=120, ge=40, le=160)
+
+
 class SynthesisRequest(BaseModel):
     proposed: dict | None = None
     provider_id: str = Field(default="", max_length=200)
@@ -327,6 +333,14 @@ def delete_topic_evidence(topic_id: str, evidence_id: str):
     try:
         HUB.delete_evidence(topic_id, evidence_id)
         return R.success({"deleted": True})
+    except Exception as exc:
+        return _error(exc)
+
+
+@router.post("/research_topics/{topic_id}/evidence/extract")
+def extract_topic_evidence(topic_id: str, data: EvidenceExtractionRequest):
+    try:
+        return R.success(HUB.extract_topic_evidence(topic_id, data.model_dump()))
     except Exception as exc:
         return _error(exc)
 

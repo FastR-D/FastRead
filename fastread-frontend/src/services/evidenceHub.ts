@@ -52,8 +52,28 @@ export type TopicEvidenceItem = {
   exact_quote: string
   user_note: string
   role: 'question' | 'method' | 'experiment' | 'limitation' | 'other'
-  source_kind: 'manual' | 'annotation' | 'report'
+  source_kind: 'manual' | 'annotation' | 'report' | 'model_classified'
   source_ref: string
+}
+
+export type EvidenceExtractionRun = {
+  run_id: string
+  topic_id: string
+  task_id: string
+  title: string
+  status: 'completed' | 'completed_no_selection' | 'failed'
+  provider_id: string
+  model_name: string
+  prompt_version: string
+  strategy_version: string
+  candidate_count: number
+  selected_count: number
+  selected_by_role: Record<TopicEvidenceItem['role'], number>
+  unresolved_roles: TopicEvidenceItem['role'][]
+  fallback_used: boolean
+  fallback_reason: string
+  error?: string
+  generated_at: string
 }
 
 export type ResearchTopic = {
@@ -66,6 +86,7 @@ export type ResearchTopic = {
   papers?: Array<{ task_id: string; title?: string; added_at: string; missing?: boolean }>
   evidence_items?: TopicEvidenceItem[]
   evidence_matrix?: Record<string, TopicEvidenceItem[]>
+  evidence_extraction_runs?: EvidenceExtractionRun[]
   created_at: string
   updated_at: string
 }
@@ -189,6 +210,12 @@ export const removeTopicPaper = (topicId: string, taskId: string) => request.del
 export const addTopicEvidence = (topicId: string, data: Omit<TopicEvidenceItem, 'id' | 'topic_id' | 'source_kind' | 'source_ref'>): Promise<TopicEvidenceItem> =>
   request.post(`/research_topics/${topicId}/evidence`, data) as any
 export const deleteTopicEvidence = (topicId: string, evidenceId: string) => request.delete(`/research_topics/${topicId}/evidence/${evidenceId}`)
+export const extractTopicEvidence = (topicId: string, data: {
+  provider_id: string
+  model_name: string
+  max_candidates: 80 | 120 | 160
+}): Promise<{ topic: ResearchTopic; runs: EvidenceExtractionRun[] }> =>
+  request.post(`/research_topics/${topicId}/evidence/extract`, data, { timeout: 300000 }) as any
 export const createTopicSynthesis = (topicId: string, data: {
   provider_id: string
   model_name: string

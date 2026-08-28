@@ -3,7 +3,7 @@ import { AlertCircle, ArrowRight, CheckCircle2, Cloud, Loader2, MessageSquareTex
 import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { save_personal_summary } from '@/services/note'
+import { PERSONAL_SUMMARY_MAX_CHARS, save_personal_summary } from '@/services/note'
 import { useTaskStore, type Task } from '@/store/taskStore'
 import { loadSummaryDraft, removeSummaryDraft, saveSummaryDraft } from '@/utils/summaryDraft'
 
@@ -49,7 +49,7 @@ export default function PersonalSummaryView({ task }: { task: Task | null }) {
   }, [])
 
   const updateSummary = (content: string) => {
-    const nextSummary = content.slice(0, 300)
+    const nextSummary = content.slice(0, PERSONAL_SUMMARY_MAX_CHARS)
     setSummary(nextSummary)
     if (!task) return
     setDraftStatus('saving')
@@ -77,7 +77,7 @@ export default function PersonalSummaryView({ task }: { task: Task | null }) {
           personal_summary: response.personal_summary,
         },
       })
-      toast.success('300 字总结已保存')
+      toast.success('总结已保存')
     }
     catch (error) {
       console.error('个人总结保存失败', error)
@@ -100,9 +100,9 @@ export default function PersonalSummaryView({ task }: { task: Task | null }) {
           <div className="flex h-10 w-10 items-center justify-center rounded-md bg-slate-900 text-white">
             <Sparkles className="h-4 w-4" />
           </div>
-          <h1 className="mt-4 text-xl font-semibold text-slate-950">用自己的话写 300 字总结</h1>
+          <h1 className="mt-4 text-xl font-semibold text-slate-950">用自己的话整理总结</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            先压缩研究问题，再写方法主线与最重要贡献，最后留下一个仍需追问的疑点。个人总结与 AI 报告分开保存。
+            可以写成短摘要，也可以展开成完整阅读笔记。建议先概括研究问题、方法主线与重要贡献，再留下仍需追问的疑点。
           </p>
           {!report && (
             <button
@@ -118,14 +118,14 @@ export default function PersonalSummaryView({ task }: { task: Task | null }) {
         <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <label htmlFor="personal-summary" className="text-sm font-semibold text-slate-900">我的总结</label>
-            <span className={`font-mono text-xs ${summary.length > 280 ? 'text-amber-700' : 'text-slate-400'}`}>
-              {summary.length}/300
+            <span className={`font-mono text-xs ${summary.length > PERSONAL_SUMMARY_MAX_CHARS * 0.9 ? 'text-amber-700' : 'text-slate-400'}`}>
+              {summary.length.toLocaleString()}/{PERSONAL_SUMMARY_MAX_CHARS.toLocaleString()}
             </span>
           </div>
           <Textarea
             id="personal-summary"
             value={summary}
-            maxLength={300}
+            maxLength={PERSONAL_SUMMARY_MAX_CHARS}
             onChange={event => updateSummary(event.target.value)}
             className="mt-3 min-h-52 resize-y text-sm leading-7"
             placeholder="这篇论文试图解决……；作者通过……；最重要的贡献是……；我仍不确定……"

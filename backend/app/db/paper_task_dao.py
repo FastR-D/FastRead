@@ -5,6 +5,11 @@ from typing import Any
 
 from app.db.engine import get_db
 from app.db.models.paper_tasks import PaperTask
+from app.utils.collections import (
+    DEFAULT_COLLECTION_FOLDER,
+    normalize_collection_folder,
+    require_collection_folder,
+)
 
 
 def _loads_list(value: str | None) -> list:
@@ -69,7 +74,11 @@ def upsert_paper_task(payload: dict[str, Any]) -> dict[str, Any]:
         task.upload_filename = str(payload.get("upload_filename") or payload.get("filename") or "")
         task.content_hash = str(payload.get("content_hash") or "")
         task.report_version = str(payload.get("report_version") or "")
-        task.collection_folder = str(payload.get("collection_folder") or "默认收藏夹")
+        task.collection_folder = (
+            require_collection_folder(payload.get("collection_folder"))
+            if payload.get("collection_folder")
+            else DEFAULT_COLLECTION_FOLDER
+        )
         task.collection_tags_json = json.dumps(payload.get("collection_tags") or [], ensure_ascii=False)
         task.collection_note = str(payload.get("collection_note") or "")
         db.commit()
@@ -113,7 +122,7 @@ def update_paper_collection(
         if task is None:
             return None
         if collection_folder is not None:
-            task.collection_folder = collection_folder
+            task.collection_folder = require_collection_folder(collection_folder)
         if collection_tags is not None:
             tags = collection_tags if isinstance(collection_tags, list) else [collection_tags]
             task.collection_tags_json = json.dumps(
@@ -124,6 +133,33 @@ def update_paper_collection(
         db.commit()
         db.refresh(task)
         return _to_dict(task)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def delete_paper_collection(
+    collection_folder: str,
+    *,
+    replacement_folder: str = DEFAULT_COLLECTION_FOLDER,
+) -> list[str]:
+    folder = require_collection_folder(collection_folder)
+    replacement = require_collection_folder(replacement_folder)
+    db = next(get_db())
+    try:
+        folder_key = normalize_collection_folder(folder).casefold()
+        tasks = [
+            task
+            for task in db.query(PaperTask).all()
+            if normalize_collection_folder(task.collection_folder).casefold() == folder_key
+        ]
+        task_ids = [task.task_id for task in tasks]
+        for task in tasks:
+            task.collection_folder = replacement
+        db.commit()
+        return task_ids
     except Exception:
         db.rollback()
         raise

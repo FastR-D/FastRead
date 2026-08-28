@@ -62,7 +62,7 @@ const FLOW = [
   { label: '关键问题', caption: '引导式报告', view: 'report' as const, icon: BookOpenCheck },
   { label: '方法与贡献', caption: '过程与增量', view: 'report' as const, icon: FileStack },
   { label: '近邻论文', caption: '相关工作', view: 'related' as const, icon: Network },
-  { label: '300 字总结', caption: '自己的理解', view: 'summary' as const, icon: Sparkles },
+  { label: '个人总结', caption: '自己的理解', view: 'summary' as const, icon: Sparkles },
   { label: '持续追问', caption: '回答带页码', view: 'chat' as const, icon: MessageSquareText },
 ]
 
@@ -196,7 +196,7 @@ const HomeLayout: FC<IProps> = ({ NoteForm, Preview }) => {
                   <dl className="divide-y divide-slate-100 rounded-md border border-slate-200 bg-white text-xs">
                     <MetaRow label="分页原文" value={`${paper.page_count || paper.pages.length} 页`} />
                     <MetaRow label="关键问题报告" value={report ? '已生成' : '待生成'} />
-                    <MetaRow label="300 字总结" value={summary?.content ? `${summary.content.length} 字` : '待填写'} />
+                    <MetaRow label="个人总结" value={summary?.content ? `${summary.content.length} 字` : '待填写'} />
                     <MetaRow label="持续追问" value="页码优先" />
                   </dl>
                 ) : (

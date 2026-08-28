@@ -117,6 +117,13 @@ export const update_task_collection = async (data: {
   collection_note: data.collection_note,
 })
 
+export const delete_collection_folder = async (folder: string): Promise<{
+  collection_folder: string
+  replacement_folder: string
+  updated_task_ids: string[]
+  updated_count: number
+}> => request.delete('/collections', { params: { collection_folder: folder } }) as any
+
 export type SearchTrack = 'security' | 'systems' | 'ai'
 
 export type SearchVenue = {
@@ -271,6 +278,11 @@ export const save_personal_summary = async (taskId: string, summary: string): Pr
   task_id: string
   personal_summary: { content: string; updated_at: string; max_chars: number }
 }> => request.put(`/reading_reports/${encodeURIComponent(taskId)}/personal_summary`, { summary }) as any
+
+export const PERSONAL_SUMMARY_MAX_CHARS = 20_000
+
+export const get_reading_report_markdown_url = (taskId: string): string =>
+  resolve_backend_resource_url(`/api/reading_reports/${encodeURIComponent(taskId)}/export.md`)
 
 export const ingest_paper_pdf = async (data: {
   file: File

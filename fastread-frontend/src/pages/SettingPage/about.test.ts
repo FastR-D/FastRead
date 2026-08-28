@@ -9,11 +9,12 @@ describe('FastRead about page copy', () => {
       '论文原文',
       '分页原文',
       '可追溯引用',
-      '300 字个人总结',
+      '个人总结',
       '带页码持续追问',
     ]) {
       expect(aboutSource).toContain(requiredCopy)
     }
+    expect(aboutSource).not.toContain('300 字')
   })
 
   it('does not reintroduce the retired video-product positioning', () => {

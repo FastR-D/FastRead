@@ -246,6 +246,201 @@ def test_topic_synthesis_uses_selected_model_and_binds_evidence_ids(monkeypatch,
     assert all(item.get("verbatim_evidence") for item in model_context["evidence"])
 
 
+def test_topic_evidence_classifier_selects_ids_and_preserves_old_evidence_on_invalid_rerun(monkeypatch, tmp_path):
+    dao = make_dao()
+    artifacts = PaperArtifactRepository(tmp_path / "notes")
+    text = " ".join([
+        "This study asks whether compact evaluations can preserve a reliable model ranking across tasks.",
+        "We propose a pairwise comparison method that estimates a global ordering from local judgments.",
+        "We evaluate twelve models on three datasets and report Kendall correlation against the full benchmark.",
+        "A limitation is that the human study includes only seven annotators and may not generalize broadly.",
+        "The final analysis connects behavioral ordering to practical value-alignment audits in deployment.",
+    ])
+    write_paper(artifacts, TASK_A, "Flexible evidence", text)
+    hub = EvidenceHubService(dao, artifacts, tmp_path / "integrations")
+    topic = hub.create_topic({"question": "Reliable evaluation"})
+    hub.add_topic_paper(topic["id"], TASK_A)
+    invalid = {"enabled": False}
+    calls = []
+
+    class Completions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            context = json.loads(kwargs["messages"][1]["content"])
+            if invalid["enabled"]:
+                content = json.dumps({
+                    "selections": [{"candidate_id": "C999", "roles": ["experiment"], "confidence": 0.9}],
+                    "unresolved_roles": [],
+                })
+            else:
+                selections = []
+                for candidate in context["candidates"]:
+                    quote = candidate["verbatim_evidence"]
+                    role = None
+                    if "asks whether" in quote:
+                        role = "question"
+                    elif "propose a pairwise" in quote:
+                        role = "method"
+                    elif "evaluate twelve models" in quote:
+                        role = "experiment"
+                    elif "limitation is" in quote:
+                        role = "limitation"
+                    elif "final analysis" in quote:
+                        role = "other"
+                    if role:
+                        selections.append({
+                            "candidate_id": candidate["candidate_id"],
+                            "roles": [role],
+                            "confidence": 0.8,
+                            "reason": "verbatim role evidence",
+                        })
+                content = json.dumps({"selections": selections, "unresolved_roles": []})
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    fake_gpt = SimpleNamespace(
+        model="cheap-classifier",
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+    )
+    monkeypatch.setattr(
+        "app.services.evidence_hub_service.GPTProvider.create",
+        lambda **_kwargs: fake_gpt,
+    )
+
+    result = hub.extract_topic_evidence(topic["id"], {
+        "provider_id": "deepseek",
+        "model_name": "cheap-classifier",
+        "max_candidates": 80,
+    })
+    run = result["runs"][0]
+    assert run["status"] == "completed"
+    assert run["prompt_version"] == "topic-evidence-id-selection-v2"
+    assert run["strategy_version"] == "page-balanced-verbatim-candidates-v4"
+    assert run["fallback_used"] is False
+    assert run["selected_by_role"] == {
+        "question": 1,
+        "method": 1,
+        "experiment": 1,
+        "limitation": 1,
+        "other": 1,
+    }
+    matrix = result["topic"]["evidence_matrix"]
+    assert all(len(matrix[role]) == 1 for role in ("question", "method", "experiment", "limitation", "other"))
+    assert all(item["source_kind"] == "model_classified" for items in matrix.values() for item in items)
+    assert all(item["exact_quote"] in text for items in matrix.values() for item in items)
+    classifier_context = json.loads(calls[0]["messages"][1]["content"])
+    assert classifier_context["limits"]["max_candidates"] == 80
+    assert all("candidate_id" in item and "page" in item for item in classifier_context["candidates"])
+
+    previous_ids = {item["id"] for items in matrix.values() for item in items}
+    invalid["enabled"] = True
+    failed = hub.extract_topic_evidence(topic["id"], {
+        "provider_id": "deepseek",
+        "model_name": "cheap-classifier",
+        "max_candidates": 80,
+    })
+    assert failed["runs"][0]["status"] == "failed"
+    assert failed["runs"][0]["run_id"]
+    assert failed["runs"][0]["candidate_count"] == 5
+    assert failed["runs"][0]["fallback_reason"] == "model_call_or_validation_failed"
+    assert failed["runs"][0]["fallback_used"] is False
+    retained_ids = {
+        item["id"]
+        for items in failed["topic"]["evidence_matrix"].values()
+        for item in items
+        if item["source_kind"] == "model_classified"
+    }
+    assert retained_ids == previous_ids
+
+
+def test_topic_evidence_candidates_remove_pdf_chrome_and_numeric_figure_noise(tmp_path):
+    dao = make_dao()
+    artifacts = PaperArtifactRepository(tmp_path / "notes")
+    hub = EvidenceHubService(dao, artifacts, tmp_path / "integrations")
+    paper = {
+        "pages": [
+            {
+                "page": 1,
+                "text": (
+                    "Published as a conference paper at ICLR 2026 "
+                    "HOW RELIABLE IS LANGUAGE MODEL MICRO-BENCHMARKING?\n"
+                    "Published as a conference paper at ICLR 2026 "
+                    "We introduce a reliability measure that identifies the minimum performance gap "
+                    "needed for a micro-benchmark to preserve pairwise model rankings."
+                ),
+            },
+            {
+                "page": 2,
+                "text": (
+                    "Published as a conference paper at ICLR 2026 "
+                    "0.2 0.4 0.6 0.8 1 Agreement 10 25 50 100 250 500 1000 "
+                    "0 5 10 15 20 25 MDAD 2% 4% 8% 16% 24% 32% 40%"
+                ),
+            },
+            {
+                "page": 3,
+                "text": (
+                    "4.2 PROMPTED DISPOSITIONS We hypothesize that language models have measurable "
+                    "dispositional tendencies that persist across prompts."
+                ),
+            },
+        ],
+    }
+
+    candidates = hub._classification_candidates(TASK_A, paper, {}, 80)
+
+    assert {item["verbatim_evidence"] for item in candidates} == {
+        "We introduce a reliability measure that identifies the minimum performance gap "
+        "needed for a micro-benchmark to preserve pairwise model rankings.",
+        "We hypothesize that language models have measurable dispositional tendencies that persist across prompts.",
+    }
+    assert all("Published as a conference paper" not in item["verbatim_evidence"] for item in candidates)
+
+
+def test_report_derived_matrix_is_atomically_rebuilt_with_clean_quotes(tmp_path):
+    dao = make_dao()
+    artifacts = PaperArtifactRepository(tmp_path / "notes")
+    text = (
+        "Published as a conference paper at ICLR 2026 "
+        "We propose a calibrated reliability measure for pairwise model rankings."
+    )
+    write_paper(artifacts, TASK_A, "Clean report evidence", text)
+
+    def attach_report(result):
+        result["insights"]["reading_report"] = {
+            "key_questions": [{
+                "question": "What is measured?",
+                "evidence": [{
+                    "page_start": 1,
+                    "exact_quote": text,
+                }],
+            }],
+        }
+        return result
+
+    artifacts.update_result(TASK_A, attach_report)
+    hub = EvidenceHubService(dao, artifacts, tmp_path / "integrations")
+    topic = hub.create_topic({"question": "Reliable rankings"})
+    hub.add_topic_paper(topic["id"], TASK_A)
+
+    evidence = [
+        item for item in hub.get_topic(topic["id"])["evidence_items"]
+        if item["source_kind"] == "report"
+    ]
+    assert [item["exact_quote"] for item in evidence] == [
+        "We propose a calibrated reliability measure for pairwise model rankings."
+    ]
+
+    artifacts.update_result(TASK_A, lambda result: {
+        **result,
+        "insights": {**result["insights"], "reading_report": {"key_questions": []}},
+    })
+    hub.refresh_topic_evidence(topic["id"])
+    assert not [
+        item for item in hub.get_topic(topic["id"])["evidence_items"]
+        if item["source_kind"] == "report"
+    ]
+
+
 def test_topic_chat_is_scoped_to_members_and_closes_page_sources(monkeypatch, tmp_path):
     dao = make_dao()
     artifacts = PaperArtifactRepository(tmp_path / "notes")

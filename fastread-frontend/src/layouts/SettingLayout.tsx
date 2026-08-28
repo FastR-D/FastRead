@@ -15,14 +15,14 @@ interface ISettingLayoutProps {
 const SettingLayout = ({ Menu }: ISettingLayoutProps) => {
   return (
     <div
-      className="h-full w-full"
+      className="h-full min-h-0 w-full overflow-hidden"
       style={{
         backgroundColor: 'var(--color-muted)',
       }}
     >
-      <div className="flex h-full min-h-0">
+      <div className="flex h-full min-h-0 flex-col md:flex-row">
         {/* 左侧部分：Header + 表单 */}
-        <aside className="flex h-full w-[300px] shrink-0 flex-col border-r border-neutral-200 bg-white">
+        <aside className="flex max-h-[40dvh] w-full shrink-0 flex-col border-b border-neutral-200 bg-white md:h-full md:max-h-none md:w-[260px] md:border-r md:border-b-0 lg:w-[300px]">
           {/* Header */}
           <header className="flex h-16 shrink-0 items-center justify-between px-6">
             <div className="flex items-center gap-2">
@@ -48,14 +48,14 @@ const SettingLayout = ({ Menu }: ISettingLayoutProps) => {
           </header>
 
           {/* 表单内容 */}
-          <div className="min-h-0 flex-1 overflow-auto p-4">
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">
             {/*<NoteForm />*/}
             {Menu}
           </div>
         </aside>
 
         {/* 右侧预览区域 */}
-        <main className="h-full min-w-0 flex-1 overflow-hidden">
+        <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
           <Outlet />
         </main>
       </div>

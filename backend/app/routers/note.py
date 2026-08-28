@@ -4,9 +4,11 @@ import os
 import uuid
 from pathlib import Path
 from typing import Optional
+from urllib.parse import quote
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
 from app.core.settings import get_settings
@@ -15,11 +17,12 @@ from app.services.paper_ingest_service import PaperIngestService
 from app.services.paper_index_service import PaperIndexService
 from app.services.paper_search_service import PaperSearchService
 from app.services.paper_task_service import PaperTaskService
-from app.services.reading_report_service import ReadingReportService
+from app.services.reading_report_service import PERSONAL_SUMMARY_MAX_CHARS, ReadingReportService
 from app.services.related_work_service import RelatedWorkService
 from app.services.venue_catalog import allowed_venue_catalog
 from app.utils.local_access import require_local_request
 from app.utils.logger import get_logger
+from app.utils.collections import require_collection_folder
 from app.utils.response import ResponseWrapper as R
 from app.validators.task_id_validator import CanonicalTaskId
 
@@ -32,6 +35,11 @@ class CollectionUpdateRequest(BaseModel):
     collection_folder: Optional[str] = None
     collection_tags: Optional[list[str] | str] = None
     collection_note: Optional[str] = None
+
+    @field_validator("collection_folder")
+    @classmethod
+    def validate_collection_folder(cls, value: str | None) -> str | None:
+        return require_collection_folder(value) if value is not None else None
 
 
 class ReadingReportRequest(BaseModel):
@@ -47,8 +55,8 @@ class PersonalSummaryRequest(BaseModel):
     @field_validator("summary")
     @classmethod
     def validate_summary_length(cls, value: str) -> str:
-        if len(value or "") > 300:
-            raise ValueError("个人总结不能超过 300 字")
+        if len(value or "") > PERSONAL_SUMMARY_MAX_CHARS:
+            raise ValueError(f"个人总结不能超过 {PERSONAL_SUMMARY_MAX_CHARS} 字")
         return value
 
 
@@ -163,6 +171,14 @@ def update_paper_collection(task_id: CanonicalTaskId, data: CollectionUpdateRequ
     return R.success(updated)
 
 
+@router.delete("/collections")
+def delete_collection_folder(collection_folder: str):
+    try:
+        return R.success(PAPER_TASKS.delete_collection(collection_folder))
+    except ValueError as exc:
+        return R.error(msg=str(exc), code=400)
+
+
 @router.post("/papers/search")
 def search_papers(data: PaperSearchRequest):
     try:
@@ -262,6 +278,24 @@ def save_personal_summary(task_id: CanonicalTaskId, data: PersonalSummaryRequest
     try:
         summary = READING_REPORTS.save_personal_summary(task_id=task_id, summary=data.summary)
         return R.success({"task_id": task_id, "personal_summary": summary})
+    except ValueError as exc:
+        return R.error(msg=str(exc), code=400)
+
+
+@router.get("/reading_reports/{task_id}/export.md")
+def export_reading_report_markdown(task_id: CanonicalTaskId, request: Request):
+    try:
+        content = READING_REPORTS.export_markdown(
+            task_id=task_id,
+            base_url=str(request.base_url).rstrip("/"),
+        )
+        filename = f"FastRead-reading-report-{task_id}.md"
+        disposition = f"attachment; filename=\"FastRead-reading-report.md\"; filename*=UTF-8''{quote(filename)}"
+        return Response(
+            content=content,
+            media_type="text/markdown; charset=utf-8",
+            headers={"Content-Disposition": disposition},
+        )
     except ValueError as exc:
         return R.error(msg=str(exc), code=400)
 

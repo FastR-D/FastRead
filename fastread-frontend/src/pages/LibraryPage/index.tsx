@@ -16,7 +16,6 @@ import {
   Plus,
   Search,
   SearchCheck,
-  RotateCcw,
   Save,
   Settings,
   ShieldCheck,
@@ -24,7 +23,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import logo from '@/assets/icon.png'
-import { useTaskStore, type Task } from '@/store/taskStore'
+import { useTaskStore, type CollectionMeta, type Task } from '@/store/taskStore'
 import { cn } from '@/lib/utils'
 import {
   buildWorkspaceSearch,
@@ -40,9 +39,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import {
+  DEFAULT_COLLECTION_FOLDER,
+  mergeCollectionFolders,
+  normalizeCollectionFolder,
+  validateCollectionFolder,
+} from '@/utils/collections'
 
 type LibraryFilter = 'papers'
 type ViewMode = 'grid' | 'list'
+const ALL_COLLECTIONS = ''
 
 function getNotebookTitle(task: Task) { return task.title || task.paperDocument?.title || '未命名论文' }
 
@@ -82,7 +88,7 @@ function resumeLabel(task: Task) {
   if (progress.view === 'source') return progress.page ? `继续第 ${progress.page} 页` : '继续阅读原文'
   if (progress.view === 'report') return '继续查看阅读报告'
   if (progress.view === 'related') return '继续查看近邻论文'
-  if (progress.view === 'summary') return '继续写 300 字总结'
+  if (progress.view === 'summary') return '继续写个人总结'
   if (progress.view === 'chat') return '继续带页码追问'
   return '继续阅读'
 }
@@ -278,17 +284,27 @@ export default function LibraryPage() {
   const tasks = useTaskStore(state => state.tasks)
   const setCurrentTask = useTaskStore(state => state.setCurrentTask)
   const removeTask = useTaskStore(state => state.removeTask)
-  const updateTaskCollection = useTaskStore(state => state.updateTaskCollection)
   const saveTaskCollection = useTaskStore(state => state.saveTaskCollection)
+  const collectionFolders = useTaskStore(state => state.collectionFolders || [])
+  const createCollectionFolder = useTaskStore(state => state.createCollectionFolder)
+  const deleteCollectionFolder = useTaskStore(state => state.deleteCollectionFolder)
   const collectionSync = useTaskStore(state => state.collectionSync || {})
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<LibraryFilter>('papers')
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null)
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null)
-  const [folderFilter, setFolderFilter] = useState('all')
+  const [folderFilter, setFolderFilter] = useState(ALL_COLLECTIONS)
   const [tagFilter, setTagFilter] = useState('all')
   const [collectionTaskId, setCollectionTaskId] = useState<string | null>(null)
+  const [collectionDraft, setCollectionDraft] = useState<CollectionMeta | null>(null)
+  const [collectionTagsDraft, setCollectionTagsDraft] = useState('')
+  const [collectionError, setCollectionError] = useState('')
+  const [newFolderOpen, setNewFolderOpen] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+  const [newFolderError, setNewFolderError] = useState('')
+  const [folderToDelete, setFolderToDelete] = useState<string | null>(null)
+  const [deletingFolder, setDeletingFolder] = useState(false)
 
   const collectionTask = tasks.find(task => task.id === collectionTaskId) || null
   const collectionState = collectionTask ? collectionSync[collectionTask.id] : undefined
@@ -304,8 +320,11 @@ export default function LibraryPage() {
   )
 
   const folders = useMemo(
-    () => Array.from(new Set(tasks.map(task => task.collection?.folder || '默认收藏夹'))).sort(),
-    [tasks],
+    () => mergeCollectionFolders(
+      collectionFolders,
+      tasks.map(task => task.collection?.folder || DEFAULT_COLLECTION_FOLDER),
+    ),
+    [collectionFolders, tasks],
   )
   const availableTags = useMemo(
     () => Array.from(new Set(tasks.flatMap(task => task.collection?.tags || []))).sort(),
@@ -334,7 +353,7 @@ export default function LibraryPage() {
 
   const visibleTasks = useMemo(() => {
     const collectionFiltered = searchedTasks.filter(task => {
-      if (folderFilter !== 'all' && (task.collection?.folder || '默认收藏夹') !== folderFilter) return false
+      if (folderFilter !== ALL_COLLECTIONS && (task.collection?.folder || DEFAULT_COLLECTION_FOLDER) !== folderFilter) return false
       if (tagFilter !== 'all' && !(task.collection?.tags || []).includes(tagFilter)) return false
       return true
     })
@@ -364,6 +383,79 @@ export default function LibraryPage() {
       // delete_task already shows the error toast; keep the dialog open so users can retry.
     } finally {
       setDeletingTaskId(null)
+    }
+  }
+
+  const openCollectionEditor = (task: Task) => {
+    setCollectionTaskId(task.id)
+    setCollectionDraft({
+      folder: task.collection?.folder || DEFAULT_COLLECTION_FOLDER,
+      tags: [...(task.collection?.tags || [])],
+      note: task.collection?.note || '',
+    })
+    setCollectionTagsDraft((task.collection?.tags || []).join('，'))
+    setCollectionError('')
+  }
+
+  const closeCollectionEditor = () => {
+    setCollectionTaskId(null)
+    setCollectionDraft(null)
+    setCollectionTagsDraft('')
+    setCollectionError('')
+  }
+
+  const saveCollectionDraft = async () => {
+    if (!collectionTask || !collectionDraft) return
+    const folder = normalizeCollectionFolder(collectionDraft.folder)
+    const validationError = validateCollectionFolder(folder)
+    if (validationError) {
+      setCollectionError(validationError)
+      return
+    }
+    const nextCollection = {
+      ...collectionDraft,
+      folder,
+      tags: collectionTagsDraft
+        .split(/[，,\n]+/u)
+        .map(tag => tag.trim())
+        .filter(Boolean),
+    }
+    setCollectionError('')
+    try {
+      await saveTaskCollection(collectionTask.id, nextCollection)
+      closeCollectionEditor()
+    }
+    catch (error) {
+      setCollectionError(error instanceof Error ? error.message : '收藏信息保存失败')
+    }
+  }
+
+  const createFolder = () => {
+    try {
+      const normalized = createCollectionFolder(newFolderName)
+      setFolderFilter(normalized)
+      setNewFolderName('')
+      setNewFolderError('')
+      setNewFolderOpen(false)
+    }
+    catch (error) {
+      setNewFolderError(error instanceof Error ? error.message : '新建收藏夹失败')
+    }
+  }
+
+  const confirmDeleteFolder = async () => {
+    if (!folderToDelete) return
+    setDeletingFolder(true)
+    try {
+      await deleteCollectionFolder(folderToDelete)
+      setFolderFilter(ALL_COLLECTIONS)
+      setFolderToDelete(null)
+    }
+    catch {
+      // Store keeps both the directory and paper assignments unchanged on failure.
+    }
+    finally {
+      setDeletingFolder(false)
     }
   }
 
@@ -500,10 +592,32 @@ export default function LibraryPage() {
           <label className="flex items-center gap-2 text-xs text-neutral-500">
             收藏夹
             <select value={folderFilter} onChange={event => setFolderFilter(event.target.value)} className="h-9 rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-800">
-              <option value="all">全部收藏夹</option>
+              <option value={ALL_COLLECTIONS}>全部收藏夹</option>
               {folders.map(folder => <option key={folder} value={folder}>{folder}</option>)}
             </select>
           </label>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-9"
+            onClick={() => {
+              setNewFolderName('')
+              setNewFolderError('')
+              setNewFolderOpen(true)
+            }}
+          >
+            <Plus className="h-4 w-4" />新建收藏夹
+          </Button>
+          {folderFilter !== ALL_COLLECTIONS && folderFilter !== DEFAULT_COLLECTION_FOLDER && (
+            <Button
+              type="button"
+              variant="outline"
+              className="h-9 text-rose-700 hover:bg-rose-50 hover:text-rose-800"
+              onClick={() => setFolderToDelete(folderFilter)}
+            >
+              <Trash2 className="h-4 w-4" />删除当前收藏夹
+            </Button>
+          )}
           <label className="flex items-center gap-2 text-xs text-neutral-500">
             标签
             <select value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="h-9 rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-800">
@@ -511,8 +625,8 @@ export default function LibraryPage() {
               {availableTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
             </select>
           </label>
-          {(folderFilter !== 'all' || tagFilter !== 'all') && (
-            <button type="button" onClick={() => { setFolderFilter('all'); setTagFilter('all') }} className="text-xs text-blue-700 underline underline-offset-2">
+          {(folderFilter !== ALL_COLLECTIONS || tagFilter !== 'all') && (
+            <button type="button" onClick={() => { setFolderFilter(ALL_COLLECTIONS); setTagFilter('all') }} className="text-xs text-blue-700 underline underline-offset-2">
               清除分类筛选
             </button>
           )}
@@ -534,7 +648,7 @@ export default function LibraryPage() {
                   viewMode={viewMode}
                   onOpen={openTask}
                   onDelete={setTaskToDelete}
-                  onEditCollection={task => setCollectionTaskId(task.id)}
+                  onEditCollection={openCollectionEditor}
                 />
               ))}
             </div>
@@ -549,7 +663,7 @@ export default function LibraryPage() {
                   viewMode={viewMode}
                   onOpen={openTask}
                   onDelete={setTaskToDelete}
-                  onEditCollection={task => setCollectionTaskId(task.id)}
+                  onEditCollection={openCollectionEditor}
                 />
               ))}
             </div>
@@ -604,7 +718,9 @@ export default function LibraryPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(collectionTask)} onOpenChange={open => !open && setCollectionTaskId(null)}>
+      <Dialog open={Boolean(collectionTask)} onOpenChange={open => {
+        if (!open && collectionState?.status !== 'saving') closeCollectionEditor()
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>收藏夹与标签</DialogTitle>
@@ -612,24 +728,30 @@ export default function LibraryPage() {
               「{collectionTask ? getNotebookTitle(collectionTask) : ''}」保存后可在资料库的收藏目录中单独筛选。
             </DialogDescription>
           </DialogHeader>
-          {collectionTask && (
+          {collectionTask && collectionDraft && (
             <div className="space-y-4 py-2">
               <label className="block text-sm font-medium text-neutral-800">
                 收藏夹
                 <input
-                  value={collectionTask.collection?.folder || '默认收藏夹'}
-                  onChange={event => updateTaskCollection(collectionTask.id, { folder: event.target.value })}
+                  value={collectionDraft.folder}
+                  onChange={event => {
+                    setCollectionDraft({ ...collectionDraft, folder: event.target.value })
+                    setCollectionError('')
+                  }}
+                  list="collection-folder-options"
                   className="mt-1.5 h-10 w-full rounded-md border border-neutral-200 px-3 text-sm outline-none focus:border-blue-500"
                   placeholder="例如：大模型安全"
                 />
+                <datalist id="collection-folder-options">
+                  {folders.map(folder => <option key={folder} value={folder} />)}
+                </datalist>
+                <span className="mt-1 block text-xs font-normal text-neutral-500">可选现有收藏夹，也可直接输入新名称。</span>
               </label>
               <label className="block text-sm font-medium text-neutral-800">
                 标签
                 <input
-                  value={(collectionTask.collection?.tags || []).join('，')}
-                  onChange={event => updateTaskCollection(collectionTask.id, {
-                    tags: event.target.value.split(/[，,\s]+/).map(tag => tag.trim()).filter(Boolean),
-                  })}
+                  value={collectionTagsDraft}
+                  onChange={event => setCollectionTagsDraft(event.target.value)}
                   className="mt-1.5 h-10 w-full rounded-md border border-neutral-200 px-3 text-sm outline-none focus:border-blue-500"
                   placeholder="例如：prompt-injection，survey"
                 />
@@ -637,38 +759,107 @@ export default function LibraryPage() {
               <label className="block text-sm font-medium text-neutral-800">
                 归档备注
                 <textarea
-                  value={collectionTask.collection?.note || ''}
-                  onChange={event => updateTaskCollection(collectionTask.id, { note: event.target.value })}
+                  value={collectionDraft.note}
+                  onChange={event => setCollectionDraft({ ...collectionDraft, note: event.target.value })}
                   className="mt-1.5 min-h-24 w-full resize-y rounded-md border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
                   placeholder="记录为什么收藏、后续要读什么"
                 />
               </label>
+              {collectionDraft.folder !== DEFAULT_COLLECTION_FOLDER && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setCollectionDraft({ ...collectionDraft, folder: DEFAULT_COLLECTION_FOLDER })
+                    setCollectionError('')
+                  }}
+                >
+                  移出当前收藏夹
+                </Button>
+              )}
               <div className={cn(
                 'rounded-md border px-3 py-2 text-xs',
-                collectionState?.status === 'error'
+                collectionError || collectionState?.status === 'error'
                   ? 'border-red-200 bg-red-50 text-red-700'
-                  : collectionState?.status === 'saved'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-slate-200 bg-slate-50 text-slate-600',
+                  : 'border-slate-200 bg-slate-50 text-slate-600',
               )}>
-                {collectionState?.message || '修改后会自动保存，也可以点击下方按钮立即保存。'}
+                {collectionError || collectionState?.message || '修改仅在点击“保存”后生效，取消不会改动原收藏信息。'}
               </div>
             </div>
           )}
           <DialogFooter>
-            {collectionTask && collectionState?.status === 'error' && (
-              <Button type="button" variant="outline" onClick={() => void saveTaskCollection(collectionTask.id).catch(() => undefined)}>
-                <RotateCcw className="h-4 w-4" />重试
-              </Button>
-            )}
-            <Button type="button" variant="outline" onClick={() => setCollectionTaskId(null)}>关闭</Button>
             <Button
               type="button"
-              disabled={!collectionTask || collectionState?.status === 'saving'}
-              onClick={() => collectionTask && void saveTaskCollection(collectionTask.id).catch(() => undefined)}
+              variant="outline"
+              disabled={collectionState?.status === 'saving'}
+              onClick={closeCollectionEditor}
+            >
+              取消
+            </Button>
+            <Button
+              type="button"
+              disabled={!collectionTask || !collectionDraft || collectionState?.status === 'saving'}
+              onClick={() => void saveCollectionDraft()}
             >
               {collectionState?.status === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-              立即保存
+              保存
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={newFolderOpen} onOpenChange={open => {
+        setNewFolderOpen(open)
+        if (!open) {
+          setNewFolderName('')
+          setNewFolderError('')
+        }
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新建收藏夹</DialogTitle>
+            <DialogDescription>新建后会保留在收藏目录中，即使暂时没有论文。</DialogDescription>
+          </DialogHeader>
+          <label className="block py-2 text-sm font-medium text-neutral-800">
+            收藏夹名称
+            <input
+              autoFocus
+              value={newFolderName}
+              onChange={event => {
+                setNewFolderName(event.target.value)
+                setNewFolderError('')
+              }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  createFolder()
+                }
+              }}
+              className="mt-1.5 h-10 w-full rounded-md border border-neutral-200 px-3 text-sm outline-none focus:border-blue-500"
+              placeholder="例如：本周必读"
+            />
+          </label>
+          {newFolderError && <p className="text-sm text-red-700">{newFolderError}</p>}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setNewFolderOpen(false)}>取消</Button>
+            <Button type="button" onClick={createFolder}>创建</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(folderToDelete)} onOpenChange={open => !open && !deletingFolder && setFolderToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除收藏夹？</DialogTitle>
+            <DialogDescription>
+              收藏夹“{folderToDelete || ''}”会被删除，其中论文将移回“{DEFAULT_COLLECTION_FOLDER}”，论文本身不会删除。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" disabled={deletingFolder} onClick={() => setFolderToDelete(null)}>取消</Button>
+            <Button type="button" variant="destructive" disabled={deletingFolder} onClick={() => void confirmDeleteFolder()}>
+              {deletingFolder ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              确认删除
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   BookOpenCheck,
   ArrowRight,
+  Download,
   ExternalLink,
   FileQuestion,
   Loader2,
@@ -13,6 +14,7 @@ import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import {
   generate_reading_report,
+  get_reading_report_markdown_url,
   resolve_backend_resource_url,
 } from '@/services/note'
 import { useModelStore } from '@/store/modelStore'
@@ -135,6 +137,7 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
   const { modelList, loadEnabledModels } = useModelStore()
   const [generating, setGenerating] = useState(false)
   const report = task?.insights?.reading_report
+  const personalSummary = task?.insights?.personal_summary?.content?.trim() || ''
 
   useEffect(() => {
     loadEnabledModels()
@@ -226,7 +229,13 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
               <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">FastRead · Guided Report</div>
               <h1 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{report.title}</h1>
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="outline" size="sm" asChild>
+                <a href={get_reading_report_markdown_url(task.id)} download>
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  导出 Markdown
+                </a>
+              </Button>
               <Button variant="outline" size="sm" onClick={() => handleGenerate(true)} disabled={generating}>
                 <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${generating ? 'animate-spin' : ''}`} />
                 重新生成
@@ -243,6 +252,22 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
             <GroundingBadge status={report.report_grounding_status} />
           </div>
         </header>
+
+        <section className="rounded-lg border border-blue-200 bg-blue-50 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
+              <h2 className="text-sm font-semibold text-blue-950">我的总结</h2>
+              {personalSummary ? (
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-7 text-blue-950">{personalSummary}</p>
+              ) : (
+                <p className="mt-2 text-sm leading-6 text-blue-800">还没有个人总结。可以写一段短摘要，也可以展开成完整阅读笔记。</p>
+              )}
+            </div>
+            <Button size="sm" variant="outline" onClick={emitSummary}>
+              {personalSummary ? '编辑总结' : '写总结'} <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </section>
 
         <section className="rounded-lg border border-slate-200 bg-white px-6 py-2 shadow-sm">
           <h2 className="border-b border-slate-100 py-4 text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">关键问题与回答</h2>
@@ -340,15 +365,15 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
 
         <section className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-blue-200 bg-blue-50 p-5">
           <div>
-            <h2 className="text-sm font-semibold text-blue-950">下一步：压缩成自己的 300 字总结</h2>
-            <p className="mt-1 text-xs leading-5 text-blue-800">先写下你真正理解的研究问题、方法与贡献，再带着疑点持续追问。</p>
+            <h2 className="text-sm font-semibold text-blue-950">下一步：整理自己的总结</h2>
+            <p className="mt-1 text-xs leading-5 text-blue-800">总结可长可短；先写下真正理解的研究问题、方法与贡献，再带着疑点持续追问。</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={emitChat}>
               追问不懂的细节 <MessageSquareText className="ml-1.5 h-3.5 w-3.5" />
             </Button>
             <Button size="sm" onClick={emitSummary}>
-              写 300 字总结 <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+              {personalSummary ? '编辑总结' : '写总结'} <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
             </Button>
           </div>
         </section>

@@ -3,6 +3,7 @@ import { createJSONStorage, persist } from 'zustand/middleware'
 import { del, get, set } from 'idb-keyval'
 import toast from 'react-hot-toast'
 import {
+  delete_collection_folder,
   delete_paper,
   list_generated_tasks,
   update_task_collection,
@@ -14,6 +15,13 @@ import {
   type WorkspaceLocation,
   type WorkspaceResumeState,
 } from '@/utils/workspaceNavigation'
+import {
+  collectionFolderKey,
+  DEFAULT_COLLECTION_FOLDER,
+  mergeCollectionFolders,
+  normalizeCollectionFolder,
+  validateCollectionFolder,
+} from '@/utils/collections'
 
 export type TaskStatus =
   | 'PENDING'
@@ -165,6 +173,7 @@ export interface Task {
 interface TaskStore {
   tasks: Task[]
   currentTaskId: string | null
+  collectionFolders: string[]
   collectionSync: Record<string, {
     status: 'dirty' | 'saving' | 'saved' | 'error'
     message?: string
@@ -174,7 +183,9 @@ interface TaskStore {
   updateTaskContent: (id: string, data: Partial<Omit<Task, 'id' | 'createdAt' | 'kind'>>) => void
   applyTaskSnapshot: (snapshot: TaskSnapshot, paperInput?: PaperInput) => void
   updateTaskCollection: (id: string, collection: Partial<CollectionMeta>) => void
-  saveTaskCollection: (id: string) => Promise<void>
+  saveTaskCollection: (id: string, collection?: CollectionMeta) => Promise<void>
+  createCollectionFolder: (folder: string) => string
+  deleteCollectionFolder: (folder: string) => Promise<void>
   loadSavedTasks: () => Promise<void>
   removeTask: (id: string) => Promise<void>
   clearTasks: () => void
@@ -188,7 +199,7 @@ interface TaskStore {
 }
 
 const DEFAULT_COLLECTION: CollectionMeta = {
-  folder: '默认收藏夹',
+  folder: DEFAULT_COLLECTION_FOLDER,
   tags: [],
   note: '',
 }
@@ -206,6 +217,10 @@ export const migratePaperTaskState = (persisted: unknown) => {
     currentTaskId: state.currentTaskId && tasks.some(task => task.id === state.currentTaskId)
       ? state.currentTaskId
       : null,
+    collectionFolders: mergeCollectionFolders(
+      Array.isArray(state.collectionFolders) ? state.collectionFolders : [],
+      tasks.map(task => task.collection?.folder || DEFAULT_COLLECTION_FOLDER),
+    ),
     collectionSync: {},
   }
 }
@@ -235,6 +250,7 @@ export const useTaskStore = create<TaskStore>()(
     (setState, getState) => ({
       tasks: [],
       currentTaskId: null,
+      collectionFolders: [DEFAULT_COLLECTION_FOLDER],
       collectionSync: {},
 
       addPendingTask: (taskId, paperInput) => setState(state => ({
@@ -263,6 +279,10 @@ export const useTaskStore = create<TaskStore>()(
         return {
           tasks: [next, ...state.tasks.filter(task => task.id !== snapshot.id)],
           currentTaskId: snapshot.id,
+          collectionFolders: mergeCollectionFolders(
+            state.collectionFolders,
+            [next.collection.folder],
+          ),
         }
       }),
 
@@ -276,8 +296,66 @@ export const useTaskStore = create<TaskStore>()(
           const currentTaskId = state.currentTaskId && tasks.some(task => task.id === state.currentTaskId)
             ? state.currentTaskId
             : null
-          return { tasks, currentTaskId }
+          return {
+            tasks,
+            currentTaskId,
+            collectionFolders: mergeCollectionFolders(
+              state.collectionFolders,
+              tasks.map(task => task.collection.folder),
+            ),
+          }
         })
+      },
+
+      createCollectionFolder: folder => {
+        const normalized = normalizeCollectionFolder(folder)
+        const validationError = validateCollectionFolder(normalized)
+        if (validationError) throw new Error(validationError)
+        const knownFolders = mergeCollectionFolders(
+          getState().collectionFolders,
+          getState().tasks.map(task => task.collection.folder),
+        )
+        if (knownFolders.some(item => collectionFolderKey(item) === collectionFolderKey(normalized))) {
+          throw new Error('收藏夹名称已存在')
+        }
+        setState({ collectionFolders: mergeCollectionFolders([...knownFolders, normalized]) })
+        return normalized
+      },
+
+      deleteCollectionFolder: async folder => {
+        const normalized = normalizeCollectionFolder(folder)
+        const validationError = validateCollectionFolder(normalized)
+        if (validationError) throw new Error(validationError)
+        if (collectionFolderKey(normalized) === collectionFolderKey(DEFAULT_COLLECTION_FOLDER)) {
+          throw new Error('默认收藏夹不能删除')
+        }
+
+        try {
+          await delete_collection_folder(normalized)
+          const affectedTaskIds = new Set(
+            getState().tasks
+              .filter(task => collectionFolderKey(task.collection.folder) === collectionFolderKey(normalized))
+              .map(task => task.id),
+          )
+          setState(state => ({
+            tasks: state.tasks.map(task => affectedTaskIds.has(task.id)
+              ? { ...task, collection: { ...task.collection, folder: DEFAULT_COLLECTION_FOLDER } }
+              : task),
+            collectionFolders: state.collectionFolders.filter(
+              item => collectionFolderKey(item) !== collectionFolderKey(normalized),
+            ),
+            collectionSync: Object.fromEntries(
+              Object.entries(state.collectionSync).filter(([taskId]) => !affectedTaskIds.has(taskId)),
+            ),
+          }))
+          toast.success(affectedTaskIds.size
+            ? `收藏夹已删除，${affectedTaskIds.size} 篇论文已移回默认收藏夹`
+            : '收藏夹已删除')
+        }
+        catch (error) {
+          toast.error('收藏夹删除失败，未更改本地分类')
+          throw error
+        }
       },
 
       updateTaskCollection: (id, collection) => {
@@ -297,23 +375,41 @@ export const useTaskStore = create<TaskStore>()(
         }, 800))
       },
 
-      saveTaskCollection: async id => {
+      saveTaskCollection: async (id, collection) => {
         const timer = collectionSyncTimers.get(id)
         if (timer) clearTimeout(timer)
         collectionSyncTimers.delete(id)
         const task = getState().tasks.find(item => item.id === id)
         if (!task) throw new Error('论文不存在')
+        const normalizedFolder = normalizeCollectionFolder(collection?.folder ?? task.collection.folder)
+        const validationError = validateCollectionFolder(normalizedFolder)
+        if (validationError) {
+          setState(state => ({
+            collectionSync: { ...state.collectionSync, [id]: { status: 'error', message: validationError } },
+          }))
+          throw new Error(validationError)
+        }
+        const nextCollection: CollectionMeta = {
+          ...(collection || task.collection),
+          folder: normalizedFolder,
+          tags: Array.from(new Set((collection?.tags ?? task.collection.tags).map(tag => tag.trim()).filter(Boolean))),
+          note: collection?.note ?? task.collection.note,
+        }
         setState(state => ({
           collectionSync: { ...state.collectionSync, [id]: { status: 'saving', message: '正在保存收藏信息' } },
         }))
         try {
           await update_task_collection({
             task_id: id,
-            collection_folder: task.collection.folder,
-            collection_tags: task.collection.tags,
-            collection_note: task.collection.note,
+            collection_folder: nextCollection.folder,
+            collection_tags: nextCollection.tags,
+            collection_note: nextCollection.note,
           })
           setState(state => ({
+            tasks: state.tasks.map(item => item.id === id
+              ? { ...item, collection: nextCollection }
+              : item),
+            collectionFolders: mergeCollectionFolders(state.collectionFolders, [nextCollection.folder]),
             collectionSync: {
               ...state.collectionSync,
               [id]: { status: 'saved', message: '收藏信息已保存', savedAt: new Date().toISOString() },
@@ -366,11 +462,12 @@ export const useTaskStore = create<TaskStore>()(
     }),
     {
       name: 'fastread-paper-task-storage',
-      version: 3,
+      version: 4,
       migrate: migratePaperTaskState,
       partialize: state => ({
         tasks: state.tasks,
         currentTaskId: state.currentTaskId,
+        collectionFolders: state.collectionFolders,
       }) as TaskStore,
       storage: createJSONStorage(() => ({
         getItem: async name => (await get(name)) ?? null,

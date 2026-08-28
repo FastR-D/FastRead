@@ -34,4 +34,19 @@ describe('paper-only persisted task migration', () => {
     expect(migrated.tasks).toEqual([])
     expect(migrated.currentTaskId).toBeNull()
   })
+
+  it('keeps registered empty folders and discovers folders from migrated papers', () => {
+    const migrated = migratePaperTaskState({
+      tasks: [
+        {
+          id: 'paper-1',
+          kind: 'paper',
+          collection: { folder: '组会必读', tags: [], note: '' },
+        },
+      ],
+      collectionFolders: ['空收藏夹'],
+    })
+
+    expect(migrated.collectionFolders).toEqual(['默认收藏夹', '空收藏夹', '组会必读'])
+  })
 })
