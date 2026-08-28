@@ -276,21 +276,21 @@ def test_topic_evidence_classifier_selects_ids_and_preserves_old_evidence_on_inv
                 selections = []
                 for candidate in context["candidates"]:
                     quote = candidate["verbatim_evidence"]
-                    role = None
+                    roles = None
                     if "asks whether" in quote:
-                        role = "question"
+                        roles = ["question"]
                     elif "propose a pairwise" in quote:
-                        role = "method"
+                        roles = ["question", "method"]
                     elif "evaluate twelve models" in quote:
-                        role = "experiment"
+                        roles = ["experiment"]
                     elif "limitation is" in quote:
-                        role = "limitation"
+                        roles = ["limitation"]
                     elif "final analysis" in quote:
-                        role = "other"
-                    if role:
+                        roles = ["other"]
+                    if roles:
                         selections.append({
                             "candidate_id": candidate["candidate_id"],
-                            "roles": [role],
+                            "roles": roles,
                             "confidence": 0.8,
                             "reason": "verbatim role evidence",
                         })
@@ -313,8 +313,8 @@ def test_topic_evidence_classifier_selects_ids_and_preserves_old_evidence_on_inv
     })
     run = result["runs"][0]
     assert run["status"] == "completed"
-    assert run["prompt_version"] == "topic-evidence-id-selection-v2"
-    assert run["strategy_version"] == "page-balanced-verbatim-candidates-v4"
+    assert run["prompt_version"] == "topic-evidence-id-selection-v4"
+    assert run["strategy_version"] == "core-first-clean-candidates-v7"
     assert run["fallback_used"] is False
     assert run["selected_by_role"] == {
         "question": 1,
@@ -327,6 +327,15 @@ def test_topic_evidence_classifier_selects_ids_and_preserves_old_evidence_on_inv
     assert all(len(matrix[role]) == 1 for role in ("question", "method", "experiment", "limitation", "other"))
     assert all(item["source_kind"] == "model_classified" for items in matrix.values() for item in items)
     assert all(item["exact_quote"] in text for items in matrix.values() for item in items)
+    assert run["ambiguous_role_resolutions"] == [{
+        "candidate_id": next(
+            item["candidate_id"]
+            for item in json.loads(calls[0]["messages"][1]["content"])["candidates"]
+            if "propose a pairwise" in item["verbatim_evidence"]
+        ),
+        "offered_roles": ["question", "method"],
+        "selected_role": "method",
+    }]
     classifier_context = json.loads(calls[0]["messages"][1]["content"])
     assert classifier_context["limits"]["max_candidates"] == 80
     assert all("candidate_id" in item and "page" in item for item in classifier_context["candidates"])
@@ -383,6 +392,15 @@ def test_topic_evidence_candidates_remove_pdf_chrome_and_numeric_figure_noise(tm
                     "dispositional tendencies that persist across prompts."
                 ),
             },
+            {
+                "page": 4,
+                "text": (
+                    "We report accuracy at a fixed resolution, i.e. the score is measured from zero to one. "
+                    "(MDAD of 20) by having a lower score, but this means it cannot distinguish similar models. "
+                    "This suggests that the reported ranking should be treated as robust evidence. "
+                    "We report accuracy at a resolution of 0.5 points, i.e."
+                ),
+            },
         ],
     }
 
@@ -392,6 +410,7 @@ def test_topic_evidence_candidates_remove_pdf_chrome_and_numeric_figure_noise(tm
         "We introduce a reliability measure that identifies the minimum performance gap "
         "needed for a micro-benchmark to preserve pairwise model rankings.",
         "We hypothesize that language models have measurable dispositional tendencies that persist across prompts.",
+        "We report accuracy at a fixed resolution, i.e. the score is measured from zero to one.",
     }
     assert all("Published as a conference paper" not in item["verbatim_evidence"] for item in candidates)
 
@@ -428,6 +447,23 @@ def test_report_derived_matrix_is_atomically_rebuilt_with_clean_quotes(tmp_path)
     ]
     assert [item["exact_quote"] for item in evidence] == [
         "We propose a calibrated reliability measure for pairwise model rankings."
+    ]
+    assert evidence[0]["role"] == "other"
+
+    dao.replace_model_classified_evidence(topic["id"], TASK_A, [{
+        "topic_id": topic["id"],
+        "task_id": TASK_A,
+        "page": 1,
+        "exact_quote": "We propose a calibrated reliability measure for pairwise model rankings.",
+        "user_note": "",
+        "role": "method",
+        "source_kind": "model_classified",
+        "source_ref": "model:test:C1:method",
+    }])
+    hub.refresh_topic_evidence(topic["id"])
+    assert not [
+        item for item in hub.get_topic(topic["id"])["evidence_items"]
+        if item["source_kind"] == "report"
     ]
 
     artifacts.update_result(TASK_A, lambda result: {

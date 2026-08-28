@@ -80,7 +80,7 @@ const roleLabels: Record<string, string> = {
 const evidenceSourceLabels: Record<string, string> = {
   manual: '手工证据',
   annotation: '阅读批注',
-  report: '阅读报告',
+  report: '阅读报告（待分类）',
   model_classified: '模型选证（逐字复核）',
 }
 
@@ -467,7 +467,7 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
               <div className="flex flex-wrap items-end justify-between gap-2">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-900">证据矩阵</h3>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">程序提供长上下文逐字候选，模型只选择编号并分类；页码、原文和论文成员关系仍由服务端复核。空缺会保留，不由模型补写。</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">程序提供长上下文逐字候选，模型只为每条候选选择一个主要角色；页码、原文、去重和论文成员关系由服务端复核。报告证据在智能选证前只作未分类补充；空缺会保留，不由模型补写。</p>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
                   <span className="rounded bg-white px-2 py-1 text-[10px] text-slate-500">{topic.evidence_items?.length || 0} 条已校验证据</span>

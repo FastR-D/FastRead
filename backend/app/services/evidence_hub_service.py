@@ -17,34 +17,35 @@ from app.services.llm_compat import create_chat_completion
 
 EVIDENCE_ROLE_ORDER = ("question", "method", "experiment", "limitation", "other")
 EVIDENCE_ROLES = set(EVIDENCE_ROLE_ORDER)
-EVIDENCE_CLASSIFICATION_PROMPT_VERSION = "topic-evidence-id-selection-v2"
-EVIDENCE_CANDIDATE_STRATEGY_VERSION = "page-balanced-verbatim-candidates-v4"
+EVIDENCE_CLASSIFICATION_PROMPT_VERSION = "topic-evidence-id-selection-v4"
+EVIDENCE_CANDIDATE_STRATEGY_VERSION = "core-first-clean-candidates-v7"
 
 TOPIC_EVIDENCE_CLASSIFICATION_PROMPT = """你是 FastRead 的轻量证据分类器。程序已经从一篇论文的分页原文中生成了固定候选 C1、C2……。
 
-你只负责选择候选编号并分类，不负责写引文、改写引文或推断页码。一个候选可以属于多个角色，但只有确实同时承担多种研究职责时才多选。
+你只负责选择候选编号并分类，不负责写引文、改写引文或推断页码。每个候选只能选择一个最主要的研究角色。
 
 角色定义：
 - question：论文明确提出或回答的研究问题、假设、评价目标。
 - method：算法、框架、数据采集、建模或分析步骤。
-- experiment：数据集、基准、对照、指标、消融、人类研究、实验设置或结果。
+- experiment：数据集、基准、对照、指标、消融、人类研究、实验设置或结果。优先主结果、比较结论和效应量；样本数、模型数、设备等设置只有在缺少主结果时才选。
 - limitation：论文明确承认的约束、偏差、失败情形、外推边界或尚未解决的问题。
 - other：对理解论文重要、但不适合以上四类的背景或结论证据。
 
 约束：
 1. 只能使用输入中的 candidate_id；不要输出逐字引文、页码、论文 ID 或新编号。
-2. 每个角色最多选择 4 条，宁可少选，不要为了填满栏目而牵强归类。
+2. 每个候选最多归入一个最主要的角色；每个角色最多选择 4 条，宁可少选，不要为了填满栏目而牵强归类。
 3. 允许跳过候选，并在 unresolved_roles 中列出当前候选不足以支持的角色。
 4. report_outline 只是检索提示，可能不准确，不能把它当证据；唯一可选证据是 candidates。
 5. reason 只解释为什么分类，保持一句短语；最终不会作为论文主张展示。
 6. 只选能独立读懂的完整学术陈述。不要选择论文标题、章节标题、页眉页脚、参考文献、公式残片、表格表头、纯图表数字串或断裂 OCR。
 7. question 必须明确陈述研究目标、研究问题或可检验假设；仅仅是标题、宽泛背景或“本文很重要”不属于 question。
 8. other 也必须有实质学术含义，例如关键结论、适用意义或必要背景；不要把无法分类的垃圾片段塞进 other。
+9. origin 为 core_front/core_section 的候选来自摘要、前两页、结果或结论，应优先检查；main_text 次之，appendix 只在它提供独有关键证据时选择。
 
 只输出以下 JSON，不要代码围栏：
 {
   "selections": [
-    {"candidate_id": "C1", "roles": ["experiment"], "confidence": 0.85, "reason": "包含评测指标与结果"}
+    {"candidate_id": "C1", "role": "experiment", "confidence": 0.85, "reason": "包含评测指标与结果"}
   ],
   "unresolved_roles": ["limitation"]
 }"""
@@ -181,13 +182,27 @@ def _canonical_quote(text: str, query: str, max_words: int = 18) -> str:
 def _sentence_candidates(text: str, max_chars: int = 650) -> list[str]:
     """Return exact sentence-like spans; model selection never rewrites quotes."""
     source = str(text or "")
+    protected = source
+    for pattern in (
+        r"\b(?:i\.e|e\.g)\.",
+        r"\bet\s+al\.",
+        r"\b(?:Fig|Eq|Sec|Dr|vs)\.",
+    ):
+        protected = re.sub(
+            pattern,
+            lambda match: match.group(0).replace(".", "\ue000"),
+            protected,
+            flags=re.IGNORECASE,
+        )
     candidates = []
-    for raw in re.split(r"(?<=[.!?。！？])\s+|[\r\n]+", source):
-        span = raw.strip()
+    for raw in re.split(r"(?<=[.!?。！？])\s+|[\r\n]+", protected):
+        span = raw.replace("\ue000", ".").strip()
         if len(span) < 40:
             continue
         if len(span) > max_chars:
-            span = span[:max_chars].rstrip()
+            # Mid-sentence truncation creates authoritative-looking quote fragments.
+            # A long sentence is safer to omit than to persist as verbatim evidence.
+            continue
         if span and span in source and span not in candidates:
             candidates.append(span)
     if not candidates:
@@ -205,7 +220,7 @@ _PDF_BOILERPLATE_PREFIXES = (
 _PDF_SECTION_PREFIX = re.compile(
     r"^(?:\d+(?:\.\d+)*|[A-Z])\s+"
     r"[A-Z][A-Z0-9][A-Z0-9 :/&()\-–—]{5,}?\s+"
-    r"(?=(?:We|Our|For|To|In|This|The|So|Throughout|Figure|Table)\b)"
+    r"(?=(?:We|Our|For|To|In|This|The|So|After|Given|Let|Here|Once|Although|Because|Importantly|Throughout|Figure|Table)\b)"
 )
 
 
@@ -222,6 +237,24 @@ def _is_readable_academic_candidate(value: str) -> bool:
     """Reject deterministic PDF noise before asking a weak model to classify IDs."""
     text = str(value or "").strip()
     if len(text) < 40:
+        return False
+    if not re.search(r"[.!?。！？](?:[\"'”’\)\]])*$", text):
+        return False
+    if re.search(r"\b(?:i\.e|e\.g)\.$", text, re.IGNORECASE):
+        return False
+    if re.match(r"^[\(\[][^\)\]]{1,80}[\)\]]\s+[a-z]", text):
+        return False
+    if re.match(
+        r"^(?:This|These|Those|It|They)\s+(?:strongly\s+)?"
+        r"(?:suggests?|indicates?|supports?|shows?|demonstrates?|is|are|was|were)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return False
+    if re.match(r"^This\s+(?:finding|result|observation|analysis|approach)\b", text, re.IGNORECASE):
+        return False
+    first_word = re.search(r"[A-Za-z]+", re.sub(r"^[\"'“”‘’]+", "", text))
+    if first_word and first_word.group(0)[0].islower():
         return False
     lexical = re.findall(r"[A-Za-z]+(?:[-'’][A-Za-z]+)*|[\u4e00-\u9fff]", text)
     if len(lexical) < 8:
@@ -256,6 +289,42 @@ def _is_readable_academic_candidate(value: str) -> bool:
     if text.count(",") >= 2 and len(capitalized_words) >= 4 and not has_clause_verb:
         return False
     return True
+
+
+_ROLE_SIGNAL_PATTERNS = {
+    "question": (
+        r"\b(?:research question|our (?:goal|aim|objective)|we (?:ask|investigate|study|hypothesi[sz]e)|asks? whether|whether)\b",
+    ),
+    "method": (
+        r"\b(?:we (?:propose|introduce|define|construct|compute|assign|fit|model|sample)|method|algorithm|estimator|measure|matrix|distribution|likelihood)\b",
+    ),
+    "experiment": (
+        r"\b(?:we (?:evaluate|find|observe|report|show)|results?|experiment|dataset|benchmark|variance|correlation|coefficient|accuracy|outperform)\b",
+        r"\b\d+(?:\.\d+)?%\b",
+    ),
+    "limitation": (
+        r"\b(?:limitation|inefficient|cannot|could not|do not|does not|only|exception|fail(?:s|ed)?|vulnerab|may not|might not|subvert|insufficient)\b",
+    ),
+    "other": (),
+}
+
+
+def _primary_evidence_role(text: str, roles: list[str]) -> str:
+    """Resolve weak-model multi-label output to one academically primary role."""
+    unique_roles = list(dict.fromkeys(roles))
+    if len(unique_roles) == 1:
+        return unique_roles[0]
+    priority = {role: len(EVIDENCE_ROLE_ORDER) - index for index, role in enumerate(EVIDENCE_ROLE_ORDER)}
+
+    def rank(role: str) -> tuple[int, int]:
+        score = sum(
+            1
+            for pattern in _ROLE_SIGNAL_PATTERNS.get(role, ())
+            if re.search(pattern, text, re.IGNORECASE)
+        )
+        return score, priority.get(role, 0)
+
+    return max(unique_roles, key=rank)
 
 
 class EvidenceHubService:
@@ -534,33 +603,78 @@ class EvidenceHubService:
                         f"report:{section}",
                     )
 
-        page_queues: list[list[tuple[int, str]]] = []
-        pages = [page for page in (paper.get("pages") or []) if int(page.get("page") or 0) > 0]
-        per_page_target = max(3, min(10, (limit + max(len(pages), 1) - 1) // max(len(pages), 1)))
-        for page in pages:
-            page_number = int(page.get("page") or 0)
-            spans = _sentence_candidates(str(page.get("text") or ""), max_chars=520)
-            if not spans:
+        pages = sorted(
+            [page for page in (paper.get("pages") or []) if int(page.get("page") or 0) > 0],
+            key=lambda page: int(page.get("page") or 0),
+        )
+        spans_by_page = {
+            int(page.get("page") or 0): _sentence_candidates(str(page.get("text") or ""), max_chars=520)
+            for page in pages
+        }
+        main_end = len(pages)
+        for index, page in enumerate(pages):
+            if index < 2:
                 continue
-            take = min(per_page_target, len(spans))
-            if take == 1:
-                indices = [0]
-            else:
-                indices = sorted({round(index * (len(spans) - 1) / (take - 1)) for index in range(take)})
-            page_queues.append([(page_number, spans[index]) for index in indices])
+            page_text = str(page.get("text") or "")[:3000]
+            if re.search(r"\b(?:ACKNOWLEDGMENTS?|REFERENCES?|BIBLIOGRAPHY|APPENDIX)\b", page_text):
+                main_end = index
+                break
+        main_pages = pages[:main_end] or pages[: min(2, len(pages))]
+        appendix_pages = pages[main_end:]
 
-        # Round-robin across pages prevents a long introduction from consuming the context window.
-        while page_queues and len(candidates) < limit:
-            remaining = []
-            for queue in page_queues:
-                if queue:
-                    page_number, quote = queue.pop(0)
-                    add(page_number, quote, "page_balanced")
-                if queue:
-                    remaining.append(queue)
-                if len(candidates) >= limit:
-                    break
-            page_queues = remaining
+        core_page_numbers = {
+            int(page.get("page") or 0)
+            for page in main_pages[:2]
+        }
+        for page in main_pages:
+            page_number = int(page.get("page") or 0)
+            page_text = str(page.get("text") or "")[:3000]
+            if re.search(
+                r"(?:^|\n|\s\d+(?:\.\d+)?\s+)"
+                r"(?:RESULTS?|DISCUSSION(?:\s+AND\s+CONCLUSION)?|CONCLUSION(?:S|,\s+LIMITATIONS)?|LIMITATIONS?)\b",
+                page_text,
+            ):
+                core_page_numbers.add(page_number)
+
+        # Abstract/front matter and explicit results/conclusion pages carry the
+        # claims a human reader would normally extract first.
+        for page_number in sorted(core_page_numbers):
+            for span in spans_by_page.get(page_number, [])[:16]:
+                add(page_number, span, "core_front" if page_number <= 2 else "core_section")
+
+        def balanced_queues(selected_pages: list[dict], per_page_target: int) -> list[list[tuple[int, str]]]:
+            queues = []
+            for page in selected_pages:
+                page_number = int(page.get("page") or 0)
+                spans = spans_by_page.get(page_number, [])
+                take = min(per_page_target, len(spans))
+                if not take:
+                    continue
+                indices = (
+                    [0]
+                    if take == 1
+                    else sorted({round(index * (len(spans) - 1) / (take - 1)) for index in range(take)})
+                )
+                queues.append([(page_number, spans[index]) for index in indices])
+            return queues
+
+        def drain(queues: list[list[tuple[int, str]]], origin: str) -> None:
+            while queues and len(candidates) < limit:
+                remaining = []
+                for queue in queues:
+                    if queue:
+                        page_number, quote = queue.pop(0)
+                        add(page_number, quote, origin)
+                    if queue:
+                        remaining.append(queue)
+                    if len(candidates) >= limit:
+                        break
+                queues = remaining
+
+        # Give the scientific main text substantially more coverage than appendices,
+        # while preserving page diversity inside each tier.
+        drain(balanced_queues(main_pages, 8), "main_text")
+        drain(balanced_queues(appendix_pages, 2), "appendix")
         return candidates
 
     def _classify_paper_evidence(
@@ -613,7 +727,7 @@ class EvidenceHubService:
 
         role_counts = {role: 0 for role in EVIDENCE_ROLE_ORDER}
         normalized = []
-        selected_pairs = set()
+        proposed_by_candidate: dict[str, dict] = {}
         rejected_excess = []
         for selection in proposal["selections"]:
             if not isinstance(selection, dict):
@@ -621,9 +735,10 @@ class EvidenceHubService:
             candidate_id = str(selection.get("candidate_id") or "")
             if candidate_id not in candidate_map:
                 raise ValueError(f"证据分类模型使用了无效候选编号: {candidate_id or '<empty>'}")
-            roles = selection.get("roles")
+            primary_role = selection.get("role")
+            roles = [primary_role] if primary_role else selection.get("roles")
             if not isinstance(roles, list) or not roles:
-                raise ValueError(f"候选 {candidate_id} 缺少 roles")
+                raise ValueError(f"候选 {candidate_id} 缺少 role")
             invalid_roles = [str(role) for role in roles if str(role) not in EVIDENCE_ROLES]
             if invalid_roles:
                 raise ValueError(f"候选 {candidate_id} 使用了未知角色: {', '.join(invalid_roles)}")
@@ -634,24 +749,40 @@ class EvidenceHubService:
             if not 0 <= confidence <= 1:
                 raise ValueError(f"候选 {candidate_id} 的 confidence 必须在 0 到 1 之间")
             reason = str(selection.get("reason") or "").strip()[:500]
+            bucket = proposed_by_candidate.setdefault(candidate_id, {
+                "roles": [],
+                "confidence_by_role": {},
+                "reason_by_role": {},
+            })
             for role_value in dict.fromkeys(str(role) for role in roles):
-                pair = (candidate_id, role_value)
-                if pair in selected_pairs:
-                    continue
-                if role_counts[role_value] >= 4:
-                    rejected_excess.append({"candidate_id": candidate_id, "role": role_value})
-                    continue
-                selected_pairs.add(pair)
-                role_counts[role_value] += 1
-                candidate = candidate_map[candidate_id]
-                normalized.append({
+                bucket["roles"].append(role_value)
+                if confidence >= bucket["confidence_by_role"].get(role_value, -1):
+                    bucket["confidence_by_role"][role_value] = confidence
+                    bucket["reason_by_role"][role_value] = reason
+
+        ambiguous_role_resolutions = []
+        for candidate_id, bucket in proposed_by_candidate.items():
+            candidate = candidate_map[candidate_id]
+            role_options = list(dict.fromkeys(bucket["roles"]))
+            role_value = _primary_evidence_role(str(candidate["verbatim_evidence"]), role_options)
+            if len(role_options) > 1:
+                ambiguous_role_resolutions.append({
                     "candidate_id": candidate_id,
-                    "role": role_value,
-                    "confidence": confidence,
-                    "reason": reason,
-                    "page": int(candidate["page"]),
-                    "exact_quote": str(candidate["verbatim_evidence"]),
+                    "offered_roles": role_options,
+                    "selected_role": role_value,
                 })
+            if role_counts[role_value] >= 4:
+                rejected_excess.append({"candidate_id": candidate_id, "role": role_value})
+                continue
+            role_counts[role_value] += 1
+            normalized.append({
+                "candidate_id": candidate_id,
+                "role": role_value,
+                "confidence": bucket["confidence_by_role"][role_value],
+                "reason": bucket["reason_by_role"][role_value],
+                "page": int(candidate["page"]),
+                "exact_quote": str(candidate["verbatim_evidence"]),
+            })
 
         unresolved = [
             str(role) for role in proposal.get("unresolved_roles") or []
@@ -690,6 +821,7 @@ class EvidenceHubService:
             "selected_by_role": role_counts,
             "unresolved_roles": list(dict.fromkeys(unresolved)),
             "rejected_excess": rejected_excess,
+            "ambiguous_role_resolutions": ambiguous_role_resolutions,
             "fallback_used": False,
             "fallback_reason": "",
             "generated_at": generated_at,
@@ -769,6 +901,7 @@ class EvidenceHubService:
                 }
                 atomic_write_json(self._evidence_extraction_path(topic_id, task_id), run)
             runs.append(run)
+        self.refresh_topic_evidence(topic_id)
         return {"topic": self.get_topic(topic_id), "runs": runs}
 
     def delete_topic(self, topic_id: str) -> None:
@@ -1015,18 +1148,28 @@ class EvidenceHubService:
                     "source_ref": ref,
                 })
                 existing_refs.add(ref)
+            task_evidence = [
+                item for item in self.dao.get_topic(topic_id)["evidence_items"]
+                if item["task_id"] == task_id
+            ]
+            if any(item.get("source_kind") == "model_classified" for item in task_evidence):
+                # Once the dedicated classifier has run, report-derived records are
+                # redundant and their outline sections are not trustworthy role labels.
+                self.dao.replace_report_evidence(topic_id, task_id, [])
+                continue
             report = ((result.get("insights") or {}).get("reading_report") or {})
             evidence_groups = []
             for index, question in enumerate(report.get("key_questions") or []):
-                evidence_groups.append(("question", f"question:{index}", question.get("evidence") or []))
+                evidence_groups.append((f"question:{index}", question.get("evidence") or []))
             for index, contribution in enumerate(report.get("contributions") or []):
                 raw = contribution.get("evidence") or []
-                evidence_groups.append(("method", f"contribution:{index}", raw if isinstance(raw, list) else []))
+                evidence_groups.append((f"contribution:{index}", raw if isinstance(raw, list) else []))
             for index, process in enumerate(report.get("process") or []):
                 raw = process.get("evidence") or []
-                evidence_groups.append(("experiment", f"process:{index}", raw if isinstance(raw, list) else []))
+                evidence_groups.append((f"process:{index}", raw if isinstance(raw, list) else []))
             report_payloads = []
-            for role, prefix, evidences in evidence_groups:
+            seen_report_quotes = set()
+            for prefix, evidences in evidence_groups:
                 for index, evidence in enumerate(evidences):
                     page_number = int(evidence.get("page_start") or evidence.get("page") or 0)
                     quote = _clean_classification_candidate(str(evidence.get("exact_quote") or ""))
@@ -1038,13 +1181,19 @@ class EvidenceHubService:
                     except ValueError:
                         continue
                     canonical_quote = str(self._page(paper, page_number).get("text") or "")[start:end]
+                    quote_key = (page_number, canonical_quote)
+                    if quote_key in seen_report_quotes:
+                        continue
+                    seen_report_quotes.add(quote_key)
                     report_payloads.append({
                         "topic_id": topic_id,
                         "task_id": task_id,
                         "page": page_number,
                         "exact_quote": canonical_quote,
                         "user_note": "",
-                        "role": role,
+                        # Report sections provide retrieval hints, not reliable semantic
+                        # roles. Keep them visibly unclassified until model extraction.
+                        "role": "other",
                         "source_kind": "report",
                         "source_ref": ref,
                     })
