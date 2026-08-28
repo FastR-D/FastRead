@@ -10,8 +10,7 @@ from app.db.provider_dao import (
     update_provider,
     delete_provider, get_enabled_providers,
 )
-from app.gpt.gpt_factory import GPTFactory
-from app.models.model_config import ModelConfig
+from app.services.secret_store import unprotect_secret
 
 
 class ProviderService:
@@ -91,21 +90,25 @@ class ProviderService:
             "name": p.name,
             "logo": p.logo,
             "type": p.type,
-            "api_key": p.api_key,
+            "api_key": unprotect_secret(p.api_key),
             "base_url": p.base_url,
             "enabled": p.enabled,
             "created_at": p.created_at,
         }
     @staticmethod
     def get_all_providers():
-        rows = get_all_providers()
+        from app.services.search_connection_config import is_system_search_provider
+
+        rows = [row for row in get_all_providers() if not is_system_search_provider(row)]
         if rows is None:
             return []
 
         return [ProviderService.serialize_provider(row) for row in rows] if rows else []
     @staticmethod
     def get_all_providers_safe():
-        rows = get_all_providers()
+        from app.services.search_connection_config import is_system_search_provider
+
+        rows = [row for row in get_all_providers() if not is_system_search_provider(row)]
 
         return [ProviderService.serialize_provider_safe(row) for row in rows] if (rows) else []
     @staticmethod

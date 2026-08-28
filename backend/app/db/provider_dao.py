@@ -4,6 +4,7 @@ import sys
 from app.db.models.providers import Provider
 from app.utils.logger import get_logger
 from app.db.engine import get_engine, Base, get_db
+from app.services.secret_store import protect_secret
 
 logger = get_logger(__name__)
 
@@ -49,10 +50,40 @@ def seed_default_providers():
         db.close()
 
 
+def migrate_provider_secrets() -> int:
+    """Protect legacy plaintext provider keys in place without logging values."""
+    db = next(get_db())
+    migrated = 0
+    try:
+        for provider in db.query(Provider).all():
+            protected = protect_secret(provider.api_key)
+            if protected != provider.api_key:
+                provider.api_key = protected
+                migrated += 1
+        if migrated:
+            db.commit()
+            logger.info(f"Migrated {migrated} legacy provider secret(s) to protected local storage.")
+        return migrated
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to protect legacy provider secrets")
+        raise
+    finally:
+        db.close()
+
+
 def insert_provider(id: str, name: str, api_key: str, base_url: str, logo: str, type_: str, enabled: int = 1):
     db = next(get_db())
     try:
-        provider = Provider(id=id, name=name, api_key=api_key, base_url=base_url, logo=logo, type=type_, enabled=enabled)
+        provider = Provider(
+            id=id,
+            name=name,
+            api_key=protect_secret(api_key),
+            base_url=base_url,
+            logo=logo,
+            type=type_,
+            enabled=enabled,
+        )
         db.add(provider)
         db.commit()
         logger.info(f"Provider inserted successfully. id: {id}, name: {name}, type: {type_}")
@@ -66,7 +97,14 @@ def insert_provider(id: str, name: str, api_key: str, base_url: str, logo: str, 
 def get_enabled_providers():
     db = next(get_db())
     try:
-        return db.query(Provider).filter_by(enabled=1).all()
+        # Reserved search-connection rows reuse protected provider storage but
+        # are not LLM providers and must never be offered to ModelService.
+        return (
+            db.query(Provider)
+            .filter_by(enabled=1)
+            .filter(Provider.type != "system-search-connection")
+            .all()
+        )
     finally:
         db.close()
 
@@ -103,6 +141,8 @@ def update_provider(id: str, **kwargs):
             logger.warning(f"Provider {id} not found for update.")
             return
 
+        if "api_key" in kwargs:
+            kwargs["api_key"] = protect_secret(kwargs["api_key"])
         for key, value in kwargs.items():
             if hasattr(provider, key):
                 setattr(provider, key, value)

@@ -1,7 +1,7 @@
 <!--
 PR 标题请遵循 type(scope): subject 格式，例如：
-  feat(extension): 侧边栏接入思维导图
-  fix(bilibili): 修正字幕优先链路在未登录态下的回退
+  feat(related-work): 增加近邻论文来源展示
+  fix(reader): 修正分页原文定位
 分支命名 / 提交规范见 CONTRIBUTING.md。
 -->
 
@@ -19,7 +19,7 @@ PR 标题请遵循 type(scope): subject 格式，例如：
 
 ## 测试方式
 
-- [ ] `pnpm typecheck && pnpm build`（前端 / 插件）通过
+- [ ] `pnpm typecheck && pnpm build`（前端）通过
 - [ ] `python -m py_compile <文件>` 或本地 backend 启动验证（后端）通过
 - [ ] 手动验证步骤：
   <!-- 描述如何复现验证；UI 改动请附截图 / 录屏 -->

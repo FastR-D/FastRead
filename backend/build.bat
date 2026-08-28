@@ -1,63 +1,66 @@
 @echo off
-setlocal enabledelayedexpansion
+setlocal
 
-REM 切换到脚本所在目录的上级，也就是项目根目录
 cd /d %~dp0..
-echo 当前工作目录：%cd%
+set "STAGING_DIR=backend\.build-staging"
+set "BUNDLE_DIR=fastread-frontend\src-tauri\bin\FastReadBackend"
+set "PYTHON_EXE=python"
+if defined FASTREAD_BUILD_PYTHON set "PYTHON_EXE=%FASTREAD_BUILD_PYTHON%"
 
-REM 清理旧的构建
-echo 清理旧的构建...
-if exist backend\dist rmdir /s /q backend\dist
-if exist backend\build rmdir /s /q backend\build
-if exist fastread-frontend\src-tauri\bin rmdir /s /q fastread-frontend\src-tauri\bin
-echo 清理完成。
-
-REM 重新创建 Tauri 需要的目录结构
-mkdir fastread-frontend\src-tauri\bin
-
-REM 获取 Rust 的 target triple（适配 Tauri 对应平台）
-for /f "tokens=2 delims=:" %%A in ('rustc -Vv ^| findstr "host"') do (
-    set "TARGET_TRIPLE=%%A"
+"%PYTHON_EXE%" -c "import PyInstaller" >nul 2>&1
+if errorlevel 1 (
+  echo PyInstaller is unavailable in %PYTHON_EXE%. Install backend\requirements.txt first.
+  goto :fail
 )
-set "TARGET_TRIPLE=%TARGET_TRIPLE: =%"
+
+echo Cleaning generated build directories...
+if exist "backend\dist" rmdir /s /q "backend\dist"
+if exist "backend\build" rmdir /s /q "backend\build"
+if exist "fastread-frontend\src-tauri\bin" rmdir /s /q "fastread-frontend\src-tauri\bin"
+if exist "%STAGING_DIR%" rmdir /s /q "%STAGING_DIR%"
+mkdir "%STAGING_DIR%" || goto :fail
+mkdir "fastread-frontend\src-tauri\bin" || goto :fail
+
+if /I not "%PROCESSOR_ARCHITECTURE%"=="AMD64" (
+  echo Unsupported Windows architecture: %PROCESSOR_ARCHITECTURE%
+  goto :fail
+)
+set "TARGET_TRIPLE=x86_64-pc-windows-msvc"
 echo Detected target triple: %TARGET_TRIPLE%
 
-
-REM --- 核心修改部分开始 ---
-
-REM 步骤 1: 为了避免 PyInstaller 的解析歧义，我们先手动复制文件
-echo 为打包准备 .env 文件...
-copy .env.example backend\.env
-
-REM 步骤 2: 执行 PyInstaller 打包，直接添加已存在的 .env 文件
-echo 开始 PyInstaller 打包...
-pyinstaller ^
+echo Building the isolated backend bundle...
+"%PYTHON_EXE%" -m PyInstaller ^
   -y ^
   --name FastReadBackend ^
   --paths backend ^
   --distpath fastread-frontend\src-tauri\bin ^
   --workpath backend\build ^
-  --specpath backend ^
+  --specpath "%STAGING_DIR%" ^
   --hidden-import uvicorn ^
   --hidden-import fastapi ^
   --hidden-import starlette ^
-  --add-data "app\db\builtin_providers.json;." ^
-  --add-data ".env;." ^
+  --add-data "%cd%\backend\app\db\builtin_providers.json;." ^
   backend\main.py
+if errorlevel 1 goto :fail
 
-REM 步骤 3: 清理在项目根目录创建的临时 .env 文件
-echo 清理临时的 .env 文件...
-del backend\.env
+move /Y "%BUNDLE_DIR%\FastReadBackend.exe" "%BUNDLE_DIR%\FastReadBackend-%TARGET_TRIPLE%.exe" >nul
+if errorlevel 1 goto :fail
 
-REM --- 核心修改部分结束 ---
+echo Scanning staged and generated files for private-key or high-confidence token material...
+pwsh -NoProfile -Command "$roots = @('backend/.build-staging','backend/build','backend/dist','fastread-frontend/src-tauri/bin') | Where-Object { Test-Path -LiteralPath $_ }; $textNames = @('.env','.env.example'); $textExtensions = @('.cfg','.ini','.json','.map','.md','.pem','.py','.spec','.toml','.ts','.txt','.yaml','.yml'); $pattern = '-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|(?:sk|rk)-[A-Za-z0-9_-]{32,}|gh[pousr]_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{20,}'; $bad = foreach ($file in Get-ChildItem -LiteralPath $roots -Recurse -File -ErrorAction SilentlyContinue) { if ($textNames -notcontains $file.Name -and $textExtensions -notcontains $file.Extension.ToLowerInvariant()) { continue }; $text = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue; if ($null -ne $text -and $text -match $pattern) { $file.Name } }; if ($bad) { Write-Error ('Potential secret material in artifact file(s): ' + (($bad | Sort-Object -Unique) -join ', ')); exit 1 }"
+if errorlevel 1 goto :fail
 
+pwsh -NoProfile -Command "$bundle = 'fastread-frontend/src-tauri/bin/FastReadBackend'; if (Get-ChildItem -LiteralPath $bundle -Recurse -File -Filter '.env') { throw 'Packaged .env files are forbidden' }; if (-not (Get-ChildItem -LiteralPath $bundle -Recurse -File -Filter 'builtin_providers.json')) { throw 'builtin_providers.json is missing' }"
+if errorlevel 1 goto :fail
 
-REM 重命名生成的可执行文件为符合 Tauri 要求的名称
-move /Y fastread-frontend\src-tauri\bin\FastReadBackend\FastReadBackend.exe fastread-frontend\src-tauri\bin\FastReadBackend\FastReadBackend-%TARGET_TRIPLE%.exe
-
-echo PyInstaller 打包完成：
-dir fastread-frontend\src-tauri\bin\FastReadBackend
-
-echo 请检查 fastread-frontend\src-tauri\bin\FastReadBackend 目录，确认其中包含了名为 .env 的【文件】。
-
+echo PyInstaller bundle completed: %BUNDLE_DIR%
+if exist "%STAGING_DIR%" rmdir /s /q "%STAGING_DIR%"
 endlocal
+exit /b 0
+
+:fail
+set "BUILD_EXIT=%errorlevel%"
+if "%BUILD_EXIT%"=="0" set "BUILD_EXIT=1"
+if exist "%STAGING_DIR%" rmdir /s /q "%STAGING_DIR%"
+echo Backend bundle failed.
+endlocal & exit /b %BUILD_EXIT%

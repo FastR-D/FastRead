@@ -90,11 +90,10 @@ If port `3015` is already in use, change the frontend port in `.env`.
 
 If backend port `8483` is already in use, change `BACKEND_PORT` and keep frontend API settings aligned.
 
-If verification fails:
+If related-work discovery fails:
 
 - confirm the backend health checks pass;
 - confirm search provider settings are configured;
-- check backend logs for search/fetch/source-risk failures;
-- remember degraded search mode must not return `supported`.
-
-If the old Douyin note-generation compatibility flow fails, then check Douyin Cookie status separately.
+- check backend logs for metadata search failures;
+- inspect the provider status shown in the related-work panel;
+- remember that provider degradation is reported explicitly and never replaced by model guesses.

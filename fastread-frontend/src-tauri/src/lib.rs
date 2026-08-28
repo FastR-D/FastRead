@@ -3,7 +3,7 @@ use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use std::env;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use serde::Serialize;
 
@@ -23,26 +23,6 @@ pub fn run() {
                 )?;
             }
 
-            let exe_path = env::current_exe().expect("无法获取当前可执行文件路径");
-
-            // 安装路径诊断：PyInstaller sidecar 在含非 ASCII / 空格的路径下经常炸（README 已警告但缺主动防御）
-            // 命中时把诊断信息 emit 给前端，由顶端横幅展示，不阻断启动
-            let diag = analyze_install_path(&exe_path);
-            if diag.path_has_non_ascii || diag.path_has_space || !diag.parent_writable {
-                let app_handle = app.handle().clone();
-                // 等前端首屏挂载好 listener；setup 阶段 window 已存在但 React 还没 render
-                // 用独立线程 + 标准 sleep，不引入 tokio 依赖
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(1500));
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.emit("backend-warning", &diag);
-                    }
-                });
-            }
-
-            // 检查 ffmpeg 是否在 PATH 中可用
-            check_ffmpeg_availability();
-
             // 启动 Sidecar 并把 child handle 存到 state，方便后续 restart_backend_sidecar 使用
             let child = spawn_backend_sidecar(app.handle()).map_err(|e| {
                 eprintln!("Sidecar 启动失败: {}", e);
@@ -53,181 +33,11 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            get_system_env_vars,
-            find_executable_path,
-            run_command_with_env,
-            test_ffmpeg_access,
             get_install_path_diagnostics,
             restart_backend_sidecar
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
-}
-
-// 获取额外的二进制路径
-fn get_additional_binary_paths() -> Vec<String> {
-    if cfg!(target_os = "windows") {
-        vec![
-            "C:\\ffmpeg\\bin".to_string(),
-            "C:\\Program Files\\ffmpeg\\bin".to_string(),
-            "C:\\Program Files (x86)\\ffmpeg\\bin".to_string(),
-            "C:\\tools\\ffmpeg\\bin".to_string(),
-            "C:\\ProgramData\\chocolatey\\bin".to_string(),
-        ]
-    } else if cfg!(target_os = "macos") {
-        vec![
-            "/usr/local/bin".to_string(),
-            "/opt/homebrew/bin".to_string(),
-            "/usr/bin".to_string(),
-            "/bin".to_string(),
-            "/opt/local/bin".to_string(), // MacPorts
-        ]
-    } else {
-        vec![
-            "/usr/local/bin".to_string(),
-            "/usr/bin".to_string(),
-            "/bin".to_string(),
-            "/snap/bin".to_string(),
-            "/opt/bin".to_string(),
-            "/usr/local/sbin".to_string(),
-        ]
-    }
-}
-
-// 增强 PATH 环境变量
-fn enhance_path_variable(current_path: &str, additional_paths: &[String]) -> String {
-    let path_separator = if cfg!(target_os = "windows") { ";" } else { ":" };
-
-    let mut paths: Vec<String> = additional_paths.to_vec();
-
-    // 添加当前 PATH
-    if !current_path.is_empty() {
-        paths.push(current_path.to_string());
-    }
-
-    paths.join(path_separator)
-}
-
-// 检查 ffmpeg 可用性
-fn check_ffmpeg_availability() {
-    use std::process::Command;
-
-    match Command::new("ffmpeg").arg("-version").output() {
-        Ok(output) => {
-            if output.status.success() {
-                println!("✓ FFmpeg is available in PATH");
-                let version_info = String::from_utf8_lossy(&output.stdout);
-                let first_line = version_info.lines().next().unwrap_or("Unknown version");
-                println!("FFmpeg version: {}", first_line);
-            } else {
-                println!("✗ FFmpeg found but returned error");
-            }
-        }
-        Err(e) => {
-            println!("✗ FFmpeg not found in PATH: {}", e);
-
-            // 尝试在常见路径中查找
-            let common_paths = get_additional_binary_paths();
-            for path in common_paths {
-                let ffmpeg_path = if cfg!(target_os = "windows") {
-                    format!("{}\\ffmpeg.exe", path)
-                } else {
-                    format!("{}/ffmpeg", path)
-                };
-
-                if std::path::Path::new(&ffmpeg_path).exists() {
-                    println!("✓ Found FFmpeg at: {}", ffmpeg_path);
-                    return;
-                }
-            }
-            println!("✗ FFmpeg not found in common installation paths");
-        }
-    }
-}
-
-// Tauri 命令：获取系统环境变量
-#[tauri::command]
-fn get_system_env_vars() -> HashMap<String, String> {
-    env::vars().collect()
-}
-
-// Tauri 命令：查找可执行文件路径
-#[tauri::command]
-fn find_executable_path(executable_name: String) -> Option<String> {
-    use std::process::Command;
-
-    // 首先尝试直接执行
-    if Command::new(&executable_name).arg("--version").output().is_ok() {
-        return Some(executable_name);
-    }
-
-    // 使用 which/where 命令查找
-    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-
-    if let Ok(output) = Command::new(which_cmd).arg(&executable_name).output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(path);
-            }
-        }
-    }
-
-    // 在常见路径中搜索
-    let common_paths = get_additional_binary_paths();
-    for base_path in common_paths {
-        let executable_path = if cfg!(target_os = "windows") {
-            format!("{}\\{}.exe", base_path, executable_name)
-        } else {
-            format!("{}/{}", base_path, executable_name)
-        };
-
-        if std::path::Path::new(&executable_path).exists() {
-            return Some(executable_path);
-        }
-    }
-
-    None
-}
-
-// Tauri 命令：使用完整环境变量运行命令
-#[tauri::command]
-async fn run_command_with_env(
-    program: String,
-    args: Vec<String>
-) -> Result<String, String> {
-    use std::process::Command;
-
-    let mut cmd = Command::new(&program);
-    cmd.args(&args);
-
-    // 设置所有环境变量
-    for (key, value) in env::vars() {
-        cmd.env(key, value);
-    }
-
-    // 增强 PATH
-    let current_path = env::var("PATH").unwrap_or_default();
-    let additional_paths = get_additional_binary_paths();
-    let enhanced_path = enhance_path_variable(&current_path, &additional_paths);
-    cmd.env("PATH", enhanced_path);
-
-    match cmd.output() {
-        Ok(output) => {
-            if output.status.success() {
-                Ok(String::from_utf8_lossy(&output.stdout).to_string())
-            } else {
-                Err(String::from_utf8_lossy(&output.stderr).to_string())
-            }
-        }
-        Err(e) => Err(format!("Failed to execute {}: {}", program, e))
-    }
-}
-
-// Tauri 命令：测试 ffmpeg 访问
-#[tauri::command]
-async fn test_ffmpeg_access() -> Result<String, String> {
-    run_command_with_env("ffmpeg".to_string(), vec!["-version".to_string()]).await
 }
 
 // 启动后端 Sidecar：负责装环境变量、spawn、挂 stdout/stderr/terminated 监听并 emit 给前端。
@@ -239,15 +49,19 @@ fn spawn_backend_sidecar(app_handle: &tauri::AppHandle) -> Result<CommandChild, 
         .ok_or("无法获取可执行文件父目录")?
         .to_path_buf();
 
-    // 收集所有系统环境变量并增强 PATH（含 ffmpeg 常见安装位置）
+    // 继承系统环境变量，并注入 FastRead 专用数据根。
     let mut all_env_vars = HashMap::new();
     for (key, value) in env::vars() {
         all_env_vars.insert(key, value);
     }
-    let current_path = all_env_vars.get("PATH").cloned().unwrap_or_default();
-    let additional_paths = get_additional_binary_paths();
-    let enhanced_path = enhance_path_variable(&current_path, &additional_paths);
-    all_env_vars.insert("PATH".to_string(), enhanced_path);
+    let data_root = resolve_data_root(app_handle)?;
+    std::fs::create_dir_all(&data_root)
+        .map_err(|e| format!("无法创建 FastRead 应用数据目录: {}", e))?;
+    all_env_vars.insert(
+        "FASTREAD_DATA_ROOT".to_string(),
+        data_root.to_string_lossy().to_string(),
+    );
+    all_env_vars.insert("BACKEND_HOST".to_string(), "127.0.0.1".to_string());
 
     let mut sidecar_command = app_handle
         .shell()
@@ -300,6 +114,24 @@ fn spawn_backend_sidecar(app_handle: &tauri::AppHandle) -> Result<CommandChild, 
     Ok(child)
 }
 
+// Production defaults to Tauri's per-user roaming app-data directory. An
+// explicit absolute override keeps managed/portable deployments and release
+// smoke tests isolated without changing the installation directory.
+fn resolve_data_root(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if let Some(value) = env::var_os("FASTREAD_DATA_ROOT").filter(|value| !value.is_empty()) {
+        let path = PathBuf::from(value);
+        if !path.is_absolute() {
+            return Err("FASTREAD_DATA_ROOT 必须是绝对路径".to_string());
+        }
+        return Ok(path);
+    }
+
+    app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法获取 FastRead 应用数据目录: {}", e))
+}
+
 // 重启 sidecar：杀旧 child，spawn 新 child，回写到 state。
 #[tauri::command]
 fn restart_backend_sidecar(
@@ -326,8 +158,9 @@ fn restart_backend_sidecar(
     Ok(())
 }
 
-// 安装路径诊断：PyInstaller 在含非 ASCII / 空格的路径下加载 _internal/* 经常炸；
-// 父目录不可写时模型 / 配置 / 日志也无法落盘
+// Keep path characteristics available for on-demand diagnostics. They are not
+// startup failures: the bundled backend is verified in paths containing spaces
+// and non-ASCII characters, and all mutable data lives under FASTREAD_DATA_ROOT.
 #[derive(Serialize, Clone)]
 struct InstallPathDiagnostics {
     exe_path: String,
@@ -347,7 +180,7 @@ fn analyze_install_path(exe_path: &Path) -> InstallPathDiagnostics {
     let parent = exe_path.parent();
     let parent_writable = parent
         .and_then(|p| {
-            let probe = p.join(".reel_mind_write_probe");
+            let probe = p.join(".fastread_write_probe");
             match std::fs::write(&probe, b"x") {
                 Ok(_) => {
                     let _ = std::fs::remove_file(&probe);
@@ -372,20 +205,4 @@ fn analyze_install_path(exe_path: &Path) -> InstallPathDiagnostics {
 fn get_install_path_diagnostics() -> InstallPathDiagnostics {
     let exe_path = env::current_exe().unwrap_or_default();
     analyze_install_path(&exe_path)
-}
-
-// 可选：添加一个函数来动态更新 sidecar 的环境变量
-#[tauri::command]
-async fn update_sidecar_environment(
-    app_handle: tauri::AppHandle,
-    additional_env_vars: HashMap<String, String>
-) -> Result<(), String> {
-    // 这个函数可以用来在运行时更新环境变量
-    // 注意：这需要重启 sidecar 才能生效
-
-    for (key, value) in additional_env_vars {
-        env::set_var(key, value);
-    }
-
-    Ok(())
 }

@@ -3,12 +3,11 @@ from app.exceptions.provider import ProviderError
 from app.services.gpt_provider import GPTProvider
 
 
-class FakeFactory:
-    captured_config = None
+class FakeOpenAI:
+    captured = None
 
-    def from_config(self, config):
-        FakeFactory.captured_config = config
-        return {"model": config.model_name}
+    def __init__(self, **kwargs):
+        FakeOpenAI.captured = kwargs
 
 
 def test_create_builds_gpt_from_provider(monkeypatch):
@@ -21,15 +20,13 @@ def test_create_builds_gpt_from_provider(monkeypatch):
             "name": f"provider-{provider_id}",
         },
     )
-    monkeypatch.setattr("app.services.gpt_provider.GPTFactory", FakeFactory)
+    monkeypatch.setattr("app.services.gpt_provider.OpenAI", FakeOpenAI)
 
     gpt = GPTProvider.create(provider_id="p1", model_name="model-a")
 
-    assert gpt == {"model": "model-a"}
-    assert FakeFactory.captured_config.api_key == "key"
-    assert FakeFactory.captured_config.base_url == "http://example.test"
-    assert FakeFactory.captured_config.provider == "openai"
-    assert FakeFactory.captured_config.name == "provider-p1"
+    assert gpt.model == "model-a"
+    assert isinstance(gpt.client, FakeOpenAI)
+    assert FakeOpenAI.captured == {"api_key": "key", "base_url": "http://example.test"}
 
 
 def test_create_returns_none_when_optional_provider_missing(monkeypatch):

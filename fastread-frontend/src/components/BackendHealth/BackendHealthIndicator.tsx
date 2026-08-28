@@ -4,7 +4,7 @@ import BackendLogPanel from './BackendLogPanel'
 
 // 健康度判定：
 // - 绿：sidecar running 且 /sys_health 通
-// - 黄：sidecar running 但 /sys_health 失败 (ffmpeg 缺等)
+// - 黄：sidecar running 但 /sys_health 失败（数据库或论文存储异常）
 // - 红：sidecar terminated 或 /sys_health 连续 3 次失败
 
 type Health = 'green' | 'yellow' | 'red' | 'unknown'

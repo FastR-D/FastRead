@@ -29,7 +29,7 @@ export default function MarkmapEditor({
   title = 'mindmap',
 }: MarkmapEditorProps) {
   const svgRef = useRef<SVGSVGElement>(null)
-  const mmRef = useRef<Markmap | undefined>()
+  const mmRef = useRef<Markmap | undefined>(undefined)
   const toolbarRef = useRef<HTMLDivElement>(null)
 
   // 用于跟踪是否处于全屏状态

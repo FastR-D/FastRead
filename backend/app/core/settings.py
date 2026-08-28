@@ -33,12 +33,12 @@ def _sqlite_url_from_path(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
 
 
-def _normalize_database_url(database_url: str) -> str:
+def _normalize_database_url(database_url: str, base_dir: Path = BACKEND_ROOT) -> str:
     if not database_url.startswith("sqlite:///"):
         return database_url
     path = AppSettings._sqlite_path_from_url(database_url)
     if not path.is_absolute():
-        path = _resolve_backend_path(path)
+        path = base_dir / path
     return _sqlite_url_from_path(path)
 
 
@@ -49,66 +49,69 @@ class AppSettings:
         self.backend_root = BACKEND_ROOT
         self.project_root = PROJECT_ROOT
 
-        self.backend_host = os.getenv("BACKEND_HOST", "0.0.0.0")
+        raw_data_root = os.getenv("FASTREAD_DATA_ROOT", "").strip()
+        self.data_root = _resolve_backend_path(raw_data_root) if raw_data_root else BACKEND_ROOT
+
+        def runtime_path(value: str | Path) -> Path:
+            path = Path(value)
+            return path if path.is_absolute() else self.data_root / path
+
+        # FastRead is a local-first desktop application. Exposing the API on every
+        # network interface must be an explicit deployment choice, never a default.
+        self.backend_host = os.getenv("BACKEND_HOST", "127.0.0.1")
         self.backend_port = _get_int("BACKEND_PORT", 8483)
         self.api_base_url = os.getenv("API_BASE_URL", "http://localhost")
         self.backend_base_url = f"{self.api_base_url.rstrip('/')}:{self.backend_port}"
         self.sqlalchemy_echo = os.getenv("SQLALCHEMY_ECHO", "false").lower() == "true"
         self.db_pool_size = _get_int("DB_POOL_SIZE", 10)
         self.db_max_overflow = _get_int("DB_MAX_OVERFLOW", 20)
+        default_database = self.data_root / "fastread.db"
         self.database_url = _normalize_database_url(
-            os.getenv("DATABASE_URL") or _sqlite_url_from_path(_resolve_backend_path("reel_mind.db"))
+            os.getenv("DATABASE_URL") or _sqlite_url_from_path(default_database),
+            self.data_root,
         )
         self.sqlite_db_path = self._sqlite_path_from_url(self.database_url)
 
-        self.static_path = os.getenv("STATIC", "/static")
-        self.static_dir = _resolve_backend_path(os.getenv("STATIC_DIR", "static"))
         self.uploads_path = os.getenv("UPLOADS_PATH", "/uploads")
-        self.uploads_dir = _resolve_backend_path(os.getenv("UPLOAD_DIR", "uploads"))
-        self.screenshot_output_dir = _resolve_backend_path(os.getenv("OUT_DIR", "./static/screenshots"))
-        self.image_base_url = os.getenv("IMAGE_BASE_URL", "/static/screenshots")
-        self.note_output_dir = _resolve_backend_path(os.getenv("NOTE_OUTPUT_DIR", "note_results"))
-        self.data_dir = _resolve_backend_path(os.getenv("DATA_DIR", "data"))
-        self.export_output_dir = _resolve_backend_path(os.getenv("EXPORT_OUTPUT_DIR", "data/note_output"))
-        self.vector_db_dir = _resolve_backend_path(os.getenv("VECTOR_DB_DIR", "vector_db"))
-        ffmpeg_bin_path = os.getenv("FFMPEG_BIN_PATH", "").strip()
-        self.ffmpeg_bin_path = _resolve_backend_path(ffmpeg_bin_path) if ffmpeg_bin_path else None
-        self.ffmpeg_runtime_dir = _resolve_backend_path(os.getenv("FFMPEG_RUNTIME_DIR", ".runtime/ffmpeg"))
+        self.uploads_dir = runtime_path(os.getenv("UPLOAD_DIR", "uploads"))
+        self.paper_output_dir = runtime_path(os.getenv("PAPER_OUTPUT_DIR", "paper_results"))
+        self.data_dir = runtime_path(os.getenv("DATA_DIR", "data"))
+        self.vector_db_dir = runtime_path(os.getenv("VECTOR_DB_DIR", "vector_db"))
 
-        self.max_upload_bytes = _get_int("MAX_UPLOAD_BYTES", 10 * 1024 * 1024)
-        self.max_image_proxy_bytes = _get_int("MAX_IMAGE_PROXY_BYTES", 15 * 1024 * 1024)
-        self.image_proxy_allowed_hosts = {
-            host.strip().lower()
-            for host in os.getenv("IMAGE_PROXY_ALLOWED_HOSTS", "").split(",")
-            if host.strip()
-        }
-
-        self.cookie_config_path = _resolve_backend_path(
-            os.getenv("DOWNLOADER_CONFIG_PATH", "config/downloader.json")
+        self.max_upload_bytes = _get_int("MAX_UPLOAD_BYTES", 64 * 1024 * 1024)
+        self.fastnews_enabled = os.getenv("FASTNEWS_ENABLED", "true").lower() == "true"
+        self.fastnews_repo = "FastR-D/FastNews"
+        self.fastnews_cache_path = runtime_path(
+            os.getenv("FASTNEWS_CACHE_PATH", "data/integrations/fastnews_catalog.json")
         )
-        self.transcriber_config_path = _resolve_backend_path(
-            os.getenv("TRANSCRIBER_CONFIG_PATH", "config/transcriber.json")
+        self.fastinsight_max_bytes = _get_int("FASTINSIGHT_MAX_BYTES", 1024 * 1024)
+        self.fastwrite_enabled = os.getenv("FASTWRITE_ENABLED", "true").lower() == "true"
+        self.fastwrite_base_url = os.getenv("FASTWRITE_BASE_URL", "http://127.0.0.1:3003").rstrip("/")
+        self.fastwrite_allowed_origins = {
+            origin.strip().rstrip("/")
+            for origin in os.getenv("FASTWRITE_ALLOWED_ORIGINS", "").split(",")
+            if origin.strip()
+        }
+        self.integration_timeout_seconds = _get_int("INTEGRATION_TIMEOUT_SECONDS", 15)
+        self.integration_data_dir = runtime_path(
+            os.getenv("INTEGRATION_DATA_DIR", "data/integrations")
         )
 
     def ensure_runtime_dirs(self) -> None:
         for path in (
-            self.static_dir,
             self.uploads_dir,
-            self.screenshot_output_dir,
-            self.note_output_dir,
+            self.paper_output_dir,
             self.data_dir,
-            self.export_output_dir,
             self.vector_db_dir,
-            self.ffmpeg_runtime_dir,
-            self.cookie_config_path.parent,
-            self.transcriber_config_path.parent,
+            self.integration_data_dir,
+            self.fastnews_cache_path.parent,
         ):
             path.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _sqlite_path_from_url(database_url: str) -> Path:
         if not database_url.startswith("sqlite:///"):
-            return BACKEND_ROOT / "reel_mind.db"
+            raise ValueError("DATABASE_URL must be an explicit SQLAlchemy URL")
 
         raw_path = database_url.removeprefix("sqlite:///")
         if raw_path.startswith("/") and not raw_path.startswith("//"):

@@ -1,10 +1,12 @@
 import logging
+from logging.handlers import RotatingFileHandler
 import sys
-from pathlib import Path
+
+from app.core.settings import get_settings
 
 # 日志目录
-LOG_DIR = Path("logs")
-LOG_DIR.mkdir(exist_ok=True)
+LOG_DIR = get_settings().data_root / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # 日志格式
 formatter = logging.Formatter(
@@ -17,7 +19,12 @@ console_handler = logging.StreamHandler(sys.stdout)
 console_handler.setFormatter(formatter)
 
 # 文件输出
-file_handler = logging.FileHandler(LOG_DIR / "app.log", encoding="utf-8")
+file_handler = RotatingFileHandler(
+    LOG_DIR / "app.log",
+    maxBytes=5 * 1024 * 1024,
+    backupCount=5,
+    encoding="utf-8",
+)
 file_handler.setFormatter(formatter)
 
 # 获取日志器

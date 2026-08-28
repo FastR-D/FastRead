@@ -1,8 +1,9 @@
+import asyncio
+
 import pytest
 from fastapi import HTTPException
 
-from app.routers.note import _assert_content_length_within_limit, _assert_public_image_url, _safe_upload_extension
-from app.utils.local_access import require_local_request
+from app.utils.local_access import LocalOnlyASGI, require_local_request
 from app.utils.response import ResponseWrapper as R
 
 
@@ -28,32 +29,6 @@ def test_response_error_maps_business_code_to_bad_request():
     assert response.status_code == 400
 
 
-def test_upload_extension_rejects_unsafe_file_type():
-    with pytest.raises(HTTPException) as exc:
-        _safe_upload_extension("../evil.exe")
-
-    assert exc.value.status_code == 400
-
-
-def test_content_length_limit_rejects_oversized_proxy_response():
-    with pytest.raises(HTTPException) as exc:
-        _assert_content_length_within_limit({"Content-Length": "20"}, 10)
-
-    assert exc.value.status_code == 413
-
-
-def test_content_length_limit_ignores_missing_or_invalid_header():
-    _assert_content_length_within_limit({}, 10)
-    _assert_content_length_within_limit({"Content-Length": "unknown"}, 10)
-
-
-def test_image_proxy_rejects_loopback_url():
-    with pytest.raises(HTTPException) as exc:
-        _assert_public_image_url("http://127.0.0.1:8483/api/sys_health")
-
-    assert exc.value.status_code == 403
-
-
 def test_local_access_rejects_non_loopback_client():
     with pytest.raises(HTTPException) as exc:
         require_local_request(DummyRequest("8.8.8.8"))
@@ -63,3 +38,32 @@ def test_local_access_rejects_non_loopback_client():
 
 def test_local_access_allows_loopback_client():
     require_local_request(DummyRequest("127.0.0.1"))
+
+
+def test_mounted_static_gate_rejects_non_loopback_client(monkeypatch):
+    called = False
+    messages = []
+
+    async def downstream(_scope, _receive, _send):
+        nonlocal called
+        called = True
+
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        messages.append(message)
+
+    monkeypatch.delenv("ALLOW_NON_LOCAL_ADMIN", raising=False)
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/uploads/paper.pdf",
+        "headers": [],
+        "client": ("192.168.1.25", 50123),
+    }
+
+    asyncio.run(LocalOnlyASGI(downstream)(scope, receive, send))
+
+    assert called is False
+    assert messages[0]["status"] == 403

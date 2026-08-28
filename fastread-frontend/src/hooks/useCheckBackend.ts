@@ -1,66 +1,77 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import axios from 'axios'
 
-const MAX_RETRIES = 3
-const RETRY_INTERVAL = 10000 // 10秒
+const MAX_ATTEMPTS = 4
+const RETRY_INTERVAL = 2000
 
 const healthClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   timeout: 3000,
 })
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+export type BackendStartupStatus = 'checking' | 'ready' | 'failed'
+
+function describeError(error: unknown): string {
+  if (axios.isAxiosError(error)) {
+    if (error.code === 'ECONNABORTED') return '健康检查超时，后端进程可能没有响应。'
+    if (error.response) return `健康检查返回 HTTP ${error.response.status}。`
+    return '无法连接后端健康检查接口。'
+  }
+  return error instanceof Error ? error.message : '后端健康检查失败。'
+}
 
 export const useCheckBackend = () => {
-  const [loading, setLoading] = useState(false)
-  const [initialized, setInitialized] = useState(false)
+  const [status, setStatus] = useState<BackendStartupStatus>('checking')
+  const [attempt, setAttempt] = useState(0)
+  const [error, setError] = useState('')
+  const [checkCycle, setCheckCycle] = useState(0)
+
+  const retry = useCallback(() => setCheckCycle(cycle => cycle + 1), [])
 
   useEffect(() => {
-    let retries = 0
     let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const wait = () => new Promise<void>(resolve => {
+      timer = setTimeout(resolve, RETRY_INTERVAL)
+    })
 
     const check = async () => {
-      try {
-        await healthClient.get('/sys_check')
-        if (cancelled) return
-        setInitialized(true)
-        setLoading(false)
-      } catch {
-        if (cancelled) return
-        if (retries === 0) {
-          // 第一次失败时开始显示加载状态
-          setLoading(true)
-        }
+      setStatus('checking')
+      setAttempt(0)
+      setError('')
 
-        if (retries < MAX_RETRIES) {
-          retries++
-          setTimeout(check, RETRY_INTERVAL)
-        } else {
-          // 达到重试上限，继续轮询直到后端就绪
-          waitUntilBackendReady()
-        }
-      }
-    }
-
-    const waitUntilBackendReady = async () => {
-      while (!cancelled) {
+      for (let nextAttempt = 1; nextAttempt <= MAX_ATTEMPTS && !cancelled; nextAttempt += 1) {
+        setAttempt(nextAttempt)
         try {
           await healthClient.get('/sys_health')
           if (cancelled) return
-          setInitialized(true)
-          setLoading(false)
-          break
-        } catch {
-          await sleep(RETRY_INTERVAL)
+          setStatus('ready')
+          setError('')
+          return
+        }
+        catch (nextError) {
+          if (cancelled) return
+          setError(describeError(nextError))
+          if (nextAttempt < MAX_ATTEMPTS) await wait()
         }
       }
+
+      if (!cancelled) setStatus('failed')
     }
 
     check()
     return () => {
       cancelled = true
+      if (timer) clearTimeout(timer)
     }
-  }, [])
+  }, [checkCycle])
 
-  return { loading, initialized }
+  return {
+    status,
+    attempt,
+    error,
+    initialized: status === 'ready',
+    retry,
+  }
 }

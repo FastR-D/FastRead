@@ -146,3 +146,24 @@ html, body, #root {
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  .primary-button {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-md bg-blue-700 px-3 text-xs font-medium text-white transition hover:bg-blue-800 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .secondary-button {
+    @apply inline-flex h-9 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .icon-button {
+    @apply inline-flex h-9 min-w-9 items-center justify-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-500 transition hover:bg-slate-50 hover:text-slate-900;
+  }
+  .field {
+    @apply h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-xs outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100;
+  }
+  textarea.field {
+    @apply h-auto py-2;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-medium text-slate-600;
+  }
+}

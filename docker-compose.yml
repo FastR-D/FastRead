@@ -1,5 +1,23 @@
 
 services:
+  elasticsearch:
+    container_name: fastread-elasticsearch
+    image: ${ELASTICSEARCH_IMAGE:-docker.elastic.co/elasticsearch/elasticsearch:8.17.4}
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms1g -Xmx1g}
+    ports:
+      - "127.0.0.1:${ELASTICSEARCH_PORT:-9200}:9200"
+    volumes:
+      - fastread-elasticsearch-data:/usr/share/elasticsearch/data
+    restart: on-failure:3
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
   backend:
     container_name: fastread-backend
     build:
@@ -9,16 +27,27 @@ services:
         PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-mirror.gcr.io/library/python:3.11-slim}
         APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
         PIP_INDEX: ${PIP_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}
-    env_file:
-      - .env
     environment:
-      - BACKEND_PORT=${BACKEND_PORT:-8483}
-      - BACKEND_HOST=${BACKEND_HOST:-0.0.0.0}
+      BACKEND_PORT: ${BACKEND_PORT:-8483}
+      BACKEND_HOST: 0.0.0.0
+      ALLOW_NON_LOCAL_ADMIN: "true"
+      FASTREAD_DATA_ROOT: /app/runtime
+      DATABASE_URL: sqlite:////app/runtime/fastread.db
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      PAPER_SEARCH_ES_REPLICAS: ${PAPER_SEARCH_ES_REPLICAS:-0}
     volumes:
-      - ./backend:/app
+      - fastread-data:/app/runtime
     expose:
       - "${BACKEND_PORT:-8483}"  # 不再对外暴露，用于 nginx 内部通信
     restart: on-failure:3
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${BACKEND_PORT:-8483}/api/sys_health"]
       interval: 30s
@@ -35,8 +64,6 @@ services:
       args:
         NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-mirror.gcr.io/library/node:20-alpine}
         NGINX_BASE_IMAGE: ${NGINX_BASE_IMAGE:-mirror.gcr.io/library/nginx:1.25-alpine}
-    env_file:
-      - .env
     expose:
       - "80"  # 不暴露给宿主机，只供 nginx 访问
     restart: on-failure:3
@@ -46,7 +73,7 @@ services:
     container_name: fastread-nginx
     image: ${NGINX_RUNTIME_IMAGE:-mirror.gcr.io/library/nginx:1.25-alpine}
     ports:
-      - "${APP_PORT:-3015}:80"
+      - "127.0.0.1:${APP_PORT:-3015}:80"
     environment:
       - BACKEND_PORT=${BACKEND_PORT:-8483}
     volumes:
@@ -58,3 +85,7 @@ services:
         condition: service_started
     restart: on-failure:3
     mem_limit: 256m
+
+volumes:
+  fastread-data:
+  fastread-elasticsearch-data:

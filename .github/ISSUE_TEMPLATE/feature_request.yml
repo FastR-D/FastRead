@@ -30,7 +30,6 @@ body:
       options:
         - 后端 (backend/)
         - Web 前端 (fastread-frontend/)
-        - 浏览器插件 (fastread-extension/)
         - Tauri 桌面端
         - 不确定
   - type: textarea

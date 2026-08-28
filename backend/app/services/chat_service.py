@@ -1,144 +1,62 @@
+from __future__ import annotations
+
 import json
 import os
 import re
+from collections import Counter
 from typing import Optional
 
-from app.repositories.note_artifacts import NoteArtifactRepository
+from app.repositories.paper_artifacts import PaperArtifactRepository
 from app.services.gpt_provider import GPTProvider
+from app.services.llm_compat import create_chat_completion
 from app.services.vector_store import VectorStoreManager
-from app.services.chat_tools import TOOLS, execute_tool
 from app.utils.logger import get_logger
 
+
 logger = get_logger(__name__)
-
-ARTIFACTS = NoteArtifactRepository()
-CHAT_VECTOR_INDEX_ENABLED = os.getenv("CHAT_VECTOR_INDEX_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
-
-SYSTEM_PROMPT = """你是 FastRead 的学术阅读问答助手。你拥有以下能力：
-
-1. 系统已自动检索了一些相关内容作为初始参考（见下方）
-2. 你可以调用工具主动查询更多信息：
-   - lookup_transcript: 查询视频原始转录文本（支持按时间、关键词、位置筛选）
-   - get_video_info: 获取视频元信息（标题、作者、简介、标签等）
-   - get_note_content: 获取完整笔记内容
-
---- 初始检索内容 ---
-{context}
----
-
-回答要求：
-- 如果初始检索内容不足以回答问题，请主动调用工具获取更多信息
-- 回答关于原文具体表述、细节时，优先引用检索到的原文或报告证据
-- 回答关于作者、标题等基本信息时，用 get_video_info 查询
-- 明确区分“原文声称”“联网核验支持”和“领域共识”；证据不足时直接说明
-- 只有标注为“论文原文”的分页片段可以证明论文写了什么；阅读报告只是辅助导航，联网核验证据才可用于外部支持或反证
-- 引用论文时必须说明页码；若当前上下文没有能支持答案的分页原文，直接回答“原文证据不足”
-- 请用中文回答，保持简洁准确"""
+ARTIFACTS = PaperArtifactRepository()
+CHAT_VECTOR_INDEX_ENABLED = os.getenv("CHAT_VECTOR_INDEX_ENABLED", "0").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 PAPER_SYSTEM_PROMPT = """你是 FastRead 的单篇论文阅读问答助手。
+只能依据下面给出的论文分页原文回答，不能使用模型记忆补写事实，也不能把单篇论文陈述升级成领域共识。
+每个实质结论必须引用当前上下文中的页码和逐字短引文；证据不足时回答“原文证据不足”。
 
---- 当前论文的分页原文与辅助材料 ---
+论文原文：
 {context}
----
 
-回答要求：
-- 论文原文分页片段是回答“论文写了什么”的唯一依据；阅读报告只用于导航，联网证据只用于外部支持或反证
-- 每个实质结论必须标明当前上下文给出的论文页码，不能把单篇论文的陈述升级为领域共识
-- 如果分页原文不足以回答，明确回答“原文证据不足”，不要用常识或模型记忆补写
-- 明确区分“原文声称”“外部核验支持”和“实验已复现”；没有实际运行证据时不得声称实验已复现
-- 请用中文回答，保持简洁准确"""
+只返回 JSON：
+{{"answer":"中文回答","citations":[{{"page":1,"exact_quote":"逐字短引文"}}]}}
+"""
 
-LIBRARY_SYSTEM_PROMPT = """你是一个跨视频知识库问答助手。
+LIBRARY_SYSTEM_PROMPT = """你是 FastRead 的论文资料库问答助手。
+只能综合下面给出的多篇论文分页原文；必须用 [S1]、[S2] 标明来源，不得使用模型记忆补写。
+证据不足时明确说明，不要伪造共识。
 
-系统会提供多个视频笔记中召回的相关片段。请综合这些片段回答用户问题。
-
---- 知识库检索内容 ---
+分页原文：
 {context}
----
-
-回答要求：
-- 优先综合多个视频之间的共同结论、差异和可执行建议
-- 如果证据不足，请明确说明不足，不要编造视频里没有的信息
-- 提到关键观点时，尽量指出来自哪个视频标题
-- 请用中文回答，保持简洁准确"""
+"""
 
 
-def _build_context(chunks: list[dict]) -> str:
-    """将检索到的片段拼接为上下文文本。"""
-    parts = []
-    for chunk in chunks:
-        meta = chunk.get("metadata", {})
-        source_type = meta.get("source_type", "unknown")
-        if source_type == "meta":
-            label = "[视频信息]"
-        elif source_type == "markdown":
-            label = f"[笔记 - {meta.get('section_title', '')}]"
-        elif source_type == "reading_report":
-            label = "[学术阅读报告]"
-        elif source_type == "verification":
-            label = "[联网核验证据]"
-        elif source_type == "paper_page":
-            label = f"[论文原文 · 第 {meta.get('page_start', '?')} 页]"
-        else:
-            start = meta.get("start_time", 0)
-            end = meta.get("end_time", 0)
-            if meta.get("title"):
-                label = f"[转录 - {meta.get('title')}]"
-            else:
-                label = f"[转录 - {start:.0f}s~{end:.0f}s]"
-        if meta.get("title") and source_type != "transcript":
-            label = f"{label} {meta.get('title')}"
-        parts.append(f"{label}\n{chunk['text']}")
-    return "\n\n".join(parts)
+def _tokens(text: str) -> list[str]:
+    lowered = str(text or "").lower()
+    words = re.findall(r"[a-z0-9_]{2,}|[\u4e00-\u9fff]{2,}", lowered)
+    chinese = "".join(re.findall(r"[\u4e00-\u9fff]", lowered))
+    return words + [chinese[index : index + 2] for index in range(max(0, len(chinese) - 1))]
 
 
-def _build_sources(chunks: list[dict]) -> list[dict]:
-    """从检索片段中提取来源信息。"""
-    sources = []
-    for chunk in chunks:
-        meta = chunk.get("metadata", {})
-        source = {
-            "text": chunk["text"][:200],
-            "source_type": meta.get("source_type", "unknown"),
-        }
-        if meta.get("task_id"):
-            source["task_id"] = meta["task_id"]
-        if meta.get("title"):
-            source["title"] = meta["title"]
-        if meta.get("section_title"):
-            source["section_title"] = meta["section_title"]
-        if meta.get("start_time") is not None:
-            source["start_time"] = meta["start_time"]
-        if meta.get("end_time") is not None:
-            source["end_time"] = meta["end_time"]
-        if meta.get("page_start") is not None:
-            source["page_start"] = meta["page_start"]
-        if meta.get("page_end") is not None:
-            source["page_end"] = meta["page_end"]
-        if meta.get("source_url"):
-            source["source_url"] = meta["source_url"]
-        if meta.get("doi"):
-            source["doi"] = meta["doi"]
-        sources.append(source)
-    return sources
-
-
-def _tokenize(text: str) -> list[str]:
-    text = (text or "").lower()
-    words = re.findall(r"[a-zA-Z0-9_]{2,}|[\u4e00-\u9fff]{2,}", text)
-    chinese = "".join(re.findall(r"[\u4e00-\u9fff]", text))
-    grams = [chinese[i:i + 2] for i in range(max(len(chinese) - 1, 0))]
-    return words + grams
-
-
-def _chunk_text(text: str, size: int = 520, overlap: int = 80) -> list[str]:
-    cleaned = re.sub(r"\s+", " ", text or "").strip()
+def _chunk_page(text: str, size: int = 900, overlap: int = 120) -> list[str]:
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
     if not cleaned:
         return []
-    chunks = []
-    step = max(size - overlap, 1)
+    chunks: list[str] = []
+    step = max(1, size - overlap)
     for start in range(0, len(cleaned), step):
-        chunk = cleaned[start:start + size].strip()
+        chunk = cleaned[start : start + size].strip()
         if len(chunk) >= 30:
             chunks.append(chunk)
         if start + size >= len(cleaned):
@@ -146,218 +64,169 @@ def _chunk_text(text: str, size: int = 520, overlap: int = 80) -> list[str]:
     return chunks
 
 
-def _reading_report_text(note_data: dict) -> str:
-    report = ((note_data.get("insights") or {}).get("reading_report") or {})
-    return json.dumps(report, ensure_ascii=False, default=str) if report else ""
-
-
-def _verification_text(note_data: dict) -> str:
-    insights = note_data.get("insights") or {}
-    verification = insights.get("verification") or {}
-    if not verification:
-        return ""
-    compact = {
-        "overall": verification.get("overall") or {},
-        "claims": verification.get("claims") or [],
-        "result": note_data.get("verification_result") or verification.get("result") or {},
-    }
-    return json.dumps(compact, ensure_ascii=False, default=str)
-
-
-def _paper_page_chunks(note_data: dict, task_id: str, title: str) -> list[dict]:
-    paper = note_data.get("paper_document") or {}
-    chunks = []
-    for page in paper.get("pages") or []:
+def _paper_chunks(task_id: str, payload: dict) -> list[dict]:
+    document = payload.get("paper_document") or {}
+    title = str(document.get("title") or task_id)
+    chunks: list[dict] = []
+    for page in document.get("pages") or []:
         page_number = int(page.get("page") or 1)
-        for index, text in enumerate(_chunk_text(page.get("text") or "", size=700, overlap=100)):
-            chunks.append({
-                "text": text,
-                "metadata": {
-                    "task_id": task_id,
-                    "title": title,
-                    "source_type": "paper_page",
-                    "chunk_index": index,
-                    "page_start": page_number,
-                    "page_end": page_number,
-                    "source_url": paper.get("pdf_url") or paper.get("source_url") or "",
-                    "doi": paper.get("doi") or "",
-                },
-            })
-    return chunks
-
-
-def _load_library_chunks() -> list[dict]:
-    chunks = []
-    for result_file in ARTIFACTS.iter_result_files():
-        task_id = result_file.task_id
-        note_data = ARTIFACTS.read_result(task_id)
-        if not note_data:
-            logger.warning(f"读取知识库笔记失败: {result_file.path.name}")
-            continue
-
-        audio_meta = note_data.get("audio_meta") or {}
-        raw_info = audio_meta.get("raw_info") or {}
-        title = audio_meta.get("title") or task_id
-        markdown = note_data.get("markdown") or ""
-        transcript = note_data.get("transcript") or {}
-        is_paper = bool(note_data.get("paper_task") or note_data.get("paper_document"))
-        transcript_text = "" if is_paper else (transcript.get("full_text") or "")
-        reading_report_text = _reading_report_text(note_data)
-        verification_text = _verification_text(note_data)
-        tags = raw_info.get("tags") if isinstance(raw_info.get("tags"), list) else []
-        meta_text = "\n".join(part for part in [
-            f"视频标题：{title}",
-            f"平台：{audio_meta.get('platform', '')}",
-            f"标签：{', '.join(str(tag) for tag in tags[:12])}" if tags else "",
-        ] if part.strip("：, "))
-
-        for source_type, source_text in (
-            ("meta", meta_text),
-            ("markdown", markdown),
-            ("transcript", transcript_text),
-            ("reading_report", reading_report_text),
-            ("verification", verification_text),
-        ):
-            for index, text in enumerate(_chunk_text(source_text)):
-                chunks.append({
+        for index, text in enumerate(_chunk_page(page.get("text") or "")):
+            chunks.append(
+                {
                     "text": text,
                     "metadata": {
                         "task_id": task_id,
                         "title": title,
-                        "source_type": source_type,
+                        "source_type": "paper_page",
+                        "page_start": page_number,
+                        "page_end": page_number,
                         "chunk_index": index,
+                        "source_url": document.get("pdf_url") or document.get("source_url") or "",
+                        "doi": document.get("doi") or "",
                     },
-                })
-        chunks.extend(_paper_page_chunks(note_data, task_id, title))
-
+                }
+            )
     return chunks
 
 
-def _load_task_data(task_id: str) -> Optional[dict]:
-    return ARTIFACTS.read_result(task_id)
-
-
-def _normalize_markdown(markdown) -> str:
-    if isinstance(markdown, list):
-        if not markdown:
-            return ""
-        latest = markdown[0] if isinstance(markdown[0], dict) else markdown[-1]
-        if isinstance(latest, dict):
-            return latest.get("content", "") or ""
-        return str(latest)
-    return markdown or ""
-
-
-def _load_task_chunks(task_id: str) -> list[dict]:
-    note_data = _load_task_data(task_id)
-    if not note_data:
-        return []
-
-    audio_meta = note_data.get("audio_meta") or {}
-    raw_info = audio_meta.get("raw_info") or {}
-    title = audio_meta.get("title") or task_id
-    markdown = _normalize_markdown(note_data.get("markdown"))
-    transcript = note_data.get("transcript") or {}
-    is_paper = bool(note_data.get("paper_task") or note_data.get("paper_document"))
-    transcript_text = "" if is_paper else (transcript.get("full_text") or "")
-    reading_report_text = _reading_report_text(note_data)
-    verification_text = _verification_text(note_data)
-    tags = raw_info.get("tags") if isinstance(raw_info.get("tags"), list) else []
-    meta_text = "\n".join(part for part in [
-        f"视频标题：{title}",
-        f"平台：{audio_meta.get('platform', '')}",
-        f"作者：{raw_info.get('uploader', '')}",
-        f"简介：{str(raw_info.get('description', ''))[:500]}" if raw_info.get("description") else "",
-        f"标签：{', '.join(str(tag) for tag in tags[:12])}" if tags else "",
-    ] if part.strip("：, "))
-
-    chunks = []
-    for source_type, source_text in (
-        ("meta", meta_text),
-        ("markdown", markdown),
-        ("transcript", transcript_text),
-        ("reading_report", reading_report_text),
-        ("verification", verification_text),
-    ):
-        for index, text in enumerate(_chunk_text(source_text)):
-            chunks.append({
-                "text": text,
-                "metadata": {
-                    "task_id": task_id,
-                    "title": title,
-                    "source_type": source_type,
-                    "chunk_index": index,
-                },
-            })
-    chunks.extend(_paper_page_chunks(note_data, task_id, title))
-    return chunks
-
-
-def _rank_chunks(chunks: list[dict], question: str, n_results: int) -> list[dict]:
-    query_terms = _tokenize(question)
-    if not query_terms:
-        return chunks[:n_results]
-    query_set = set(query_terms)
+def _rank(chunks: list[dict], question: str, limit: int) -> list[dict]:
+    query_counts = Counter(_tokens(question))
+    if not query_counts:
+        return chunks[:limit]
     ranked = []
     for chunk in chunks:
-        text = chunk["text"]
-        terms = _tokenize(text)
-        if not terms:
-            continue
-        meta = chunk.get("metadata", {})
-        title = meta.get("title", "")
-        source_type = meta.get("source_type", "")
-        overlap = len(query_set & set(terms))
-        title_overlap = len(query_set & set(_tokenize(title)))
-        score = overlap * 3 + title_overlap * 5
-        if source_type == "meta":
-            score += 1
-        lower_text = text.lower()
-        for term in query_set:
-            if term and term in lower_text:
-                score += 2
-        if score > 0:
+        counts = Counter(_tokens(chunk.get("text") or ""))
+        score = sum(min(counts[token], count) for token, count in query_counts.items())
+        if score:
             ranked.append((score, chunk))
+    ranked.sort(
+        key=lambda item: (
+            -item[0],
+            int((item[1].get("metadata") or {}).get("page_start") or 0),
+        )
+    )
+    return [chunk for _, chunk in ranked[:limit]]
 
-    ranked.sort(key=lambda item: item[0], reverse=True)
-    return [chunk for _, chunk in ranked[:n_results]]
+
+def _load_task(task_id: str) -> dict:
+    payload = ARTIFACTS.read_result(task_id)
+    if not payload or payload.get("paper_task") is not True:
+        raise ValueError("论文任务不存在")
+    return payload
 
 
-def _query_task_fallback(task_id: str, question: str, n_results: int = 6) -> list[dict]:
-    return _rank_chunks(_load_task_chunks(task_id), question, n_results)
+def _task_chunks(task_id: str, question: str, limit: int = 6) -> tuple[dict, list[dict]]:
+    payload = _load_task(task_id)
+    chunks: list[dict] = []
+    if CHAT_VECTOR_INDEX_ENABLED:
+        try:
+            chunks = [
+                chunk
+                for chunk in VectorStoreManager().query(task_id, question, n_results=limit)
+                if (chunk.get("metadata") or {}).get("source_type") == "paper_page"
+            ]
+        except Exception as exc:
+            logger.warning(f"向量检索不可用，使用本地分页检索: {exc}")
+    if not chunks:
+        chunks = _rank(_paper_chunks(task_id, payload), question, limit)
+    return payload, chunks
 
 
-def _query_library(question: str, n_results: int = 8) -> list[dict]:
-    return _rank_chunks(_load_library_chunks(), question, n_results)
+def _library_chunks(question: str, limit: int = 10) -> list[dict]:
+    chunks: list[dict] = []
+    for result_file in ARTIFACTS.iter_result_files() or []:
+        payload = ARTIFACTS.read_result(result_file.task_id)
+        if payload and payload.get("paper_task") is True:
+            chunks.extend(_paper_chunks(result_file.task_id, payload))
+    return _rank(chunks, question, limit)
+
+
+def _context(chunks: list[dict], *, source_labels: bool = False) -> str:
+    lines = []
+    for index, chunk in enumerate(chunks, 1):
+        metadata = chunk.get("metadata") or {}
+        label = f"[S{index}] " if source_labels else ""
+        lines.append(
+            f"{label}[{metadata.get('title', '')} · 第 {metadata.get('page_start', '?')} 页]\n"
+            f"{chunk.get('text', '')}"
+        )
+    return "\n\n".join(lines)
+
+
+def _source_records(chunks: list[dict]) -> list[dict]:
+    records = []
+    for index, chunk in enumerate(chunks, 1):
+        metadata = chunk.get("metadata") or {}
+        records.append(
+            {
+                "source_id": f"S{index}",
+                "source_type": "paper_page",
+                "task_id": metadata.get("task_id") or "",
+                "title": metadata.get("title") or "",
+                "page_start": metadata.get("page_start"),
+                "page_end": metadata.get("page_end"),
+                "source_url": metadata.get("source_url") or "",
+                "doi": metadata.get("doi") or "",
+            }
+        )
+    return records
+
+
+def _strip_fence(value: str) -> str:
+    text = str(value or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def _ground_task_answer(raw: str, payload: dict, chunks: list[dict]) -> dict:
+    try:
+        parsed = json.loads(_strip_fence(raw))
+    except json.JSONDecodeError:
+        return {"answer": "原文证据不足", "sources": [], "grounding_status": "citation_rejected"}
+    if not isinstance(parsed, dict):
+        return {"answer": "原文证据不足", "sources": [], "grounding_status": "citation_rejected"}
+    answer = str(parsed.get("answer") or "").strip()
+    citations = parsed.get("citations") if isinstance(parsed.get("citations"), list) else []
+    pages = {
+        int(page.get("page") or 1): str(page.get("text") or "")
+        for page in (payload.get("paper_document") or {}).get("pages") or []
+    }
+    allowed_pages = {
+        int((chunk.get("metadata") or {}).get("page_start") or 0) for chunk in chunks
+    }
+    sources = []
+    for citation in citations:
+        if not isinstance(citation, dict):
+            continue
+        try:
+            page_number = int(citation.get("page"))
+        except (TypeError, ValueError):
+            continue
+        quote = re.sub(r"\s+", " ", str(citation.get("exact_quote") or "")).strip()
+        page_text = re.sub(r"\s+", " ", pages.get(page_number, ""))
+        if page_number not in allowed_pages or len(quote) < 8 or quote.casefold() not in page_text.casefold():
+            continue
+        document = payload.get("paper_document") or {}
+        sources.append(
+            {
+                "source_type": "paper_page",
+                "task_id": document.get("id") or "",
+                "title": document.get("title") or "",
+                "page_start": page_number,
+                "page_end": page_number,
+                "exact_quote": quote,
+                "source_url": document.get("pdf_url") or document.get("source_url") or "",
+            }
+        )
+    if not answer or not sources:
+        return {"answer": "原文证据不足", "sources": [], "grounding_status": "citation_rejected"}
+    return {"answer": answer, "sources": sources, "grounding_status": "source_grounded"}
 
 
 def _get_gpt(provider_id: str, model_name: str):
     return GPTProvider.create(provider_id=provider_id, model_name=model_name)
-
-
-def library_chat(
-    question: str,
-    history: list[dict],
-    provider_id: str,
-    model_name: str,
-) -> dict:
-    chunks = _query_library(question, n_results=8)
-    context = _build_context(chunks) if chunks else "（未从知识库中检索到相关内容）"
-    sources = _build_sources(chunks) if chunks else []
-
-    messages = [{"role": "system", "content": LIBRARY_SYSTEM_PROMPT.format(context=context)}]
-    for msg in history[-20:]:
-        messages.append({"role": msg["role"], "content": msg["content"]})
-    messages.append({"role": "user", "content": question})
-
-    gpt = _get_gpt(provider_id, model_name)
-    logger.info(f"Library Chat: model={model_name}, chunks={len(chunks)}")
-    response = gpt.client.chat.completions.create(
-        model=gpt.model,
-        messages=messages,
-        temperature=0.7,
-    )
-    return {"answer": response.choices[0].message.content or "", "sources": sources}
 
 
 def chat(
@@ -368,110 +237,37 @@ def chat(
     model_name: str,
     scope: str = "task",
 ) -> dict:
-    """
-    RAG + Tool Calling 问答。
-    1. 向量检索初始上下文
-    2. 调用 LLM（带 tools）
-    3. 如果 LLM 调用了工具，执行工具并将结果返回给 LLM
-    4. 循环直到 LLM 给出最终回答
-    """
     if scope == "library":
-        return library_chat(question, history, provider_id, model_name)
-    if not task_id:
-        raise ValueError("当前视频问答需要 task_id")
-
-    # 1. 检索初始上下文：默认使用笔记 JSON 关键词检索，避免 Chroma 首次下载 embedding 模型阻塞问答。
-    chunks = []
-    if CHAT_VECTOR_INDEX_ENABLED:
-        try:
-            vector_store = VectorStoreManager()
-            chunks = vector_store.query(task_id, question, n_results=6)
-        except Exception as exc:
-            logger.warning(f"向量检索不可用，降级为文件检索: task_id={task_id}, {exc}")
-
-    if not chunks:
-        chunks = _query_task_fallback(task_id, question, n_results=6)
-
-    context = _build_context(chunks) if chunks else "（未检索到相关内容，请使用工具查询）"
-    sources = _build_sources(chunks) if chunks else []
-
-    # 2. 构建消息
-    note_data = _load_task_data(task_id) or {}
-    is_paper = bool(note_data.get("paper_task") or note_data.get("paper_document"))
-    system_template = PAPER_SYSTEM_PROMPT if is_paper else SYSTEM_PROMPT
-    system_msg = system_template.format(context=context)
-    messages = [{"role": "system", "content": system_msg}]
-
-    for msg in history[-20:]:
-        messages.append({"role": msg["role"], "content": msg["content"]})
-
-    messages.append({"role": "user", "content": question})
-
-    # 3. 获取 LLM client
-    gpt = _get_gpt(provider_id, model_name)
-
-    logger.info(f"Chat: task_id={task_id}, model={model_name}")
-
-    # Paper answers must stay inside page-aware retrieval. Legacy video tools return
-    # unpaged transcript text, so exposing them here would weaken citation provenance.
-    if is_paper:
-        response = gpt.client.chat.completions.create(
+        chunks = _library_chunks(question)
+        context = _context(chunks, source_labels=True) if chunks else "（未找到相关分页原文）"
+        messages = [{"role": "system", "content": LIBRARY_SYSTEM_PROMPT.format(context=context)}]
+        messages.extend(history[-20:])
+        messages.append({"role": "user", "content": question})
+        gpt = _get_gpt(provider_id, model_name)
+        response = create_chat_completion(
+            gpt.client,
             model=gpt.model,
             messages=messages,
             temperature=0.3,
         )
-        return {"answer": response.choices[0].message.content or "", "sources": sources}
+        return {
+            "answer": response.choices[0].message.content or "",
+            "sources": _source_records(chunks),
+            "grounding_status": "source_context_supplied" if chunks else "insufficient_source",
+        }
 
-    # 4. Tool calling 循环（最多 3 轮）
-    max_rounds = 3
-    for round_i in range(max_rounds):
-        try:
-            response = gpt.client.chat.completions.create(
-                model=gpt.model,
-                messages=messages,
-                tools=TOOLS,
-                temperature=0.7,
-            )
-        except Exception as exc:
-            logger.warning(f"模型不支持工具调用或工具调用失败，退回普通问答: {exc}")
-            response = gpt.client.chat.completions.create(
-                model=gpt.model,
-                messages=messages,
-                temperature=0.7,
-            )
-            return {"answer": response.choices[0].message.content or "", "sources": sources}
-
-        msg = response.choices[0].message
-
-        # 没有工具调用，直接返回
-        if not msg.tool_calls:
-            return {"answer": msg.content or "", "sources": sources}
-
-        # 处理工具调用
-        messages.append(msg)
-
-        for tool_call in msg.tool_calls:
-            fn_name = tool_call.function.name
-            try:
-                fn_args = json.loads(tool_call.function.arguments)
-            except json.JSONDecodeError:
-                fn_args = {}
-
-            logger.info(f"Tool call [{round_i+1}/{max_rounds}]: {fn_name}({fn_args})")
-
-            result = execute_tool(task_id, fn_name, fn_args)
-
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": result,
-            })
-
-    # 超过最大轮次，做最后一次不带 tools 的调用
-    response = gpt.client.chat.completions.create(
+    if not task_id:
+        raise ValueError("当前论文问答需要 task_id")
+    payload, chunks = _task_chunks(task_id, question)
+    context = _context(chunks) if chunks else "（未找到相关分页原文）"
+    messages = [{"role": "system", "content": PAPER_SYSTEM_PROMPT.format(context=context)}]
+    messages.extend(history[-20:])
+    messages.append({"role": "user", "content": question})
+    gpt = _get_gpt(provider_id, model_name)
+    response = create_chat_completion(
+        gpt.client,
         model=gpt.model,
         messages=messages,
-        temperature=0.7,
+        temperature=0.2,
     )
-
-    return {"answer": response.choices[0].message.content or "", "sources": sources}
+    return _ground_task_answer(response.choices[0].message.content or "", payload, chunks)

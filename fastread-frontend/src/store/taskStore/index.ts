@@ -1,55 +1,28 @@
 import { create } from 'zustand'
-import { persist, createJSONStorage } from 'zustand/middleware'
-import {
-  delete_task,
-  generateNote,
-  list_generated_tasks,
-  rerun_verification_task,
-  update_task_collection,
-} from '@/services/note.ts'
-import { v4 as uuidv4 } from 'uuid'
+import { createJSONStorage, persist } from 'zustand/middleware'
+import { del, get, set } from 'idb-keyval'
 import toast from 'react-hot-toast'
-import { get, set, del } from 'idb-keyval'
+import {
+  delete_paper,
+  list_generated_tasks,
+  update_task_collection,
+  type PaperInput,
+  type TaskSnapshot,
+} from '@/services/note'
+import {
+  updateWorkspaceResumeState,
+  type WorkspaceLocation,
+  type WorkspaceResumeState,
+} from '@/utils/workspaceNavigation'
 
 export type TaskStatus =
   | 'PENDING'
-  | 'PARSING'
-  | 'DOWNLOADING'
-  | 'TRANSCRIBING'
-  | 'SUMMARIZING'
-  | 'FORMATTING'
-  | 'SAVING'
-  | 'EXTRACTING_CLAIMS'
-  | 'SEARCHING_WEB'
-  | 'FETCHING_SOURCES'
-  | 'EVALUATING_EVIDENCE'
+  | 'PARSING_DOCUMENT'
+  | 'GENERATING_REPORT'
+  | 'FINDING_RELATED_WORK'
   | 'WRITING_REPORT'
-  | 'RUNNING'
   | 'SUCCESS'
   | 'FAILED'
-
-export interface AudioMeta {
-  cover_url: string
-  duration: number
-  file_path: string
-  platform: string
-  raw_info: any
-  title: string
-  video_id: string
-}
-
-export interface Segment {
-  start: number
-  end: number
-  text: string
-}
-
-export interface Transcript {
-  full_text: string
-  language: string
-  raw: any
-  segments: Segment[]
-}
 
 export interface PaperPage {
   page: number
@@ -58,17 +31,52 @@ export interface PaperPage {
   end?: number
 }
 
+export interface AcademicGate {
+  level: 'A1' | 'A2' | 'B1' | 'U' | 'N/A'
+  label: string
+  gate_passed: boolean
+  formal_identity_passed?: boolean
+  identity_complete: boolean
+  identity_fields_complete?: boolean
+  is_top4_security: boolean
+  is_core_venue?: boolean
+  venue_track?: 'security' | 'systems' | 'ai' | ''
+  identity_source?: string
+  identity_status:
+    | 'confirmed_core'
+    | 'claimed_core_unverified'
+    | 'confirmed_formal_other'
+    | 'preprint'
+    | 'incomplete'
+    | 'retracted_or_withdrawn'
+  publication_status: 'formally_published' | 'published' | 'unknown' | 'preprint' | 'withdrawn' | 'retracted'
+  integrity_status?: string
+  title?: string
+  authors?: string[]
+  year?: number | null
+  doi?: string
+  venue?: { id?: string; name?: string; short_name?: string; track?: string; raw?: string }
+  official_record?: boolean
+  official_record_verified?: boolean
+  registry_record_verified?: boolean
+  registry_name?: string
+  registry_record_url?: string
+  warnings?: string[]
+}
+
 export interface PaperDocument {
   id: string
   title: string
   authors: string[]
-  venue?: { id?: string; name?: string; short_name?: string; raw?: string }
+  venue?: { id?: string; name?: string; short_name?: string; track?: string; raw?: string }
   year?: number | null
   doi?: string
   source_url?: string
   resolved_source_url?: string
   pdf_url?: string
   filename?: string
+  content_hash?: string
+  formal_record_url?: string
   page_count: number
   page_count_total?: number
   page_count_parsed?: number
@@ -78,143 +86,10 @@ export interface PaperDocument {
   academic_gate?: AcademicGate
 }
 
-export interface Markdown {
-  ver_id: string
-  content: string
-  style: string
-  model_name: string
-  created_at: string
-}
-
 export interface CollectionMeta {
   folder: string
   tags: string[]
   note: string
-}
-
-export interface InsightScore {
-  score: number
-  level: string
-  reason: string
-}
-
-export interface KnowledgeCard {
-  type: string
-  title: string
-  content: string
-  evidence?: string
-  priority?: number
-}
-
-export interface VerificationClaim {
-  claim: string
-  type: string
-  type_label: string
-  risk_level: 'low' | 'medium' | 'high'
-  risk_topics: string[]
-  verdict: string
-  confidence: number
-  reason: string
-  evidence_hint: string
-  online?: {
-    claim_id?: string
-    checked: boolean
-    query: string
-    queries?: string[]
-    status?: string
-    verdict: string
-    reason: string
-    confidence: number
-    metrics: {
-      coverage: number
-      trusted_count: number
-      top_overlap: number
-      support?: number
-      refute?: number
-      context?: number
-      high_support_independent?: number
-      high_refute_independent?: number
-      independent_authoritative_sources?: number
-    }
-    sources: Array<{
-      source_id?: string
-      title: string
-      url: string
-      canonical_url?: string
-      domain: string
-      publisher?: string
-      author?: string
-      published_at?: string
-      retrieved_at?: string
-      source_type?: string
-      trust_tier?: 'A' | 'B' | 'C' | 'D' | 'blocked'
-      trust_reasons?: string[]
-      independence_group?: string
-      content_hash?: string
-      redirect_chain?: string[]
-      fetch_status?: string
-      snippet: string
-      trusted: boolean
-      risk_flags?: string[]
-    }>
-    evidence?: Array<{
-      evidence_id?: string
-      source_url: string
-      passage: string
-      stance: 'support' | 'refute' | 'context'
-      claim_element?: string
-      exact_value?: string
-      unit?: string
-      page_offsets?: { start?: number; end?: number; page_start?: number; page_end?: number }
-      confidence?: number
-      extraction_method?: string
-    }>
-    risk_flags?: string[]
-    audit?: Record<string, any>
-  }
-  priority?: number
-  machine_verdict?: string
-}
-
-export interface ClaimVerification {
-  version: number
-  external_check: boolean
-  overall: {
-    status: string
-    score: number
-    summary: string
-    note: string
-  }
-  claim_counts: {
-    total: number
-    needs_review: number
-    high_risk: number
-    medium_risk: number
-    online_checked?: number
-    online_supported?: number
-    online_refuted?: number
-  }
-  online_error?: string
-  sources?: NonNullable<VerificationClaim['online']>['sources']
-  evidence?: NonNullable<VerificationClaim['online']>['evidence']
-  risk_flags?: string[]
-  result?: Record<string, any>
-  claims: VerificationClaim[]
-}
-
-export interface AcademicGate {
-  level: 'A1' | 'A2' | 'B1' | 'U' | 'N/A'
-  label: string
-  gate_passed: boolean
-  identity_complete: boolean
-  is_top4_security: boolean
-  publication_status: 'published' | 'preprint' | 'retracted'
-  title?: string
-  authors?: string[]
-  year?: number | null
-  doi?: string
-  venue?: { id?: string; name?: string; short_name?: string; raw?: string }
-  warnings?: string[]
 }
 
 export interface ReadingReportEvidence {
@@ -228,6 +103,7 @@ export interface ReadingReportEvidence {
 
 export interface ReadingReport {
   version: number
+  report_version?: string
   generated_at: string
   title: string
   executive_summary: string
@@ -236,9 +112,8 @@ export interface ReadingReport {
     answer: string
     why_it_matters: string
     evidence: ReadingReportEvidence[]
-    verification_status: string
   }>
-  process: Array<{ step: string; description: string }>
+  process: Array<{ step: string; description: string; evidence?: ReadingReportEvidence[] }>
   contributions: Array<{
     title: string
     description: string
@@ -253,19 +128,7 @@ export interface ReadingReport {
 }
 
 export interface NoteInsights {
-  version: number
-  summary?: {
-    title?: string
-    transcript_type?: string
-    transcript_chars?: number
-    markdown_chars?: number
-  }
-  scores: Partial<{
-    information_density: InsightScore
-    credibility: InsightScore
-    actionability: InsightScore
-  }>
-  verification?: ClaimVerification
+  version?: number
   reading_report?: ReadingReport
   academic_gate?: AcademicGate
   personal_summary?: {
@@ -273,65 +136,55 @@ export interface NoteInsights {
     updated_at: string
     max_chars: number
   }
-  cards: KnowledgeCard[]
 }
 
 export interface TaskFailure {
-  category: 'cookie' | 'douyin_detail' | 'provider' | 'asr' | 'llm' | 'media' | 'unknown'
+  category: 'parsing' | 'fetching' | 'model' | 'storage' | 'unknown'
   title: string
   message: string
-  retry_hint: string
+  retry_hint?: string
   raw_message?: string
 }
 
 export interface Task {
   id: string
-  markdown: string | Markdown[]
-  transcript: Transcript
-  paperDocument?: PaperDocument
+  kind: 'paper'
   status: TaskStatus
-  platform: string
-  collection: CollectionMeta
-  audioMeta: AudioMeta
+  title: string
+  paperInput: PaperInput
+  paperDocument?: PaperDocument
   insights?: NoteInsights
+  collection: CollectionMeta
   message?: string
   error?: TaskFailure
   createdAt: string
-  formData: {
-    video_url: string
-    link: undefined | boolean
-    screenshot: undefined | boolean
-    platform: string
-    quality: string
-    model_name: string
-    provider_id: string
-    verification_depth?: string
-    source_policy?: string
-    input_mode?: string
-    style?: string
-    extras?: string
-    format?: string[]
-    video_understanding?: boolean
-    video_interval?: number
-    grid_size?: number[]
-    collection_folder?: string
-    collection_tags?: string
-    collection_note?: string
-  }
+  updatedAt?: string
+  readingProgress?: WorkspaceResumeState
 }
 
 interface TaskStore {
   tasks: Task[]
   currentTaskId: string | null
-  addPendingTask: (taskId: string, platform: string, formData: any) => void
-  updateTaskContent: (id: string, data: Partial<Omit<Task, 'id' | 'createdAt'>>) => void
+  collectionSync: Record<string, {
+    status: 'dirty' | 'saving' | 'saved' | 'error'
+    message?: string
+    savedAt?: string
+  }>
+  addPendingTask: (taskId: string, paperInput: PaperInput) => void
+  updateTaskContent: (id: string, data: Partial<Omit<Task, 'id' | 'createdAt' | 'kind'>>) => void
+  applyTaskSnapshot: (snapshot: TaskSnapshot, paperInput?: PaperInput) => void
   updateTaskCollection: (id: string, collection: Partial<CollectionMeta>) => void
+  saveTaskCollection: (id: string) => Promise<void>
   loadSavedTasks: () => Promise<void>
   removeTask: (id: string) => Promise<void>
   clearTasks: () => void
   setCurrentTask: (taskId: string | null) => void
+  recordReadingProgress: (
+    taskId: string,
+    location: Pick<WorkspaceLocation, 'view' | 'page'>,
+  ) => void
   getCurrentTask: () => Task | null
-  retryTask: (id: string, payload?: any) => void
+  retryTask: (id: string) => void
 }
 
 const DEFAULT_COLLECTION: CollectionMeta = {
@@ -342,407 +195,188 @@ const DEFAULT_COLLECTION: CollectionMeta = {
 
 const collectionSyncTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-const parseTags = (value?: string) =>
-  (value || '')
-    .split(/[，,\s]+/)
-    .map(tag => tag.trim())
-    .filter(Boolean)
-
-const getCollectionFromForm = (formData: any): CollectionMeta => ({
-  folder: formData?.collection_folder?.trim() || DEFAULT_COLLECTION.folder,
-  tags: parseTags(formData?.collection_tags),
-  note: formData?.collection_note?.trim() || '',
-})
-
-const emptyTranscript = (): Transcript => ({
-  full_text: '',
-  language: '',
-  raw: null,
-  segments: [],
-})
-
-const EMPTY_AUDIO_META: AudioMeta = {
-  cover_url: '',
-  duration: 0,
-  file_path: '',
-  platform: '',
-  raw_info: null,
-  title: '',
-  video_id: '',
+export const migratePaperTaskState = (persisted: unknown) => {
+  const state = (persisted || {}) as Partial<TaskStore>
+  const tasks = Array.isArray(state.tasks)
+    ? state.tasks.filter((task): task is Task => task?.kind === 'paper')
+    : []
+  return {
+    ...state,
+    tasks,
+    currentTaskId: state.currentTaskId && tasks.some(task => task.id === state.currentTaskId)
+      ? state.currentTaskId
+      : null,
+    collectionSync: {},
+  }
 }
 
-const isEmptyTranscript = (transcript?: Transcript) =>
-  !transcript ||
-  (!transcript.full_text &&
-    !transcript.language &&
-    !transcript.raw &&
-    (!transcript.segments || transcript.segments.length === 0))
-
-const isEmptyAudioMeta = (audioMeta?: AudioMeta) =>
-  !audioMeta ||
-  (!audioMeta.cover_url &&
-    !audioMeta.duration &&
-    !audioMeta.file_path &&
-    !audioMeta.platform &&
-    !audioMeta.raw_info &&
-    !audioMeta.title &&
-    !audioMeta.video_id)
-
-const hasSuccessSnapshotContent = (data: Partial<Omit<Task, 'id' | 'createdAt'>>) =>
-  Boolean(
-    data.markdown ||
-      !isEmptyTranscript(data.transcript) ||
-      !isEmptyAudioMeta(data.audioMeta) ||
-      data.insights ||
-      data.paperDocument
-  )
-
-const isVerificationTask = (task: Pick<Task, 'platform' | 'formData'>) =>
-  task.platform === 'verification' || Boolean(task.formData?.input_mode)
-
-const isTerminalStatus = (status: TaskStatus) => status === 'SUCCESS' || status === 'FAILED'
+const taskFromSnapshot = (snapshot: TaskSnapshot, previous?: Task, paperInput?: PaperInput): Task => ({
+  id: snapshot.id,
+  kind: 'paper',
+  status: snapshot.status,
+  title: snapshot.title || snapshot.paperDocument?.title || previous?.title || '未命名论文',
+  paperInput: {
+    ...previous?.paperInput,
+    ...snapshot.paperInput,
+    ...paperInput,
+  },
+  paperDocument: snapshot.paperDocument || previous?.paperDocument,
+  insights: snapshot.insights || previous?.insights,
+  collection: snapshot.collection || previous?.collection || DEFAULT_COLLECTION,
+  message: snapshot.message,
+  error: snapshot.error,
+  createdAt: snapshot.createdAt || previous?.createdAt || new Date().toISOString(),
+  updatedAt: snapshot.updatedAt || previous?.updatedAt,
+  readingProgress: previous?.readingProgress,
+})
 
 export const useTaskStore = create<TaskStore>()(
   persist(
-    (set, get) => ({
+    (setState, getState) => ({
       tasks: [],
       currentTaskId: null,
+      collectionSync: {},
 
-      addPendingTask: (taskId: string, platform: string, formData: any) =>
-        set(state => ({
-          tasks: [
-            {
-              formData,
-              id: taskId,
-              status: 'PENDING',
-              markdown: '',
-              platform,
-              collection: getCollectionFromForm(formData),
-              transcript: emptyTranscript(),
-              createdAt: new Date().toISOString(),
-              audioMeta: {
-                cover_url: '',
-                duration: 0,
-                file_path: '',
-                platform: '',
-                raw_info: null,
-                title: '',
-                video_id: '',
-              },
-              insights: undefined,
-              paperDocument: undefined,
-              message: undefined,
-              error: undefined,
-            },
-            ...state.tasks,
-          ],
-          currentTaskId: taskId,
-        })),
+      addPendingTask: (taskId, paperInput) => setState(state => ({
+        tasks: [
+          {
+            id: taskId,
+            kind: 'paper',
+            status: 'PENDING',
+            title: paperInput.filename || paperInput.source_url || '正在导入论文',
+            paperInput,
+            collection: DEFAULT_COLLECTION,
+            createdAt: new Date().toISOString(),
+          },
+          ...state.tasks.filter(task => task.id !== taskId),
+        ],
+        currentTaskId: taskId,
+      })),
+
+      updateTaskContent: (id, data) => setState(state => ({
+        tasks: state.tasks.map(task => task.id === id ? { ...task, ...data } : task),
+      })),
+
+      applyTaskSnapshot: (snapshot, paperInput) => setState(state => {
+        const previous = state.tasks.find(task => task.id === snapshot.id)
+        const next = taskFromSnapshot(snapshot, previous, paperInput)
+        return {
+          tasks: [next, ...state.tasks.filter(task => task.id !== snapshot.id)],
+          currentTaskId: snapshot.id,
+        }
+      }),
 
       loadSavedTasks: async () => {
-        const savedTasks = await list_generated_tasks()
-        if (!Array.isArray(savedTasks)) return
-
-        set(state => {
-          const serverTaskIds = new Set(savedTasks.map(task => task.id))
-          const restoredServerTasks: Task[] = savedTasks
-            .filter((task: any) => task?.id)
-            .map((task: any) => {
-              const paperInput = task.result?.paperInput || {}
-              const verificationInput = task.result?.verificationInput || {}
-              const reportModel = task.insights?.reading_report?.model || {}
-              const paperDocument = task.result?.paperDocument
-              const isPaper = task.audioMeta?.platform === 'paper' || Boolean(
-                paperDocument || paperInput.filename || paperInput.source_url
-              )
-              const providerId = paperInput.provider_id || verificationInput.provider_id || reportModel.provider_id || ''
-              const modelName = paperInput.model_name || verificationInput.model_name || reportModel.model_name || ''
-
-              return {
-                id: task.id,
-                status: task.status || 'SUCCESS',
-                markdown: task.markdown || '',
-                platform: task.audioMeta?.platform || (isPaper ? 'paper' : 'douyin'),
-                collection: {
-                  ...DEFAULT_COLLECTION,
-                  ...(task.collection || {}),
-                  tags: Array.isArray(task.collection?.tags) ? task.collection.tags : [],
-                },
-                transcript: task.transcript || emptyTranscript(),
-                paperDocument,
-                createdAt: task.createdAt || new Date().toISOString(),
-                audioMeta: {
-                  ...EMPTY_AUDIO_META,
-                  ...(task.audioMeta || {}),
-                  platform: task.audioMeta?.platform || (isPaper ? 'paper' : 'douyin'),
-                  title: task.audioMeta?.title || paperInput.filename || '未命名知识卡片',
-                },
-                insights: task.insights,
-                message: task.message || '',
-                error: task.error,
-                formData: {
-                  video_url: paperInput.source_url || task.videoUrl || paperInput.filename || verificationInput.url || '',
-                  link: false,
-                  screenshot: false,
-                  platform: isPaper ? 'paper' : 'douyin',
-                  quality: 'medium',
-                  model_name: modelName,
-                  provider_id: providerId,
-                  input_mode: isPaper ? 'paper' : verificationInput.input_mode,
-                  style: 'minimal',
-                  format: ['toc', 'summary', 'mindmap'],
-                },
-              }
-            })
-          const serverTasksById = new Map(restoredServerTasks.map(task => [task.id, task]))
-          const reconciledLocalTasks = state.tasks.filter(
-            task =>
-              !isVerificationTask(task) ||
-              serverTaskIds.has(task.id) ||
-              !isTerminalStatus(task.status)
-          ).map(localTask => {
-            const serverTask = serverTasksById.get(localTask.id)
-            if (!serverTask) return localTask
-            return {
-              ...localTask,
-              status: serverTask.status,
-              message: serverTask.message,
-              error: serverTask.error,
-              markdown: serverTask.markdown || localTask.markdown,
-              transcript: serverTask.transcript || localTask.transcript,
-              paperDocument: serverTask.paperDocument || localTask.paperDocument,
-              audioMeta: { ...localTask.audioMeta, ...serverTask.audioMeta },
-              insights: serverTask.insights || localTask.insights,
-              collection: serverTask.collection || localTask.collection,
-              formData: {
-                ...serverTask.formData,
-                ...localTask.formData,
-                provider_id: localTask.formData.provider_id || serverTask.formData.provider_id,
-                model_name: localTask.formData.model_name || serverTask.formData.model_name,
-                input_mode: localTask.formData.input_mode || serverTask.formData.input_mode,
-                video_url: localTask.formData.video_url || serverTask.formData.video_url,
-              },
-            }
-          })
-          const existingIds = new Set(reconciledLocalTasks.map(task => task.id))
-          const restoredTasks = restoredServerTasks.filter(task => !existingIds.has(task.id))
-
-          const currentTask = reconciledLocalTasks.find(task => task.id === state.currentTaskId)
-          const keepActiveTask =
-            currentTask && currentTask.status !== 'SUCCESS' && currentTask.status !== 'FAILED'
-          if (restoredTasks.length === 0) {
-            return {
-              ...state,
-              tasks: reconciledLocalTasks,
-              currentTaskId: keepActiveTask ? state.currentTaskId : null,
-            }
-          }
-
-          return {
-            tasks: [...reconciledLocalTasks, ...restoredTasks].sort(
-              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-            ),
-            currentTaskId: keepActiveTask ? state.currentTaskId : null,
-          }
+        const snapshots = await list_generated_tasks()
+        setState(state => {
+          const previousById = new Map(state.tasks.map(task => [task.id, task]))
+          const tasks = snapshots
+            .map(snapshot => taskFromSnapshot(snapshot, previousById.get(snapshot.id)))
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          const currentTaskId = state.currentTaskId && tasks.some(task => task.id === state.currentTaskId)
+            ? state.currentTaskId
+            : null
+          return { tasks, currentTaskId }
         })
       },
 
-      updateTaskContent: (id, data) =>
-        set(state => ({
-          tasks: state.tasks.map(task => {
-            if (task.id !== id) return task
-
-            if (
-              task.status === 'SUCCESS' &&
-              data.status === 'SUCCESS' &&
-              !hasSuccessSnapshotContent(data)
-            ) {
-              return task
-            }
-
-            if (typeof data.markdown === 'string') {
-              const prev = task.markdown
-              const newVersion: Markdown = {
-                ver_id: `${task.id}-${uuidv4()}`,
-                content: data.markdown,
-                style: task.formData.style || '',
-                model_name: task.formData.model_name || '',
-                created_at: new Date().toISOString(),
-              }
-
-              let updatedMarkdown: Markdown[]
-              if (Array.isArray(prev)) {
-                updatedMarkdown = [newVersion, ...prev]
-              } else {
-                updatedMarkdown = [
-                  newVersion,
-                  ...(typeof prev === 'string' && prev
-                    ? [
-                        {
-                          ver_id: `${task.id}-${uuidv4()}`,
-                          content: prev,
-                          style: task.formData.style || '',
-                          model_name: task.formData.model_name || '',
-                          created_at: new Date().toISOString(),
-                        },
-                      ]
-                    : []),
-                ]
-              }
-
-              return {
-                ...task,
-                ...data,
-                markdown: updatedMarkdown,
-              }
-            }
-
-            return { ...task, ...data }
-          }),
-        })),
-
       updateTaskCollection: (id, collection) => {
-        let nextCollection: CollectionMeta | null = null
-
-        set(state => ({
-          tasks: state.tasks.map(task => {
-            if (task.id !== id) return task
-
-            nextCollection = {
-              ...(task.collection || DEFAULT_COLLECTION),
-              ...collection,
-            }
-
-            return {
-              ...task,
-              collection: nextCollection,
-            }
-          }),
+        setState(state => ({
+          tasks: state.tasks.map(task => task.id === id
+            ? { ...task, collection: { ...task.collection, ...collection } }
+            : task),
+          collectionSync: {
+            ...state.collectionSync,
+            [id]: { status: 'dirty', message: '有未保存的收藏信息' },
+          },
         }))
+        const timer = collectionSyncTimers.get(id)
+        if (timer) clearTimeout(timer)
+        collectionSyncTimers.set(id, setTimeout(() => {
+          void getState().saveTaskCollection(id).catch(() => undefined)
+        }, 800))
+      },
 
-        if (!nextCollection) return
-
-        const existingTimer = collectionSyncTimers.get(id)
-        if (existingTimer)
-          clearTimeout(existingTimer)
-
-        const timer = setTimeout(() => {
-          const latest = get().tasks.find(task => task.id === id)?.collection || nextCollection!
-          update_task_collection({
+      saveTaskCollection: async id => {
+        const timer = collectionSyncTimers.get(id)
+        if (timer) clearTimeout(timer)
+        collectionSyncTimers.delete(id)
+        const task = getState().tasks.find(item => item.id === id)
+        if (!task) throw new Error('论文不存在')
+        setState(state => ({
+          collectionSync: { ...state.collectionSync, [id]: { status: 'saving', message: '正在保存收藏信息' } },
+        }))
+        try {
+          await update_task_collection({
             task_id: id,
-            collection_folder: latest.folder,
-            collection_tags: latest.tags || [],
-            collection_note: latest.note || '',
-          }).catch(err => {
-            console.warn('同步收藏信息失败:', err)
-          }).finally(() => {
-            collectionSyncTimers.delete(id)
+            collection_folder: task.collection.folder,
+            collection_tags: task.collection.tags,
+            collection_note: task.collection.note,
           })
-        }, 500)
-
-        collectionSyncTimers.set(id, timer)
+          setState(state => ({
+            collectionSync: {
+              ...state.collectionSync,
+              [id]: { status: 'saved', message: '收藏信息已保存', savedAt: new Date().toISOString() },
+            },
+          }))
+          toast.success('收藏夹和标签已保存')
+        }
+        catch (error) {
+          const message = error instanceof Error ? error.message : '收藏信息保存失败'
+          setState(state => ({
+            collectionSync: { ...state.collectionSync, [id]: { status: 'error', message } },
+          }))
+          toast.error('收藏信息保存失败，可在资料库重试')
+          throw error
+        }
       },
 
       getCurrentTask: () => {
-        const currentTaskId = get().currentTaskId
-        return get().tasks.find(task => task.id === currentTaskId) || null
+        const currentTaskId = getState().currentTaskId
+        return getState().tasks.find(task => task.id === currentTaskId) || null
       },
 
-      retryTask: async (id: string, payload?: any) => {
-        if (!id) {
-          toast.error('任务不存在')
-          return
-        }
-        const task = get().tasks.find(task => task.id === id)
-        if (!task) return
-
-        const newFormData = payload || task.formData
-        if (task.platform === 'verification' || newFormData?.input_mode) {
-          await rerun_verification_task(id)
-
-          set(state => ({
-            tasks: state.tasks.map(t =>
-              t.id === id
-                ? {
-                    ...t,
-                    formData: newFormData,
-                    collection: getCollectionFromForm(newFormData),
-                    status: 'SEARCHING_WEB',
-                    message: '重新联网核实中',
-                    error: undefined,
-                  }
-                : t
-            ),
-          }))
-          return
-        }
-
-        await generateNote({
-          ...newFormData,
-          task_id: id,
-        })
-
-        set(state => ({
-          tasks: state.tasks.map(t =>
-            t.id === id
-              ? {
-                  ...t,
-                  formData: newFormData,
-                  collection: getCollectionFromForm(newFormData),
-                  status: 'PENDING',
-                  message: undefined,
-                  error: undefined,
-                }
-              : t
-          ),
-        }))
+      retryTask: () => {
+        toast('请重新导入原 PDF 或论文 URL，失败任务不会复用不完整产物。')
       },
 
       removeTask: async id => {
-        const previousTasks = get().tasks
-        const task = previousTasks.find(t => t.id === id)
-        const previousCurrentTaskId = get().currentTaskId
-
-        set(state => ({
+        const previousTasks = getState().tasks
+        const previousCurrentTaskId = getState().currentTaskId
+        setState(state => ({
           tasks: state.tasks.filter(task => task.id !== id),
           currentTaskId: state.currentTaskId === id ? null : state.currentTaskId,
         }))
-
-        if (task) {
-          try {
-            await delete_task({
-              task_id: task.id,
-              video_id: task.audioMeta.video_id,
-              platform: task.platform,
-            })
-          } catch (error) {
-            set({
-              tasks: previousTasks,
-              currentTaskId: previousCurrentTaskId,
-            })
-            throw error
-          }
+        try {
+          await delete_paper(id)
+        }
+        catch (error) {
+          setState({ tasks: previousTasks, currentTaskId: previousCurrentTaskId })
+          throw error
         }
       },
 
-      clearTasks: () => set({ tasks: [], currentTaskId: null }),
-
-      setCurrentTask: taskId => set({ currentTaskId: taskId }),
+      clearTasks: () => setState({ tasks: [], currentTaskId: null }),
+      setCurrentTask: currentTaskId => setState({ currentTaskId }),
+      recordReadingProgress: (taskId, location) => setState(state => ({
+        tasks: state.tasks.map(task => task.id === taskId
+          ? { ...task, readingProgress: updateWorkspaceResumeState(task.readingProgress, location) }
+          : task),
+      })),
     }),
     {
-      name: 'task-storage',
+      name: 'fastread-paper-task-storage',
+      version: 3,
+      migrate: migratePaperTaskState,
+      partialize: state => ({
+        tasks: state.tasks,
+        currentTaskId: state.currentTaskId,
+      }) as TaskStore,
       storage: createJSONStorage(() => ({
-        getItem: async (name: string): Promise<string | null> => {
-          const value = await get(name)
-          return value ?? null
-        },
-        setItem: async (name: string, value: string): Promise<void> => {
-          await set(name, value)
-        },
-        removeItem: async (name: string): Promise<void> => {
-          await del(name)
-        },
+        getItem: async name => (await get(name)) ?? null,
+        setItem: async (name, value) => { await set(name, value) },
+        removeItem: async name => { await del(name) },
       })),
-    }
-  )
+    },
+  ),
 )

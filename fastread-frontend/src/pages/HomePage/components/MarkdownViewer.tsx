@@ -1,65 +1,94 @@
 import { memo, type FC, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import TaskFailureView from '@/pages/HomePage/components/TaskFailureView'
 import WorkspacePanels, { type ReadingViewMode } from '@/pages/HomePage/components/WorkspacePanels'
 import WorkspaceStatusView from '@/pages/HomePage/components/WorkspaceStatusView'
 import { useTaskStore } from '@/store/taskStore'
+import {
+  buildWorkspaceSearch,
+  parseWorkspaceLocation,
+  type WorkspaceCommandDetail,
+} from '@/utils/workspaceNavigation'
 
 interface MarkdownViewerProps {
   status: 'idle' | 'loading' | 'success' | 'failed'
 }
 
-type WorkspaceCommand = {
-  viewMode?: ReadingViewMode
-  chat?: false | 'half' | 'full'
-}
-
 const paperSteps = [
-  { label: '解析 PDF / URL', key: 'PARSING' },
-  { label: '保留分页原文', key: 'DOWNLOADING' },
+  { label: '解析 PDF / URL', key: 'PARSING_DOCUMENT' },
   { label: '准备阅读报告', key: 'SUCCESS' },
-]
-
-const auditSteps = [
-  { label: '提取主张', key: 'EXTRACTING_CLAIMS' },
-  { label: '联网检索', key: 'SEARCHING_WEB' },
-  { label: '抓取证据', key: 'FETCHING_SOURCES' },
-  { label: '评估证据', key: 'EVALUATING_EVIDENCE' },
-  { label: '写入审计', key: 'WRITING_REPORT' },
-  { label: '审计完成', key: 'SUCCESS' },
 ]
 
 const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
   const currentTask = useTaskStore(state => state.getCurrentTask())
+  const currentTaskId = currentTask?.id
+  const setCurrentTask = useTaskStore(state => state.setCurrentTask)
+  const recordReadingProgress = useTaskStore(state => state.recordReadingProgress)
   const retryTask = useTaskStore.getState().retryTask
-  const isPaper = currentTask?.platform === 'paper' || Boolean(currentTask?.paperDocument)
-  const hasVerification = Boolean(currentTask?.insights?.verification)
   const [viewMode, setViewMode] = useState<ReadingViewMode>('source')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const workspaceLocation = parseWorkspaceLocation(searchParams)
+  const firstPaperPage = currentTask?.paperDocument?.pages?.[0]?.page
 
   useEffect(() => {
-    if (!currentTask) {
+    if (!currentTaskId) {
       setViewMode('source')
       return
     }
-    setViewMode(isPaper ? 'source' : hasVerification ? 'evidence' : 'report')
-  }, [currentTask?.id, hasVerification, isPaper])
+    if (!workspaceLocation.taskId || workspaceLocation.taskId === currentTaskId) {
+      setViewMode(workspaceLocation.view)
+      return
+    }
+    setViewMode('source')
+  }, [currentTaskId, workspaceLocation.taskId, workspaceLocation.view])
+
+  useEffect(() => {
+    if (!currentTaskId) return
+    recordReadingProgress(currentTaskId, {
+      view: viewMode,
+      page: viewMode === 'source' ? workspaceLocation.page || firstPaperPage || 1 : undefined,
+    })
+  }, [currentTaskId, firstPaperPage, recordReadingProgress, viewMode, workspaceLocation.page])
 
   useEffect(() => {
     const handleWorkspaceCommand = (event: Event) => {
-      const command = (event as CustomEvent<WorkspaceCommand>).detail
+      const command = (event as CustomEvent<WorkspaceCommandDetail>).detail
       if (!command) return
-      if (command.viewMode) setViewMode(command.viewMode)
-      if (command.chat) setViewMode('chat')
+      const nextView = command.chat ? 'chat' : command.viewMode || viewMode
+      const nextTaskId = command.taskId || currentTask?.id
+      if (command.taskId) setCurrentTask(command.taskId)
+      setViewMode(nextView)
+      setSearchParams(buildWorkspaceSearch({
+        taskId: nextTaskId,
+        view: nextView,
+        page: nextView === 'source' ? command.page : undefined,
+        quote: nextView === 'source' ? command.quote : undefined,
+      }), { replace: true })
     }
     window.addEventListener('fastread:workspace-command', handleWorkspaceCommand)
     return () => window.removeEventListener('fastread:workspace-command', handleWorkspaceCommand)
-  }, [])
+  }, [currentTask?.id, setCurrentTask, setSearchParams, viewMode])
 
-  if (status === 'loading' && !hasVerification && !currentTask?.paperDocument) {
+  const navigateToView = (nextView: ReadingViewMode) => {
+    setViewMode(nextView)
+    setSearchParams(buildWorkspaceSearch({ taskId: currentTask?.id, view: nextView }), { replace: true })
+  }
+
+  const updateSourceLocation = (page: number, quote?: string) => {
+    setSearchParams(buildWorkspaceSearch({
+      taskId: currentTask?.id,
+      view: 'source',
+      page,
+      quote,
+    }), { replace: true })
+  }
+
+  if (status === 'loading' && !currentTask?.paperDocument) {
     return (
       <div className="flex h-full w-full">
         <WorkspaceStatusView
           mode="loading"
-          steps={isPaper ? paperSteps : auditSteps}
+          steps={paperSteps}
           currentStep={currentTask?.status || 'PENDING'}
         />
       </div>
@@ -68,11 +97,11 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
 
   if (status === 'idle') return <WorkspaceStatusView mode="idle" />
 
-  if (status === 'failed' && !hasVerification && !currentTask?.paperDocument) {
+  if (status === 'failed' && !currentTask?.paperDocument) {
     const failure = currentTask?.error
     return (
       <TaskFailureView
-        title={failure?.title || (isPaper ? '论文导入失败' : '证据审计失败')}
+        title={failure?.title || '论文导入失败'}
         message={failure?.message || currentTask?.message || '请检查后台或稍后再试'}
         retryHint={failure?.retry_hint}
         rawMessage={failure?.raw_message}
@@ -87,7 +116,10 @@ const MarkdownViewer: FC<MarkdownViewerProps> = memo(({ status }) => {
       <WorkspacePanels
         viewMode={viewMode}
         currentTask={currentTask}
-        setViewMode={setViewMode}
+        setViewMode={navigateToView}
+        sourcePage={workspaceLocation.page}
+        sourceQuote={workspaceLocation.quote}
+        onSourceLocationChange={updateSourceLocation}
       />
     </div>
   )

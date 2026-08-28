@@ -4,31 +4,22 @@ from datetime import datetime, timezone
 import json
 import re
 
-from app.repositories.note_artifacts import NoteArtifactRepository
-from app.services.academic_evidence import assess_academic_identity
+from app.repositories.paper_artifacts import PaperArtifactRepository
+from app.services.academic_identity_service import AcademicIdentityService
 from app.services.gpt_provider import GPTProvider
+from app.services.llm_compat import create_chat_completion
 from app.utils.logger import get_logger
 
 
 logger = get_logger(__name__)
 
-DISQUALIFYING_EVIDENCE_RISKS = {
-    "blocked_domain",
-    "canonical_anomaly",
-    "fake_authority",
-    "missing_source_identity",
-    "prompt_injection",
-    "redirect_anomaly",
-    "retracted_or_withdrawn",
-}
-
 SYSTEM_PROMPT = """你是 FastRead 的学术论文阅读助手，报告风格优先参考 NotebookLM 的引导式理解方式。
 你的任务不是堆砌零散 bullet，而是围绕读者真正需要回答的关键问题，解释论文的研究问题、方法过程、贡献、证据和局限。
 
 硬性规则：
-1. 只能依据给定原文、任务元数据和联网核验结果；不得补写来源中没有的实验数字、作者、机构、DOI 或结论。
+1. 只能依据给定论文原文和正式学术身份元数据；不得补写来源中没有的实验数字、作者、机构、DOI 或结论。
 2. 每个关键问题都要回答“答案是什么、为什么重要、依据在哪里”。
-3. 明确区分 source_only（原文内陈述）、supported/refuted/mixed/insufficient/data_void/source_risk（外部核验状态）。
+3. 每条实质性回答必须保留可回到论文原文页码的逐字短引文。
 4. 单篇论文只能说明该研究报告了什么，不能自动写成领域共识。
 5. 学术身份 Gate 未通过时，必须在 limitations 中直接说明，不能称为四大安全顶会论文。
 6. 输出必须是一个 JSON 对象，不要 Markdown 代码围栏，不要额外说明。
@@ -42,11 +33,10 @@ JSON 结构：
       "question": "关键问题",
       "answer": "连贯回答",
       "why_it_matters": "为什么值得关注",
-      "evidence": [{"exact_quote": "必须逐字来自材料的短引文", "page": 1, "source_url": "来源 URL"}],
-      "verification_status": "source_only|supported|refuted|mixed|insufficient|data_void|source_risk"
+      "evidence": [{"exact_quote": "必须逐字来自材料的短引文", "page": 1, "source_url": "来源 URL"}]
     }
   ],
-  "process": [{"step": "步骤名", "description": "该步骤如何完成"}],
+  "process": [{"step": "步骤名", "description": "该步骤如何完成", "evidence": [{"exact_quote": "逐字原文", "page": 1, "source_url": "来源 URL"}]}],
   "contributions": [{"title": "贡献名", "description": "相对已有工作贡献了什么", "evidence": [{"exact_quote": "逐字原文", "page": 1, "source_url": "来源 URL"}]}],
   "limitations": ["局限或证据边界"],
   "terms": [{"term": "术语", "explanation": "面向读者的简洁解释"}],
@@ -61,6 +51,15 @@ def _strip_code_fence(value: str) -> str:
         text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
         text = re.sub(r"\s*```$", "", text)
     return text.strip()
+
+
+def _response_format_is_unsupported(exc: Exception) -> bool:
+    """Return true only for compatibility errors, never transport/quota failures."""
+    status_code = getattr(exc, "status_code", None)
+    text = str(exc or "").lower()
+    mentions_format = "response_format" in text or "json_object" in text or "json mode" in text
+    mentions_support = any(token in text for token in ("unsupported", "not support", "unknown", "invalid"))
+    return bool(mentions_format and mentions_support and status_code in {None, 400, 404, 422})
 
 
 def _as_list(value, limit: int = 12) -> list:
@@ -124,55 +123,9 @@ def _resolve_evidence(item, evidence_sources: list[dict]) -> dict | None:
                 "exact_quote": matched_quote,
                 "verified_in_source": True,
                 "evidence_kind": source.get("evidence_kind") or "paper_source",
-                "verification_status": source.get("verification_status") or "source_only",
-                "claim_id": source.get("claim_id") or "",
+                "grounding_status": "source_grounded",
             }
     return None
-
-
-def _derived_verification_status(resolved_evidence: list[dict]) -> str:
-    if not resolved_evidence:
-        return "insufficient"
-    external = {
-        str(item.get("verification_status") or "")
-        for item in resolved_evidence
-        if item.get("evidence_kind") == "verification"
-        and item.get("verification_status") in {
-            "supported", "refuted", "mixed", "insufficient", "data_void", "source_risk"
-        }
-    }
-    if not external:
-        return "source_only"
-    if "mixed" in external or ({"supported", "refuted"} <= external):
-        return "mixed"
-    for status in ("source_risk", "refuted", "supported", "data_void", "insufficient"):
-        if status in external:
-            return status
-    return "insufficient"
-
-
-def _completed_evidence_status(online: dict, evidence: dict, source: dict) -> str:
-    status = str(online.get("status") or "")
-    if not online.get("checked"):
-        return "insufficient"
-    if status in {"insufficient", "data_void", "source_risk"}:
-        return status
-    high_quality = bool(
-        source
-        and source.get("trust_tier") in {"A", "B"}
-        and source.get("fetch_status") in {"ok", "pdf_ok"}
-        and not (set(source.get("risk_flags") or []) & DISQUALIFYING_EVIDENCE_RISKS)
-    )
-    if not high_quality:
-        return "insufficient"
-    stance = str(evidence.get("stance") or "")
-    if status == "supported" and stance == "support":
-        return "supported"
-    if status == "refuted" and stance == "refute":
-        return "refuted"
-    if status == "mixed" and stance in {"support", "refute"}:
-        return "mixed"
-    return "insufficient"
 
 
 def _normalize_report(payload: dict, academic_gate: dict, evidence_sources: list[dict]) -> dict:
@@ -191,7 +144,7 @@ def _normalize_report(payload: dict, academic_gate: dict, evidence_sources: list
             "answer": str(item.get("answer") or "").strip(),
             "why_it_matters": str(item.get("why_it_matters") or "").strip(),
             "evidence": resolved_evidence,
-            "verification_status": _derived_verification_status(resolved_evidence),
+            "grounding_status": "source_grounded" if resolved_evidence else "unresolved",
         })
 
     def normalized_objects(key: str, fields: tuple[str, ...], limit: int = 12) -> list[dict]:
@@ -202,6 +155,26 @@ def _normalize_report(payload: dict, academic_gate: dict, evidence_sources: list
                 if any(normalized.values()):
                     result.append(normalized)
         return result
+
+    process = []
+    for item in _as_list(payload.get("process"), 12):
+        if not isinstance(item, dict):
+            continue
+        raw_evidence = item.get("evidence")
+        evidence_items = raw_evidence if isinstance(raw_evidence, list) else [raw_evidence]
+        resolved_evidence = [
+            resolved
+            for value in evidence_items[:8]
+            for resolved in [_resolve_evidence(value, evidence_sources)]
+            if resolved
+        ]
+        normalized = {
+            "step": str(item.get("step") or "").strip(),
+            "description": str(item.get("description") or "").strip(),
+            "evidence": resolved_evidence,
+        }
+        if normalized["step"] or normalized["description"]:
+            process.append(normalized)
 
     contributions = []
     for item in _as_list(payload.get("contributions"), 12):
@@ -231,6 +204,8 @@ def _normalize_report(payload: dict, academic_gate: dict, evidence_sources: list
     source_grounded = bool(
         len(normalized_questions) >= 4
         and all(item["evidence"] for item in normalized_questions)
+        and process
+        and all(item["evidence"] for item in process)
         and contributions
         and all(item["evidence"] for item in contributions)
     )
@@ -241,7 +216,7 @@ def _normalize_report(payload: dict, academic_gate: dict, evidence_sources: list
         "title": str(payload.get("title") or "FastRead 学术阅读报告").strip(),
         "executive_summary": str(payload.get("executive_summary") or "").strip(),
         "key_questions": normalized_questions,
-        "process": normalized_objects("process", ("step", "description")),
+        "process": process,
         "contributions": contributions,
         "limitations": limitations,
         "terms": normalized_objects("terms", ("term", "explanation")),
@@ -255,48 +230,18 @@ def _normalize_report(payload: dict, academic_gate: dict, evidence_sources: list
 
 
 class ReadingReportService:
-    def __init__(self, artifacts: NoteArtifactRepository | None = None):
-        self.artifacts = artifacts or NoteArtifactRepository()
+    def __init__(self, artifacts: PaperArtifactRepository | None = None):
+        self.artifacts = artifacts or PaperArtifactRepository()
 
     @staticmethod
     def _source_context(result: dict) -> tuple[str, dict, list[dict]]:
-        audio_meta = result.get("audio_meta") or {}
-        raw_info = audio_meta.get("raw_info") or {}
-        transcript = result.get("transcript") or {}
-        verification_input = result.get("verification_input") or {}
-        insights = result.get("insights") or {}
-        verification = insights.get("verification") or {}
-        verification_result = result.get("verification_result") or verification.get("result") or {}
-
-        sources = []
-        for claim in verification.get("claims") or []:
-            online = claim.get("online") or {}
-            for source in online.get("sources") or []:
-                if isinstance(source, dict):
-                    sources.append(source)
-
-        academic_candidates = [
-            source.get("academic") or assess_academic_identity(source)
-            for source in sources
-            if isinstance(source, dict)
-        ]
-        academic_gate = next((item for item in academic_candidates if item.get("gate_passed")), None)
         paper_document = result.get("paper_document") or {}
-        if paper_document.get("academic_gate"):
-            academic_gate = paper_document["academic_gate"]
-        if not academic_gate:
-            academic_gate = next((item for item in academic_candidates if item.get("level") != "N/A"), None)
-        if not academic_gate:
-            academic_gate = assess_academic_identity({
-                "title": audio_meta.get("title") or raw_info.get("title") or "",
-                "author": raw_info.get("author") or raw_info.get("uploader") or "",
-                "published_at": raw_info.get("published_at") or raw_info.get("date") or "",
-                "url": verification_input.get("url") or raw_info.get("url") or "",
-                "venue": raw_info.get("venue") or raw_info.get("conference") or "",
-                "doi": raw_info.get("doi") or "",
-            })
-
         paper_pages = paper_document.get("pages") or []
+        if not paper_document or not paper_pages:
+            raise ValueError("当前论文没有可引用的分页原文")
+        academic_gate = paper_document.get("academic_gate") or AcademicIdentityService().assess(
+            {**paper_document, "document_type": "paper"}
+        )
         page_budget = 65000
         per_page = max(450, min(6000, page_budget // max(len(paper_pages), 1)))
         context_pages = [
@@ -304,55 +249,26 @@ class ReadingReportService:
             for page in paper_pages
             if page.get("text")
         ]
-        original_text = transcript.get("full_text") or verification_input.get("text") or ""
         source_payload = {
-            "title": audio_meta.get("title") or raw_info.get("title") or "",
-            "source_url": verification_input.get("url") or raw_info.get("url") or "",
+            "title": paper_document.get("title") or "",
+            "authors": paper_document.get("authors") or [],
+            "source_url": paper_document.get("pdf_url") or paper_document.get("source_url") or "",
             "academic_gate": academic_gate,
             "paper_pages": context_pages,
-            "original_text": "" if context_pages else str(original_text)[:65000],
-            "existing_markdown": str(result.get("markdown") or "")[:12000],
-            "verification_overall": verification_result,
-            "verification_claims": (verification.get("claims") or [])[:12],
         }
-        evidence_sources = []
-        paper_url = paper_document.get("pdf_url") or paper_document.get("source_url") or source_payload["source_url"]
-        for page in paper_pages:
-            evidence_sources.append({
+        paper_url = source_payload["source_url"]
+        evidence_sources = [
+            {
                 "source_id": paper_document.get("id") or "",
                 "source_url": paper_url,
                 "page_start": page.get("page"),
                 "page_end": page.get("page"),
                 "text": page.get("text") or "",
                 "evidence_kind": "paper_source",
-                "verification_status": "source_only",
-                "claim_id": "",
-            })
-        for claim in verification.get("claims") or []:
-            online = claim.get("online") or {}
-            claim_id = str(online.get("claim_id") or claim.get("claim_id") or "")
-            sources_by_url = {
-                str(source.get("url") or ""): source
-                for source in online.get("sources") or []
-                if isinstance(source, dict) and source.get("url")
             }
-            for evidence in online.get("evidence") or []:
-                offsets = evidence.get("page_offsets") or {}
-                evidence_url = str(evidence.get("source_url") or "")
-                evidence_sources.append({
-                    "source_id": evidence.get("evidence_id") or "",
-                    "source_url": evidence_url,
-                    "page_start": offsets.get("page_start") or offsets.get("page"),
-                    "page_end": offsets.get("page_end") or offsets.get("page"),
-                    "text": evidence.get("passage") or "",
-                    "evidence_kind": "verification",
-                    "verification_status": _completed_evidence_status(
-                        online,
-                        evidence,
-                        sources_by_url.get(evidence_url) or {},
-                    ),
-                    "claim_id": claim_id,
-                })
+            for page in paper_pages
+            if page.get("text")
+        ]
         return json.dumps(source_payload, ensure_ascii=False, default=str), academic_gate, evidence_sources
 
     def generate(
@@ -373,12 +289,8 @@ class ReadingReportService:
             return existing
 
         context, academic_gate, evidence_sources = self._source_context(result)
-        if not context.strip() or (
-            not evidence_sources
-            and not ((result.get("transcript") or {}).get("full_text"))
-            and not ((result.get("verification_input") or {}).get("text"))
-        ):
-            raise ValueError("当前任务没有可用于生成阅读报告的原文或核验证据")
+        if not context.strip() or not evidence_sources:
+            raise ValueError("当前论文没有可用于生成阅读报告的分页原文")
 
         gpt = GPTProvider.create(provider_id=provider_id, model_name=model_name)
         messages = [
@@ -391,10 +303,12 @@ class ReadingReportService:
             "temperature": 0.2,
         }
         try:
-            response = gpt.client.chat.completions.create(**kwargs, response_format={"type": "json_object"})
+            response = create_chat_completion(gpt.client, **kwargs, response_format={"type": "json_object"})
         except Exception as exc:
-            logger.warning(f"模型不支持 JSON response_format，回退普通 JSON 提示: {exc}")
-            response = gpt.client.chat.completions.create(**kwargs)
+            if not _response_format_is_unsupported(exc):
+                raise
+            logger.warning(f"模型明确不支持 JSON response_format，回退普通 JSON 提示: {exc}")
+            response = create_chat_completion(gpt.client, **kwargs)
 
         raw = response.choices[0].message.content or ""
         try:

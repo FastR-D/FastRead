@@ -1,88 +1,58 @@
 # FastRead requirement baseline
 
-Updated: 2026-08-01
+Updated: 2026-08-28
 
-This file records the current product priority. It supersedes the older video-note-first and verification-first prioritization when they conflict, while preserving the existing verification evidence rules as a report evidence layer.
+FastRead is a paper-only reading, discovery, and group-research workbench.
 
-## P0: NotebookLM-style single-paper reading journey
+## P0: page-aware single-paper journey
 
 ```text
 Import PDF or paper URL
--> retain paginated source text and paper identity
+-> retain paginated source text and academic identity
 -> generate a guided key-question report
 -> explain the research problem, method, contribution, evaluation, and limitations
--> show source URL, exact quote, and page for every accepted citation
+-> discover neighboring papers / related work
 -> save a separate personal summary of at most 300 Chinese characters
--> continue multi-turn questions against the same paper with page-aware sources
+-> continue multi-turn questions with page-aware sources
 ```
 
 Acceptance rules:
 
-1. A scan-only, encrypted, empty, or unparseable PDF fails closed. A report must not be generated without source text.
-2. Report citations are structured as `source_url`, `page_start`, `page_end`, and `exact_quote`. Model-authored citation strings that cannot be matched to source text are discarded.
-3. At least four key questions must cover the research problem, process/method, contribution, and evaluation/limitations.
-4. A single paper may establish only what that study reports. It is not automatically field consensus.
-5. The personal summary is user-authored, stored separately from the AI report, and hard-limited to 300 characters.
+1. A scan-only, encrypted, empty, or unparseable PDF fails closed. A report cannot be generated without source text.
+2. Report citations carry `source_url`, `page_start`, `page_end`, and `exact_quote`. Quotes that cannot be matched to the selected page are discarded.
+3. At least four key questions cover the research problem, process/method, contribution, and evaluation/limitations.
+4. Method steps and contributions retain exact page evidence; model-authored text without a source page cannot become a search anchor.
+5. A single paper establishes only what that study reports. It is not automatically field consensus.
+6. The personal summary is user-authored, stored separately from the AI report, and hard-limited to 300 characters.
 
-## Academic identity and evidence levels
+## Academic identity Gate
 
-- `A1`: formally published paper with complete identity in IEEE S&P, USENIX Security, ACM CCS, or NDSS.
-- `A2`: formally published paper with complete identity outside the four-conference allowlist.
-- `B1`: identifiable preprint; it must not be described as a formally accepted four-conference paper.
-- `U`: some academic metadata exists, but title, authors, year, DOI, or official publication record is incomplete.
-- `N/A`: no recognizable paper identity metadata.
+Security, systems, and AI core conferences use the same formal identity rule:
 
-The four-conference Gate requires aligned title, authors, publication year, canonical venue, and a DOI or official proceedings/publisher record. Retractions and withdrawals fail the Gate.
+```text
+formal_identity_passed && venue.is_core
+```
 
-### Academic-grade evidence contract
+- `confirmed_core`: official title, authors, year, and venue close; level A1.
+- `claimed_core_unverified`: a document claims a core venue but no official record closes it.
+- `confirmed_formal_other`: a formal publication outside the core catalog; level A2.
+- `preprint`: an identifiable preprint; level B1.
+- `incomplete`: partial academic metadata without closure.
+- `retracted_or_withdrawn`: a withdrawn or retracted record; the Gate fails.
 
-`A1/A2/B1/U/N/A` is an identity profile only. It must never be used as a document-wide
-"verified" score. FastRead keeps the following evidence axes independent and derives UI
-labels from them:
+The venue catalog is the single source for IEEE S&P, USENIX Security, ACM CCS, NDSS, OSDI, SOSP, ASPLOS, EuroSys, USENIX ATC, SIGCOMM, NSDI, USENIX FAST, ICLR, ICML, AAAI, NeurIPS/NIPS, and ACL. Academic identity says where a paper was formally published; it does not prove that its claims are correct.
 
-1. `identity_status`: `unrecognized | incomplete | officially_aligned`.
-   `officially_aligned` requires publisher/proceedings metadata to agree on title,
-   authors, year, canonical venue, and DOI or official record URL. User-supplied fields
-   remain unverified hints and never pass the Gate by themselves.
-2. `source_status`: `blocked | parsed_partial | locked`. A locked source records the
-   source hash, page count, parser/version, retrieval time, and any extraction limit.
-3. `citation_status`: `unmatched | exact`. Only a normalized model quote fully contained
-   in the specified locked page is exact. A real source fragment with model-added text is
-   rejected.
-4. `external_verification_status`: `not_run | source_only | supported | refuted | mixed |
-   insufficient | data_void | source_risk`. The verification engine derives this state
-   from stored claim/evidence identifiers; the report model cannot self-declare it.
-5. `integrity_status`: `unknown | clear | preprint | retracted | withdrawn | stale`.
-   A retraction or withdrawal invalidates any green academic-grade summary.
-6. `reproducibility_status`: `not_assessed | artifacts_declared | artifacts_available |
-   environment_locked | execution_attempted | reproduced | partially_reproduced |
-   reproduction_failed`. A paper's own reproducibility claim is not experimental
-   reproduction evidence.
+## P0: neighboring papers / related work
 
-User-visible labels follow these rules:
+Related-work discovery is a metadata retrieval and ranking path. It derives at most three queries from page-grounded report anchors, searches core-venue metadata plus arXiv and an optional Scholar provider in parallel, deduplicates candidates, and ranks explainable title/keyword/abstract overlap.
 
-- **原文已定位**: the answer has at least one exact citation with locked source and page.
-- **学术身份已确认**: identity is officially aligned, formally published, and the
-  integrity check is current and clear.
-- **学术级阅读 · 原文依据 · 未外部核验**: formal identity is confirmed, the source is
-  locked, all substantive report sections are grounded by exact citations, and generation
-  provenance is complete.
-- **学术级阅读 · 外部已核实**: all conditions above plus rule-derived external support for
-  every core claim and no equal-strength conflict.
-- **实验已复现**: only when an actual execution has locked inputs, environment, commands,
-  logs, outputs, and tolerance evidence.
+Each result retains title, authors, year, venue/source, available official/DOI/arXiv/PDF links, matched anchor IDs, overlapping terms, relevance score, provenance, and retrieval time. It does not fetch every candidate full text and does not use an AI judge. A provider failure is shown explicitly while other providers may still return results.
 
-Preprints may display `预印本 · 原文已定位` but not formal-publication or top-four-confirmed
-labels. A report with any ungrounded core section must display `报告未完全落源` rather than
-an academic-grade label.
+The preferred index is Elasticsearch BM25. When Elasticsearch is absent, the product reports and uses the local inverted index.
 
-## P1: scoped paper search
+## P1: group research workflow
 
-The search corpus is restricted to the four security conferences above plus a configurable systems-conference allowlist whose papers pass a security-topic Gate. Search metadata must retain title, abstract, authors, venue, year, DOI, official URL, and PDF URL. AI-extracted keywords are additive fields and never replace source metadata.
-
-Elasticsearch remains the target inverted-index backend for the group deployment. Its absence must be reported explicitly; the generic web-verification search is not equivalent to the paper search engine.
-
-## P2: presentation generation and group collaboration
-
-- Generate a `.pptx` from the reading report, covering problem, method, contributions, evaluation, limitations, and references with page/source citations.
-- Add shared group libraries, access control, comments, and review workflows only after the single-paper journey and scoped search are stable.
+- Maintain visible topic membership and add/remove-paper controls.
+- Build topic synthesis and continuing questions only from member papers' paginated source text.
+- Reject invalid model JSON or unmatched citations instead of silently substituting global context.
+- Generate presentation and FastWrite handoff artifacts only from source-grounded reading products.

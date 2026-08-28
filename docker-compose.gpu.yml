@@ -8,13 +8,19 @@ services:
       args:
         APT_MIRROR: ${APT_MIRROR:-mirrors.tuna.tsinghua.edu.cn}
         PIP_INDEX: ${PIP_INDEX:-https://pypi.tuna.tsinghua.edu.cn/simple}
-    env_file:
-      - .env
     environment:
-      - BACKEND_PORT=${BACKEND_PORT:-8483}
-      - BACKEND_HOST=${BACKEND_HOST:-0.0.0.0}
+      BACKEND_PORT: ${BACKEND_PORT:-8483}
+      BACKEND_HOST: 0.0.0.0
+      ALLOW_NON_LOCAL_ADMIN: "true"
+      FASTREAD_DATA_ROOT: /app/runtime
+      DATABASE_URL: sqlite:////app/runtime/fastread.db
+      BRAVE_SEARCH_API_KEY: ${BRAVE_SEARCH_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
     volumes:
-      - ./backend:/app
+      - fastread-data:/app/runtime
     expose:
       - "${BACKEND_PORT:-8483}"  # 不再对外暴露，用于 nginx 内部通信
     deploy:
@@ -30,8 +36,6 @@ services:
     build:
       context: .
       dockerfile: fastread-frontend/Dockerfile
-    env_file:
-      - .env
     expose:
       - "80"  # 不暴露给宿主机，只供 nginx 访问
 
@@ -39,7 +43,7 @@ services:
     container_name: fastread-nginx
     image: ${NGINX_RUNTIME_IMAGE:-mirror.gcr.io/library/nginx:1.25-alpine}
     ports:
-      - "${APP_PORT:-3015}:80"
+      - "127.0.0.1:${APP_PORT:-3015}:80"
     environment:
       - BACKEND_PORT=${BACKEND_PORT:-8483}
     volumes:
@@ -47,3 +51,6 @@ services:
     depends_on:
       - backend
       - frontend
+
+volumes:
+  fastread-data:

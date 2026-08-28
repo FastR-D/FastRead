@@ -11,6 +11,7 @@ import { useTaskStore } from '@/store/taskStore'
 import { useModelStore } from '@/store/modelStore'
 import { askQuestion, getChatStatus, indexTask, type ChatSource, type IndexStatus } from '@/services/chat'
 import { resolve_backend_resource_url } from '@/services/note'
+import { emitWorkspaceCommand } from '@/utils/workspaceNavigation'
 
 type ChatMode = 'half' | 'full'
 
@@ -20,7 +21,13 @@ interface ChatPanelProps {
   onModeChange: (mode: ChatMode) => void
 }
 
-function SourceBadges({ sources }: { sources: ChatSource[] }) {
+function SourceBadges({
+  sources,
+  onOpenSource,
+}: {
+  sources: ChatSource[]
+  onOpenSource: (source: ChatSource) => void
+}) {
   const [expanded, setExpanded] = useState(false)
 
   if (!sources || sources.length === 0) return null
@@ -41,28 +48,31 @@ function SourceBadges({ sources }: { sources: ChatSource[] }) {
             const pageLabel = source.page_start
               ? `第 ${source.page_start}${source.page_end && source.page_end !== source.page_start ? `–${source.page_end}` : ''} 页`
               : '论文原文'
-            const typeLabel = source.source_type === 'paper_page'
-              ? pageLabel
-              : source.source_type === 'reading_report'
-                ? '阅读报告'
-                : source.source_type === 'verification'
-                  ? '核验证据'
-                  : source.source_type === 'markdown'
-                    ? source.section_title || '笔记'
-                    : source.source_type === 'meta'
-                      ? '信息'
-                      : source.start_time != null && source.end_time != null
-                        ? `${source.start_time.toFixed(0)}s ~ ${source.end_time.toFixed(0)}s`
-                        : '原文'
+            const typeLabel = pageLabel
             const label = source.title ? `${source.title.slice(0, 24)} · ${typeLabel}` : typeLabel
             const href = resolve_backend_resource_url(source.source_url)
               || (source.doi ? `https://doi.org/${source.doi.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')}` : '')
+            const canLocate = source.source_type === 'paper_page' && Boolean(source.page_start)
             const badge = (
               <Badge variant="outline" className="gap-1 text-xs font-normal">
                 {label}
-                {href && <ExternalLink className="h-2.5 w-2.5" />}
+                {href && !canLocate && <ExternalLink className="h-2.5 w-2.5" />}
               </Badge>
             )
+
+            if (canLocate) {
+              return (
+                <button
+                  key={`${source.task_id || ''}:${source.page_start}:${index}`}
+                  type="button"
+                  onClick={() => onOpenSource(source)}
+                  title="在分页原文中定位并高亮引用"
+                  className="rounded transition hover:bg-amber-50"
+                >
+                  {badge}
+                </button>
+              )
+            }
 
             return href ? (
               <a key={`${source.source_url || source.doi || index}`} href={href} target="_blank" rel="noreferrer" title="打开引用原文">
@@ -104,16 +114,26 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
 
   const model = useMemo(() => {
     const reportModel = task?.insights?.reading_report?.model
-    const providerId = task?.formData?.provider_id || reportModel?.provider_id
-    const modelName = task?.formData?.model_name || reportModel?.model_name
+    const providerId = task?.paperInput.provider_id || reportModel?.provider_id
+    const modelName = task?.paperInput.model_name || reportModel?.model_name
     if (providerId || modelName) {
       return modelList.find(item =>
         item.provider_id === providerId && item.model_name === modelName
       )
     }
     return modelList[0]
-  }, [modelList, task?.formData?.model_name, task?.formData?.provider_id, task?.insights?.reading_report?.model])
+  }, [modelList, task?.paperInput.model_name, task?.paperInput.provider_id, task?.insights?.reading_report?.model])
   const suggestedQuestions = task?.insights?.reading_report?.suggested_questions || []
+
+  const openSource = useCallback((source: ChatSource) => {
+    const quote = (source.exact_quote || source.text || '').trim().slice(0, 800) || undefined
+    emitWorkspaceCommand({
+      taskId: source.task_id || taskId,
+      viewMode: 'source',
+      page: source.page_start,
+      quote,
+    })
+  }, [taskId])
 
   // 检查索引状态。索引只是增强能力，不能阻塞基础问答。
   useEffect(() => {
@@ -154,7 +174,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
       const providerId = model?.provider_id
       const modelName = model?.model_name
       if (!providerId || !modelName) {
-        toast.error('无法获取模型配置，请确认任务已完成')
+        toast.error('持续追问需要模型，请先在设置中启用一个模型')
         return
       }
 
@@ -194,7 +214,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
       content: msg.content,
       footer:
         msg.role === 'assistant' && msg.sources ? (
-          <SourceBadges sources={msg.sources} />
+          <SourceBadges sources={msg.sources} onOpenSource={openSource} />
         ) : undefined,
     }))
 
@@ -208,7 +228,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
     }
 
     return items
-  }, [messages, loading])
+  }, [messages, loading, openSource])
 
   // Bubble 角色配置
   const roles = useMemo(
@@ -348,7 +368,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
         ) : (
           <Bubble.List
             items={bubbleItems}
-            role={roles}
+            roles={roles}
             style={{ minHeight: '100%', padding: '12px' }}
           />
         )}

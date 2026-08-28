@@ -3,9 +3,7 @@
 from fastapi import Request
 from fastapi import FastAPI
 
-from app.enmus.exception import NoteErrorEnum
 from app.exceptions.biz_exception import BizException
-from app.exceptions.note import NoteError
 from app.exceptions.provider import ProviderError
 from app.utils.logger import get_logger
 from app.utils.response import ResponseWrapper as R
@@ -17,10 +15,6 @@ def register_exception_handlers(app: FastAPI):
     @app.exception_handler(BizException)
     async def biz_exception_handler(request: Request, exc: BizException):
         logger.error(f"BizException: {exc.code} - {exc.message}")
-        return R.error(code=exc.code, msg=str(exc.message))
-    @app.exception_handler(NoteError)
-    async def note_exception_handler(request: Request, exc: NoteError):
-        logger.error(f"NoteError: {exc.code} - {exc.message}")
         return R.error(code=exc.code, msg=str(exc.message))
     @app.exception_handler(ProviderError)
     async def provider_exception_handler(request: Request, exc: ProviderError):

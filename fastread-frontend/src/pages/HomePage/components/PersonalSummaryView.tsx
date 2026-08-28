@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react'
-import { ArrowRight, Loader2, MessageSquareText, Save, Sparkles } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { AlertCircle, ArrowRight, CheckCircle2, Cloud, Loader2, MessageSquareText, Save, Sparkles } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { save_personal_summary } from '@/services/note'
 import { useTaskStore, type Task } from '@/store/taskStore'
+import { loadSummaryDraft, removeSummaryDraft, saveSummaryDraft } from '@/utils/summaryDraft'
+
+type DraftStatus = 'synced' | 'saving' | 'saved' | 'failed'
 
 function openView(viewMode: 'report' | 'chat') {
   window.dispatchEvent(new CustomEvent('fastread:workspace-command', {
@@ -15,18 +18,59 @@ function openView(viewMode: 'report' | 'chat') {
 export default function PersonalSummaryView({ task }: { task: Task | null }) {
   const updateTaskContent = useTaskStore(state => state.updateTaskContent)
   const [summary, setSummary] = useState(task?.insights?.personal_summary?.content || '')
+  const [lastServerSummary, setLastServerSummary] = useState(task?.insights?.personal_summary?.content || '')
+  const [draftStatus, setDraftStatus] = useState<DraftStatus>('synced')
   const [saving, setSaving] = useState(false)
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const report = task?.insights?.reading_report
+  const taskId = task?.id
+  const persistedSummary = task?.insights?.personal_summary?.content || ''
+  const dirty = summary !== lastServerSummary
 
   useEffect(() => {
-    setSummary(task?.insights?.personal_summary?.content || '')
-  }, [task?.id, task?.insights?.personal_summary?.content])
+    const draft = taskId ? loadSummaryDraft(taskId) : null
+    setLastServerSummary(persistedSummary)
+    setSummary(draft?.content ?? persistedSummary)
+    setDraftStatus(draft && draft.content !== persistedSummary ? 'saved' : 'synced')
+  }, [persistedSummary, taskId])
+
+  useEffect(() => {
+    const preventLoss = (event: BeforeUnloadEvent) => {
+      if (!dirty) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+    window.addEventListener('beforeunload', preventLoss)
+    return () => window.removeEventListener('beforeunload', preventLoss)
+  }, [dirty])
+
+  useEffect(() => () => {
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
+  }, [])
+
+  const updateSummary = (content: string) => {
+    const nextSummary = content.slice(0, 300)
+    setSummary(nextSummary)
+    if (!task) return
+    setDraftStatus('saving')
+    try {
+      saveSummaryDraft(task.id, nextSummary)
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
+      statusTimerRef.current = setTimeout(() => setDraftStatus('saved'), 300)
+    }
+    catch {
+      setDraftStatus('failed')
+    }
+  }
 
   const save = async () => {
     if (!task) return
     setSaving(true)
     try {
       const response = await save_personal_summary(task.id, summary)
+      removeSummaryDraft(task.id)
+      setLastServerSummary(response.personal_summary.content)
+      setDraftStatus('synced')
       updateTaskContent(task.id, {
         insights: {
           ...(task.insights || { version: 1, scores: {}, cards: [] }),
@@ -34,6 +78,11 @@ export default function PersonalSummaryView({ task }: { task: Task | null }) {
         },
       })
       toast.success('300 字总结已保存')
+    }
+    catch (error) {
+      console.error('个人总结保存失败', error)
+      setDraftStatus('failed')
+      toast.error('同步失败，本机草稿仍会保留')
     }
     finally {
       setSaving(false)
@@ -77,15 +126,18 @@ export default function PersonalSummaryView({ task }: { task: Task | null }) {
             id="personal-summary"
             value={summary}
             maxLength={300}
-            onChange={event => setSummary(event.target.value.slice(0, 300))}
+            onChange={event => updateSummary(event.target.value)}
             className="mt-3 min-h-52 resize-y text-sm leading-7"
             placeholder="这篇论文试图解决……；作者通过……；最重要的贡献是……；我仍不确定……"
           />
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-xs text-slate-500">保存后仍可继续修改，不会覆盖 AI 阅读报告。</p>
-            <Button size="sm" onClick={save} disabled={saving}>
+            <div className="text-xs">
+              <DraftStatusLabel status={draftStatus} dirty={dirty} />
+              <p className="mt-1 text-slate-500">切换面板不会丢失本机草稿；点击同步后才写入论文记录。</p>
+            </div>
+            <Button size="sm" onClick={save} disabled={saving || !dirty}>
               {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-1.5 h-3.5 w-3.5" />}
-              保存总结
+              {saving ? '同步中…' : dirty ? '同步总结' : '已同步'}
             </Button>
           </div>
         </section>
@@ -103,4 +155,17 @@ export default function PersonalSummaryView({ task }: { task: Task | null }) {
       </div>
     </div>
   )
+}
+
+function DraftStatusLabel({ status, dirty }: { status: DraftStatus; dirty: boolean }) {
+  if (status === 'failed') {
+    return <span className="inline-flex items-center gap-1 font-medium text-red-700"><AlertCircle className="h-3.5 w-3.5" />保存失败，请复制内容后重试</span>
+  }
+  if (status === 'saving') {
+    return <span className="inline-flex items-center gap-1 font-medium text-blue-700"><Loader2 className="h-3.5 w-3.5 animate-spin" />本机草稿保存中…</span>
+  }
+  if (dirty || status === 'saved') {
+    return <span className="inline-flex items-center gap-1 font-medium text-amber-700"><Cloud className="h-3.5 w-3.5" />本机草稿已保存，尚未同步</span>
+  }
+  return <span className="inline-flex items-center gap-1 font-medium text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" />已同步到论文记录</span>
 }

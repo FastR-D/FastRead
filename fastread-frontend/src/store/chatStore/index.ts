@@ -3,14 +3,6 @@ import { persist } from 'zustand/middleware'
 import type { ChatSource } from '@/services/chat'
 
 const CHAT_STORAGE_KEY = 'fastread-chat-storage'
-const LEGACY_CHAT_STORAGE_KEY = 'bilinote-chat-storage'
-
-if (typeof window !== 'undefined') {
-  const legacyValue = localStorage.getItem(LEGACY_CHAT_STORAGE_KEY)
-  if (legacyValue && !localStorage.getItem(CHAT_STORAGE_KEY)) {
-    localStorage.setItem(CHAT_STORAGE_KEY, legacyValue)
-  }
-}
 
 export interface ChatMessage {
   role: 'user' | 'assistant'

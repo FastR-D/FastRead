@@ -1,57 +1,69 @@
 #!/usr/bin/env bash
-set -e
-# uncomment this for debugging
-# set -x
+set -euo pipefail
 
-# 切到项目根（假设脚本放在 script/ 目录）
 cd "$(dirname "$0")/.."
 
-echo "当前工作目录：$(pwd)"
+staging_dir="backend/.build-staging"
+bundle_dir="fastread-frontend/src-tauri/bin/FastReadBackend"
 
-# 清理旧的构建
-echo "清理旧的构建..."
-rm -rf backend/dist backend/build ./fastread-frontend/src-tauri/bin/*
-echo "清理完成。"
+cleanup() {
+  rm -rf -- "$staging_dir"
+}
+trap cleanup EXIT
 
-TARGET_TRIPLE=$(rustc -Vv | grep host | cut -f2 -d' ')
-echo "Detected target triple: $TARGET_TRIPLE"
+echo "Cleaning generated build directories..."
+rm -rf -- backend/dist backend/build fastread-frontend/src-tauri/bin "$staging_dir"
+mkdir -p "$staging_dir" fastread-frontend/src-tauri/bin
 
-# --- 核心修改部分开始 ---
+target_triple="$(rustc -Vv | awk '/^host:/ { print $2 }')"
+test -n "$target_triple"
+echo "Detected target triple: $target_triple"
 
-# 步骤 1: 为了避免 PyInstaller 的解析歧义，我们先手动复制文件
-echo "为打包准备 .env 文件..."
-cp .env.example backend/.env
-
-# 步骤 2: PyInstaller 打包，直接添加已存在的 .env 文件
-echo "开始 PyInstaller 打包..."
+echo "Building the isolated backend bundle..."
 pyinstaller \
   -y \
   --name FastReadBackend \
   --paths backend \
-  --distpath ./fastread-frontend/src-tauri/bin \
+  --distpath fastread-frontend/src-tauri/bin \
   --workpath backend/build \
-  --specpath backend \
+  --specpath "$staging_dir" \
   --hidden-import uvicorn \
   --hidden-import fastapi \
   --hidden-import starlette \
-  --add-data "app/db/builtin_providers.json:." \
-  --add-data ".env:." \
-  "$(pwd)/backend/main.py"
+  --add-data "backend/app/db/builtin_providers.json:." \
+  backend/main.py
 
-# 步骤 3: 清理在项目根目录创建的临时 .env 文件
-echo "清理临时的 .env 文件..."
-rm backend/.env
-
-# --- 核心修改部分结束 ---
-
-
-# 重命名主执行文件以包含目标平台信息
 mv \
- ./fastread-frontend/src-tauri/bin/FastReadBackend/FastReadBackend\
- ./fastread-frontend/src-tauri/bin/FastReadBackend/FastReadBackend-$TARGET_TRIPLE
+  "$bundle_dir/FastReadBackend" \
+  "$bundle_dir/FastReadBackend-$target_triple"
 
-echo "PyInstaller 打包完成。"
-echo "打包后的目录内容："
-ls -l ./fastread-frontend/src-tauri/bin/FastReadBackend
+echo "Scanning staged and generated files for private-key or high-confidence token material..."
+secret_pattern='-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|(sk|rk)-[A-Za-z0-9_-]{32,}|gh[pousr]_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{20,}'
+scan_roots=()
+for root in "$staging_dir" backend/build backend/dist fastread-frontend/src-tauri/bin; do
+  if [[ -d "$root" ]]; then
+    scan_roots+=("$root")
+  fi
+done
 
-echo "请检查 src-tauri/bin/FastReadBackend 目录，确认其中包含了名为 .env 的【文件】。"
+bad_files=()
+while IFS= read -r -d '' file; do
+  if LC_ALL=C grep -IEql -- "$secret_pattern" "$file" 2>/dev/null; then
+    bad_files+=("$(basename "$file")")
+  fi
+done < <(find "${scan_roots[@]}" -type f -print0)
+
+if (( ${#bad_files[@]} > 0 )); then
+  printf 'Potential secret material in artifact file(s):' >&2
+  printf ' %s' "${bad_files[@]}" >&2
+  printf '\n' >&2
+  exit 1
+fi
+
+if find "$bundle_dir" -type f -name '.env' -print -quit | grep -q .; then
+  echo "Packaged .env files are forbidden" >&2
+  exit 1
+fi
+find "$bundle_dir" -type f -name 'builtin_providers.json' -print -quit | grep -q .
+
+echo "PyInstaller bundle completed: $bundle_dir"

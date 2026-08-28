@@ -17,24 +17,7 @@ import {
 } from '@/services/note'
 import { useModelStore } from '@/store/modelStore'
 import { useTaskStore, type ReadingReport, type Task } from '@/store/taskStore'
-
-const STATUS_LABELS: Record<string, string> = {
-  source_only: '原文内陈述',
-  supported: '外部证据支持',
-  refuted: '外部证据反驳',
-  mixed: '证据存在冲突',
-  insufficient: '证据不足',
-  data_void: '数据空缺',
-  source_risk: '信源风险',
-}
-
-const STATUS_TONES: Record<string, string> = {
-  supported: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  refuted: 'border-red-200 bg-red-50 text-red-700',
-  mixed: 'border-amber-200 bg-amber-50 text-amber-700',
-  source_only: 'border-blue-200 bg-blue-50 text-blue-700',
-  insufficient: 'border-slate-200 bg-slate-50 text-slate-600',
-}
+import { emitWorkspaceCommand } from '@/utils/workspaceNavigation'
 
 function emitChat() {
   window.dispatchEvent(new CustomEvent('fastread:workspace-command', {
@@ -46,6 +29,11 @@ function emitSummary() {
   window.dispatchEvent(new CustomEvent('fastread:workspace-command', {
     detail: { viewMode: 'summary', chat: false },
   }))
+}
+
+function openEvidenceInSource(taskId: string, page?: number | null, quote?: string) {
+  if (!page) return
+  emitWorkspaceCommand({ taskId, viewMode: 'source', page, quote })
 }
 
 function AcademicGateBadge({ report }: { report: ReadingReport }) {
@@ -63,13 +51,25 @@ function AcademicGateBadge({ report }: { report: ReadingReport }) {
       </div>
       <p className="mt-1 leading-5">
         {passed
-          ? '身份资料通过 Gate；这不等同于论文主张已被外部证据核实。'
+          ? '已命中安全、系统或 AI 核心顶会，且正式身份资料通过 Gate；这不等同于论文主张已被外部证据核实。'
+          : gate?.is_core_venue
+            ? `已识别 ${gate.venue?.short_name || gate.venue?.name || '核心顶会'}；论文内声明已展示，仍需官方会议记录闭合正式身份。`
           : (
             <>
-          未通过四大安全顶会正式论文 Gate；报告只描述原文，不把单篇材料升级为领域共识。
+          未通过安全、系统或 AI 核心顶会正式身份 Gate；报告只描述原文，不把单篇材料升级为领域共识。
             </>
           )}
       </p>
+      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+        {gate?.venue?.short_name && <span>{gate.venue.short_name}{gate.year ? ` ${gate.year}` : ''} · {gate.venue_track || gate.venue.track}</span>}
+        {gate?.authors?.length ? <span>{gate.authors.join('、')}</span> : null}
+        {gate?.registry_record_url && (
+          <a href={gate.registry_record_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 font-semibold underline underline-offset-2">
+            正式记录 <ExternalLink className="h-3 w-3" />
+          </a>
+        )}
+        <span>闭合状态：{gate?.identity_status || 'incomplete'}</span>
+      </div>
     </div>
   )
 }
@@ -88,7 +88,13 @@ function GroundingBadge({ status }: { status?: string }) {
   )
 }
 
-function EvidenceQuotes({ evidence }: { evidence: NonNullable<ReadingReport['contributions'][number]['evidence']> }) {
+function EvidenceQuotes({
+  evidence,
+  taskId,
+}: {
+  evidence: NonNullable<ReadingReport['contributions'][number]['evidence']>
+  taskId: string
+}) {
   if (typeof evidence === 'string') {
     return <p className="mt-1 text-xs text-slate-500">依据：{evidence}</p>
   }
@@ -100,11 +106,20 @@ function EvidenceQuotes({ evidence }: { evidence: NonNullable<ReadingReport['con
         return (
           <blockquote key={`${item.source_id || item.source_url || index}`} className="border-l-2 border-blue-300 pl-3 text-xs leading-5 text-slate-600">
             “{item.exact_quote}”
-            <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-slate-400">
-              {item.page_start ? `第 ${item.page_start}${item.page_end && item.page_end !== item.page_start ? `–${item.page_end}` : ''} 页` : '正文证据'}
+            <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] text-slate-400">
+              {item.page_start ? (
+                <button
+                  type="button"
+                  onClick={() => openEvidenceInSource(taskId, item.page_start, item.exact_quote)}
+                  className="font-semibold text-blue-700 hover:underline"
+                  title="在分页原文中定位并高亮"
+                >
+                  第 {item.page_start}{item.page_end && item.page_end !== item.page_start ? `–${item.page_end}` : ''} 页 · 定位原句
+                </button>
+              ) : '正文证据'}
               {sourceHref && (
                 <a href={sourceHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline">
-                  原文 <ExternalLink className="h-2.5 w-2.5" />
+                  打开 PDF <ExternalLink className="h-2.5 w-2.5" />
                 </a>
               )}
             </div>
@@ -126,15 +141,15 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
   }, [loadEnabledModels])
 
   const model = useMemo(() => {
-    const preferredProviderId = task?.formData?.provider_id || report?.model?.provider_id
-    const preferredModelName = task?.formData?.model_name || report?.model?.model_name
+    const preferredProviderId = task?.paperInput.provider_id || report?.model?.provider_id
+    const preferredModelName = task?.paperInput.model_name || report?.model?.model_name
     if (preferredProviderId || preferredModelName) {
       return modelList.find(item =>
         item.provider_id === preferredProviderId && item.model_name === preferredModelName
       )
     }
     return modelList[0]
-  }, [modelList, report?.model?.model_name, report?.model?.provider_id, task?.formData?.model_name, task?.formData?.provider_id])
+  }, [modelList, report?.model?.model_name, report?.model?.provider_id, task?.paperInput.model_name, task?.paperInput.provider_id])
 
   const handleGenerate = async (force = false) => {
     if (!task || !model?.provider_id || !model?.model_name) {
@@ -151,7 +166,7 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
       })
       updateTaskContent(task.id, {
         insights: {
-          ...(task.insights || { version: 1, scores: {}, cards: [] }),
+          ...(task.insights || { version: 1 }),
           reading_report: response.reading_report,
         },
       })
@@ -229,22 +244,19 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
           </div>
         </header>
 
-        <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">关键问题</h2>
-          <div className="space-y-3">
+        <section className="rounded-lg border border-slate-200 bg-white px-6 py-2 shadow-sm">
+          <h2 className="border-b border-slate-100 py-4 text-sm font-semibold uppercase tracking-[0.14em] text-slate-500">关键问题与回答</h2>
+          <div className="divide-y divide-slate-100">
             {report.key_questions.map((item, index) => (
-              <div key={`${item.question}-${index}`} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+              <div key={`${item.question}-${index}`} className="py-6">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <h3 className="max-w-3xl text-base font-semibold text-slate-900">
-                    <span className="mr-2 font-mono text-slate-400">Q{index + 1}</span>{item.question}
+                    <span className="mr-2 font-mono text-blue-600">{String(index + 1).padStart(2, '0')}</span>{item.question}
                   </h3>
-                  <span className={`rounded-sm border px-2 py-0.5 text-[11px] font-medium ${STATUS_TONES[item.verification_status] || STATUS_TONES.insufficient}`}>
-                    {STATUS_LABELS[item.verification_status] || item.verification_status}
-                  </span>
                 </div>
                 <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-slate-700">{item.answer}</p>
-                <p className="mt-3 rounded-md bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-600">
-                  <strong>为什么重要：</strong>{item.why_it_matters}
+                <p className="mt-3 border-l-2 border-slate-200 pl-3 text-xs leading-5 text-slate-600">
+                  <strong>阅读提示：</strong>{item.why_it_matters}
                 </p>
                 {item.evidence.length > 0 && (
                   <div className="mt-3 space-y-2">
@@ -253,11 +265,20 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
                       return (
                         <blockquote key={evidenceIndex} className="border-l-2 border-blue-300 pl-3 text-xs leading-5 text-slate-600">
                           “{evidence.exact_quote}”
-                          <div className="mt-1 flex items-center gap-2 font-mono text-[10px] text-slate-400">
-                            {evidence.page_start ? `第 ${evidence.page_start}${evidence.page_end && evidence.page_end !== evidence.page_start ? `–${evidence.page_end}` : ''} 页` : '正文证据'}
+                          <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] text-slate-400">
+                            {evidence.page_start ? (
+                              <button
+                                type="button"
+                                onClick={() => openEvidenceInSource(task.id, evidence.page_start, evidence.exact_quote)}
+                                className="font-semibold text-blue-700 hover:underline"
+                                title="在分页原文中定位并高亮"
+                              >
+                                第 {evidence.page_start}{evidence.page_end && evidence.page_end !== evidence.page_start ? `–${evidence.page_end}` : ''} 页 · 定位原句
+                              </button>
+                            ) : '正文证据'}
                             {sourceHref && (
                               <a href={sourceHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-blue-600 hover:underline">
-                                原文 <ExternalLink className="h-2.5 w-2.5" />
+                                打开 PDF <ExternalLink className="h-2.5 w-2.5" />
                               </a>
                             )}
                           </div>
@@ -271,9 +292,9 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
           </div>
         </section>
 
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">主要过程</h2>
+        <div className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <section className="border-b border-slate-100 p-6">
+            <h2 className="text-lg font-semibold text-slate-900">论文如何一步步完成这项工作</h2>
             <ol className="mt-3 space-y-3">
               {report.process.map((item, index) => (
                 <li key={`${item.step}-${index}`} className="flex gap-3 text-sm leading-6 text-slate-700">
@@ -283,13 +304,13 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
               ))}
             </ol>
           </section>
-          <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-900">主要贡献</h2>
-            <div className="mt-3 space-y-3">
+          <section className="p-6">
+            <h2 className="text-lg font-semibold text-slate-900">论文真正增加了什么</h2>
+            <div className="mt-4 divide-y divide-slate-100">
               {report.contributions.map((item, index) => (
-                <div key={`${item.title}-${index}`} className="text-sm leading-6 text-slate-700">
+                <div key={`${item.title}-${index}`} className="py-4 first:pt-0 last:pb-0 text-sm leading-6 text-slate-700">
                   <strong>{item.title}</strong><p>{item.description}</p>
-                  {item.evidence && <EvidenceQuotes evidence={item.evidence} />}
+                  {item.evidence && <EvidenceQuotes evidence={item.evidence} taskId={task.id} />}
                 </div>
               ))}
             </div>
@@ -322,9 +343,14 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
             <h2 className="text-sm font-semibold text-blue-950">下一步：压缩成自己的 300 字总结</h2>
             <p className="mt-1 text-xs leading-5 text-blue-800">先写下你真正理解的研究问题、方法与贡献，再带着疑点持续追问。</p>
           </div>
-          <Button size="sm" onClick={emitSummary}>
-            写 300 字总结 <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" onClick={emitChat}>
+              追问不懂的细节 <MessageSquareText className="ml-1.5 h-3.5 w-3.5" />
+            </Button>
+            <Button size="sm" onClick={emitSummary}>
+              写 300 字总结 <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+            </Button>
+          </div>
         </section>
       </article>
     </div>

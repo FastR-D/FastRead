@@ -1,10 +1,11 @@
 [package]
 name = "app"
-version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
-license = ""
-repository = ""
+version = "2.0.0"
+description = "FastRead desktop client for page-aware academic paper reading"
+authors = ["FastRead contributors"]
+license = "MIT"
+repository = "https://github.com/FastR-D/FastRead"
+homepage = "https://github.com/FastR-D/FastRead"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -14,6 +15,10 @@ rust-version = "1.77.2"
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "FastRead"
+path = "src/main.rs"
+
 [build-dependencies]
 tauri-build = { version = "2.2.0", features = [] }
 
@@ -21,10 +26,9 @@ tauri-build = { version = "2.2.0", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.5.0", features = ["devtools"] }
+tauri = { version = "2.5.0", features = [] }
 tauri-plugin-log = "2.0.0-rc"
 tauri-plugin-shell = "2"
 
 [package.metadata.tauri.bundle.macOS]
 frameworks = ["bin/FastReadBackend/_internal/"]
-

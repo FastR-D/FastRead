@@ -20,7 +20,7 @@ export const HomePage: FC = () => {
     } else if (currentTask.status === 'FAILED') {
       setStatus('failed')
     } else {
-      // PENDING、PARSING、DOWNLOADING、TRANSCRIBING、SUMMARIZING 等所有进行中状态
+      // 论文解析、报告生成和近邻检索等所有进行中状态
       setStatus('loading')
     }
   }, [currentTask, currentTask?.status])

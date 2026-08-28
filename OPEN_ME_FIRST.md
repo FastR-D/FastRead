@@ -17,10 +17,9 @@ Recommended first journey:
 1. Click `选择 PDF 并导入`.
 2. Open `阅读报告` and click `一键生成阅读报告`.
 3. Review the key questions, page-linked quotes, process, contributions, and limitations.
-4. Save your own summary (maximum 300 Chinese characters).
-5. Click `继续追问` for page-aware follow-up questions.
-
-Text/URL verification is still available as the evidence-audit layer.
+4. Open `近邻论文` to inspect related papers, matched anchors, and provider status.
+5. Save your own summary (maximum 300 Chinese characters).
+6. Click `继续追问` for page-aware follow-up questions.
 
 Stop the project with `run.bat --stop`.
 

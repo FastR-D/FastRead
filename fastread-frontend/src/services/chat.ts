@@ -7,14 +7,13 @@ export interface ChatMessage {
 
 export interface ChatSource {
   text: string
-  source_type: 'meta' | 'markdown' | 'transcript' | 'reading_report' | 'verification' | 'paper_page' | 'unknown'
+  source_type: 'paper_page'
   task_id?: string
   title?: string
   section_title?: string
-  start_time?: number
-  end_time?: number
   page_start?: number
   page_end?: number
+  exact_quote?: string
   source_url?: string
   doi?: string
 }

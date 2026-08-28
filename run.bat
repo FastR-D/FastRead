@@ -35,15 +35,13 @@ if not exist ".env" (
   >> ".env" echo VITE_FRONTEND_PORT=3015
   >> ".env" echo STATIC=/static
   >> ".env" echo OUT_DIR=./static/screenshots
-  >> ".env" echo NOTE_OUTPUT_DIR=note_results
+  >> ".env" echo PAPER_OUTPUT_DIR=paper_results
   >> ".env" echo IMAGE_BASE_URL=/static/screenshots
   >> ".env" echo DATA_DIR=data
-  >> ".env" echo FFMPEG_BIN_PATH=
-  >> ".env" echo TRANSCRIBER_TYPE=bcut
-  >> ".env" echo WHISPER_MODEL_SIZE=tiny
-  >> ".env" echo GROQ_TRANSCRIBER_MODEL=whisper-large-v3-turbo
-  >> ".env" echo ONLINE_VERIFY_SEARCH_PROVIDER=brave
-  >> ".env" echo ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS=bing_academic,bing_cn,baidu
+  >> ".env" echo PAPER_SEARCH_DEADLINE=8
+  >> ".env" echo ELASTICSEARCH_URL=
+  >> ".env" echo GOOGLE_SCHOLAR_API_URL=
+  >> ".env" echo SERPAPI_API_KEY=
 )
 
 for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
@@ -210,7 +208,7 @@ echo [check] Backend runtime dependencies...
 "%BACKEND_PY%" -c "import uvicorn, fastapi, dotenv, sqlalchemy, pydantic, httpx, bs4, openai, gmssl, kombu, PIL, blinker" >nul 2>nul
 if errorlevel 1 (
   echo [init] Installing minimal backend runtime dependencies...
-  "%BACKEND_PY%" -m pip install -i "%PIP_INDEX%" --timeout 180 fastapi==0.115.12 uvicorn==0.34.0 httptools==0.6.4 watchfiles==1.0.4 python-dotenv==1.1.0 SQLAlchemy==2.0.41 pydantic==2.11.2 httpx==0.28.1 beautifulsoup4==4.13.4 openai==1.70.0 python-multipart==0.0.20 requests==2.32.3 yt-dlp==2025.1.26 ffmpeg-python==0.2.0 imageio-ffmpeg==0.6.0 gmssl==3.2.2 kombu==5.5.2 pillow==11.0.0 blinker==1.9.0
+  "%BACKEND_PY%" -m pip install -i "%PIP_INDEX%" --timeout 180 fastapi==0.115.12 uvicorn==0.34.0 httptools==0.6.4 watchfiles==1.0.4 python-dotenv==1.1.0 SQLAlchemy==2.0.41 pydantic==2.11.2 httpx==0.28.1 beautifulsoup4==4.13.4 openai==1.70.0 python-multipart==0.0.20 requests==2.32.3 gmssl==3.2.2 kombu==5.5.2 pillow==11.0.0 blinker==1.9.0
   if errorlevel 1 (
     echo [error] Failed to install backend dependencies.
     goto FAIL

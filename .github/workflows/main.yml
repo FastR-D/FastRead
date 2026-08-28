@@ -9,18 +9,70 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: macos-latest
-            target: universal-apple-darwin
+            target: native
+            bundles: dmg
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
 
     runs-on: ${{ matrix.platform }}
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # build.sh uses rustc to derive the sidecar target. Keep the macOS app on
+      # the runner's native architecture until the PyInstaller backend can be
+      # built as a real universal2 binary.
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Resolve build target
+        id: build-target
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ matrix.target }}" = "native" ]; then
+            TARGET="$(rustc -Vv | awk '/^host:/ { print $2 }')"
+          else
+            TARGET="${{ matrix.target }}"
+          fi
+
+          case "$RUNNER_OS:$TARGET" in
+            macOS:aarch64-apple-darwin|macOS:x86_64-apple-darwin|Windows:x86_64-pc-windows-msvc)
+              ;;
+            *)
+              echo "::error::Unsupported runner/target combination: $RUNNER_OS/$TARGET"
+              exit 1
+              ;;
+          esac
+
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Resolved build target: $TARGET"
+
+      - name: Install Rust compilation target
+        shell: bash
+        run: rustup target add "${{ steps.build-target.outputs.target }}"
+
+      # Cargo cache
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            fastread-frontend/src-tauri/target/
+          key: ${{ runner.os }}-${{ steps.build-target.outputs.target }}-cargo-${{ hashFiles('fastread-frontend/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ steps.build-target.outputs.target }}-cargo-
+            ${{ runner.os }}-cargo-
 
       # 设置 Python 环境（带 pip 缓存）
       - name: Set up Python
@@ -38,11 +90,44 @@ jobs:
           pip install -r backend/requirements.txt
 
           if [ "$RUNNER_OS" = "Windows" ]; then
-            backend\\build.bat
+            cmd.exe /c backend\\build.bat
           else
             chmod +x backend/build.sh
             ./backend/build.sh
           fi
+
+      # Tauri resolves externalBin by appending the build target triple.
+      # Fail before the expensive frontend/Rust build if the backend did not
+      # produce the exact sidecar required by this matrix entry.
+      - name: Verify backend sidecar
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SIDECAR_DIR="fastread-frontend/src-tauri/bin/FastReadBackend"
+          SIDECAR="$SIDECAR_DIR/FastReadBackend-${{ steps.build-target.outputs.target }}"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            SIDECAR="${SIDECAR}.exe"
+          fi
+
+          if [ ! -f "$SIDECAR" ]; then
+            echo "::error::Missing backend sidecar for target ${{ steps.build-target.outputs.target }}: $SIDECAR"
+            find "$SIDECAR_DIR" -maxdepth 2 -type f -print 2>/dev/null || true
+            exit 1
+          fi
+          if [ ! -s "$SIDECAR" ]; then
+            echo "::error::Backend sidecar is empty: $SIDECAR"
+            exit 1
+          fi
+
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            case "${{ steps.build-target.outputs.target }}" in
+              aarch64-apple-darwin) lipo -verify_arch arm64 "$SIDECAR" ;;
+              x86_64-apple-darwin) lipo -verify_arch x86_64 "$SIDECAR" ;;
+            esac
+          fi
+
+          echo "Verified backend sidecar: $SIDECAR"
 
       # 设置 pnpm
       # 不能用 'latest'：pnpm 11+ 要求 Node 22+，与下方 Node 20 不兼容（ERR_UNKNOWN_BUILTIN_MODULE）。
@@ -60,42 +145,66 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: fastread-frontend
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
-      # 设置 Rust 环境
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      # Cargo 缓存
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            fastread-frontend/src-tauri/target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('fastread-frontend/src-tauri/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+      - name: Check frontend release inputs
+        working-directory: fastread-frontend
+        shell: bash
+        run: |
+          pnpm run typecheck
+          pnpm run lint
+          if node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
+            pnpm run test
+          else
+            echo "No frontend test script is defined; no tests were run."
+          fi
+          pnpm run build
 
       # 打包 Tauri 应用
       - name: Build Tauri App
         working-directory: fastread-frontend
-        run: pnpm tauri build
+        shell: bash
+        run: pnpm tauri build --target "${{ steps.build-target.outputs.target }}" --bundles "${{ matrix.bundles }}"
 
       # 收集产物到统一目录
       - name: Collect release artifacts
         shell: bash
         run: |
-          mkdir -p release-artifacts
-          BUNDLE_DIR="fastread-frontend/src-tauri/target/release/bundle"
+          set -euo pipefail
 
-          # macOS: .dmg
-          find "$BUNDLE_DIR" -name "*.dmg" -exec cp {} release-artifacts/ \; 2>/dev/null || true
-          # Windows: .msi, .exe (NSIS)
-          find "$BUNDLE_DIR" -name "*.msi" -exec cp {} release-artifacts/ \; 2>/dev/null || true
-          find "$BUNDLE_DIR/nsis" -name "*.exe" -exec cp {} release-artifacts/ \; 2>/dev/null || true
+          mkdir -p release-artifacts
+          BUNDLE_DIR="fastread-frontend/src-tauri/target/${{ steps.build-target.outputs.target }}/release/bundle"
+
+          if [ ! -d "$BUNDLE_DIR" ]; then
+            echo "::error::Tauri bundle directory does not exist: $BUNDLE_DIR"
+            exit 1
+          fi
+
+          case "$RUNNER_OS" in
+            macOS)
+              find "$BUNDLE_DIR/dmg" -maxdepth 1 -type f -name '*.dmg' -exec cp {} release-artifacts/ \;
+              if ! find release-artifacts -maxdepth 1 -type f -name '*.dmg' -size +0c -print -quit | grep -q .; then
+                echo "::error::No non-empty DMG was produced for ${{ steps.build-target.outputs.target }}"
+                exit 1
+              fi
+              ;;
+            Windows)
+              find "$BUNDLE_DIR/msi" -maxdepth 1 -type f -name '*.msi' -exec cp {} release-artifacts/ \;
+              find "$BUNDLE_DIR/nsis" -maxdepth 1 -type f -name '*.exe' -exec cp {} release-artifacts/ \;
+              if ! find release-artifacts -maxdepth 1 -type f -name '*.msi' -size +0c -print -quit | grep -q .; then
+                echo "::error::No non-empty MSI was produced for ${{ steps.build-target.outputs.target }}"
+                exit 1
+              fi
+              if ! find release-artifacts -maxdepth 1 -type f -name '*.exe' -size +0c -print -quit | grep -q .; then
+                echo "::error::No non-empty NSIS installer was produced for ${{ steps.build-target.outputs.target }}"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::Unsupported runner OS: $RUNNER_OS"
+              exit 1
+              ;;
+          esac
 
           echo "=== Collected artifacts ==="
           ls -lh release-artifacts/
@@ -104,9 +213,16 @@ jobs:
       - name: Generate checksums
         shell: bash
         run: |
+          set -euo pipefail
           cd release-artifacts
-          sha256sum * > SHA256SUMS.txt 2>/dev/null || shasum -a 256 * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
+          CHECKSUM_FILE="SHA256SUMS-${{ steps.build-target.outputs.target }}.txt"
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum -- * > "$CHECKSUM_FILE"
+          else
+            shasum -a 256 -- * > "$CHECKSUM_FILE"
+          fi
+          test -s "$CHECKSUM_FILE"
+          cat "$CHECKSUM_FILE"
 
       # 上传产物（供 release job 使用）
       - name: Upload artifacts
@@ -114,6 +230,7 @@ jobs:
         with:
           name: artifacts-${{ matrix.platform }}
           path: release-artifacts/
+          if-no-files-found: error
 
   # 创建 GitHub Release 并上传所有产物
   release:
@@ -135,9 +252,15 @@ jobs:
           merge-multiple: true
 
       - name: List all artifacts
+        shell: bash
         run: |
+          set -euo pipefail
           echo "=== All release artifacts ==="
           ls -lhR all-artifacts/
+          if ! find all-artifacts -type f -size +0c -print -quit | grep -q .; then
+            echo "::error::No non-empty release artifacts were downloaded"
+            exit 1
+          fi
 
       # 创建 Release 并上传产物
       - name: Create GitHub Release

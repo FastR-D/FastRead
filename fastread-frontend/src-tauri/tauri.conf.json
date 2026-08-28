@@ -1,13 +1,14 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "FastRead",
+  "mainBinaryName": "FastRead",
   "version": "2.0.0",
   "identifier": "com.fastread.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:3015",
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build --mode tauri "
+    "beforeDevCommand": "corepack pnpm dev",
+    "beforeBuildCommand": "corepack pnpm build --mode tauri"
   },
   "app": {
     "windows": [
@@ -17,11 +18,11 @@
         "height": 1000,
         "resizable": true,
         "fullscreen": false,
-        "devtools": true
+        "devtools": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost http://127.0.0.1:8483 http://localhost:8483 https:; img-src 'self' asset: http://asset.localhost data: blob: https: http://127.0.0.1:8483 http://localhost:8483; media-src 'self' asset: http://asset.localhost data: blob: https: http://127.0.0.1:8483 http://localhost:8483; frame-src 'self' data: blob: https: http://127.0.0.1:8483 http://localhost:8483; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self' 'unsafe-eval'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
     }
   },
   "bundle": {
@@ -29,15 +30,44 @@
       "bin/FastReadBackend/FastReadBackend"
     ],
     "resources": {
-    "bin/FastReadBackend/_internal":"_internal"
+      "bin/FastReadBackend/_internal": "_internal"
     },
-    "macOS":{
+    "macOS": {
       "files": {
-               "Frameworks": "bin/FastReadBackend/_internal"
+        "Frameworks": "bin/FastReadBackend/_internal"
       }
     },
     "active": true,
     "targets": "all",
+    "publisher": "FastRead contributors",
+    "homepage": "https://github.com/FastR-D/FastRead",
+    "copyright": "Copyright © 2026 FastRead contributors",
+    "license": "MIT",
+    "category": "Education",
+    "shortDescription": "Page-aware academic paper reading",
+    "longDescription": "Read papers from PDFs or URLs, preserve page-level source context, create structured reading reports, and continue asking questions with page citations.",
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "wix": {
+        "upgradeCode": "7dbc2bf2-34a9-540a-a7fd-7ed4f108a354",
+        "language": [
+          "en-US",
+          "zh-CN"
+        ]
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English",
+          "SimpChinese"
+        ],
+        "displayLanguageSelector": true
+      }
+    },
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"

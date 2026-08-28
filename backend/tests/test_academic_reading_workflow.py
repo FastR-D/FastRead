@@ -4,13 +4,12 @@ from types import SimpleNamespace
 import fitz
 import pytest
 
-from app.repositories.note_artifacts import NoteArtifactRepository
+from app.repositories.paper_artifacts import PaperArtifactRepository
 from app.services import chat_service
 from app.services.academic_evidence import assess_academic_identity, normalize_venue
-from app.services.note_task_service import NoteTaskService
 from app.services.paper_ingest_service import PaperIngestService
+from app.services import paper_fetching
 from app.services.reading_report_service import ReadingReportService
-from app.services.verification import fetching, source_intel
 
 
 def _pdf_bytes(*page_texts: str) -> bytes:
@@ -23,22 +22,53 @@ def _pdf_bytes(*page_texts: str) -> bytes:
     return payload
 
 
-def test_academic_gate_requires_complete_top4_identity():
+@pytest.mark.parametrize(
+    ("source_url", "venue", "expected_id", "expected_track"),
+    [
+        (
+            "https://www.usenix.org/conference/usenixsecurity25/presentation/example",
+            "34th USENIX Security Symposium",
+            "usenix_security",
+            "security",
+        ),
+        (
+            "https://www.usenix.org/conference/osdi25/presentation/example",
+            "USENIX Symposium on Operating Systems Design and Implementation",
+            "usenix_osdi",
+            "systems",
+        ),
+        (
+            "https://openreview.net/forum?id=example",
+            "ICLR 2026",
+            "iclr",
+            "ai",
+        ),
+    ],
+)
+def test_academic_gate_accepts_complete_core_venue_identity(
+    source_url,
+    venue,
+    expected_id,
+    expected_track,
+):
     gate = assess_academic_identity({
-        "url": "https://www.usenix.org/conference/usenixsecurity25/presentation/example",
+        "url": source_url,
         "official_record_verified": True,
         "verified_academic_metadata": {
-            "title": "A Security Paper",
+            "title": "A Core Conference Paper",
             "authors": ["Alice", "Bob"],
             "published_at": "2025",
-            "venue": "34th USENIX Security Symposium",
-            "source_url": "https://www.usenix.org/conference/usenixsecurity25/presentation/example",
+            "venue": venue,
+            "source_url": source_url,
         },
     })
 
     assert gate["level"] == "A1"
     assert gate["gate_passed"] is True
-    assert gate["venue"]["id"] == "usenix_security"
+    assert gate["formal_identity_passed"] is True
+    assert gate["is_core_venue"] is True
+    assert gate["venue"]["id"] == expected_id
+    assert gate["venue_track"] == expected_track
     assert normalize_venue("ACM CCS")["id"] == "acm_ccs"
 
 
@@ -81,17 +111,17 @@ def test_academic_citation_metadata_is_extracted_and_classified():
     </head><body>This is the full paper body used for classification.</body></html>
     """
 
-    snapshot = fetching._html_snapshot("https://dl.acm.org/doi/10.1145/1234.5678", html)
-    source = source_intel.classify_source({"url": snapshot["url"]}, snapshot)
+    snapshot = paper_fetching._html_snapshot("https://dl.acm.org/doi/10.1145/1234.5678", html)
+    gate = assess_academic_identity(snapshot)
 
     assert snapshot["authors"] == ["Alice", "Bob"]
     assert snapshot["venue"] == "ACM CCS"
-    assert source["academic"]["level"] == "A1"
-    assert source["academic"]["gate_passed"] is True
+    assert gate["level"] == "A1"
+    assert gate["gate_passed"] is True
 
 
 def test_pdf_ingest_persists_pages_and_academic_boundary(tmp_path):
-    repo = NoteArtifactRepository(tmp_path)
+    repo = PaperArtifactRepository(tmp_path)
     service = PaperIngestService(repo)
 
     created = service.ingest_pdf(
@@ -111,8 +141,79 @@ def test_pdf_ingest_persists_pages_and_academic_boundary(tmp_path):
     assert repo.read_status(created["task_id"])["status"] == "SUCCESS"
 
 
+def test_pdf_ingest_exposes_core_venue_document_claim_without_promoting_it(tmp_path):
+    repo = PaperArtifactRepository(tmp_path)
+    service = PaperIngestService(repo, academic_resolver=lambda _claim: {})
+
+    created = service.ingest_pdf(
+        content=_pdf_bytes(
+            "Published as a conference paper at ICLR 2026\n"
+            "EIGENBENCH: A COMPARATIVE BEHAVIORAL MEASURE\n"
+            "OF VALUE ALIGNMENT\n"
+            "Alice Smith and Bob Jones\n"
+            "Example University\n"
+            "ABSTRACT\n"
+            "This paper studies comparative value alignment."
+        ),
+        filename="eigenbench.pdf",
+    )
+
+    paper = repo.read_result(created["task_id"])["paper_document"]
+    gate = paper["academic_gate"]
+
+    assert paper["title"].startswith("EIGENBENCH")
+    assert paper["authors"] == ["Alice Smith", "Bob Jones"]
+    assert paper["year"] == 2026
+    assert paper["venue"]["id"] == "iclr"
+    assert gate["is_core_venue"] is True
+    assert gate["venue_track"] == "ai"
+    assert gate["identity_source"] == "document_claim"
+    assert gate["gate_passed"] is False
+    assert "待官方记录核验" in gate["label"]
+
+
+def test_pdf_ingest_promotes_exact_registry_match_to_ai_core_gate(tmp_path):
+    repo = PaperArtifactRepository(tmp_path)
+
+    def registry_match(claim):
+        return {
+            "registry_record_verified": True,
+            "registry_name": "fixture accepted-paper index",
+            "registry_record_url": "https://openreview.net/forum?id=fixture",
+            "verified_academic_metadata": {
+                "title": claim["title"],
+                "authors": claim["authors"],
+                "published_at": "2026",
+                "venue": "ICLR 2026",
+                "source_url": "https://openreview.net/forum?id=fixture",
+                "publication_status": "Oral",
+            },
+        }
+
+    created = PaperIngestService(repo, academic_resolver=registry_match).ingest_pdf(
+        content=_pdf_bytes(
+            "Published as a conference paper at ICLR 2026\n"
+            "CORE CONFERENCE PAPER\n"
+            "Alice Smith and Bob Jones\n"
+            "Example University\n"
+            "ABSTRACT\n"
+            "This paper studies a core conference problem."
+        ),
+        filename="core-paper.pdf",
+    )
+
+    gate = repo.read_result(created["task_id"])["paper_document"]["academic_gate"]
+
+    assert gate["level"] == "A1"
+    assert gate["gate_passed"] is True
+    assert gate["formal_identity_passed"] is True
+    assert gate["identity_source"] == "conference_registry"
+    assert gate["venue_track"] == "ai"
+    assert gate["registry_record_url"] == "https://openreview.net/forum?id=fixture"
+
+
 def test_paper_landing_url_follows_linked_pdf_and_preserves_metadata(monkeypatch, tmp_path):
-    repo = NoteArtifactRepository(tmp_path)
+    repo = PaperArtifactRepository(tmp_path)
     landing_url = "https://papers.example/item/42"
     pdf_url = "https://papers.example/files/42.pdf"
     calls = []
@@ -166,7 +267,7 @@ def test_paper_landing_url_follows_linked_pdf_and_preserves_metadata(monkeypatch
 
 
 def test_reading_report_requires_and_persists_verified_page_quotes(monkeypatch, tmp_path):
-    repo = NoteArtifactRepository(tmp_path)
+    repo = PaperArtifactRepository(tmp_path)
     created = PaperIngestService(repo).ingest_pdf(
         content=_pdf_bytes(
             "The paper studies phishing detection. The method uses a two-stage classifier.",
@@ -184,28 +285,24 @@ def test_reading_report_requires_and_persists_verified_page_quotes(monkeypatch, 
                 "answer": "Phishing detection.",
                 "why_it_matters": "It is a security problem.",
                 "evidence": [{"exact_quote": "The paper studies phishing detection.", "page": 1}],
-                "verification_status": "source_only",
             },
             {
                 "question": "What method is used?",
                 "answer": "A two-stage classifier.",
                 "why_it_matters": "It defines the process.",
                 "evidence": [{"exact_quote": "The method uses a two-stage classifier.", "page": 1}],
-                "verification_status": "source_only",
             },
             {
                 "question": "What is contributed?",
                 "answer": "A reproducible benchmark.",
                 "why_it_matters": "It supports comparison.",
                 "evidence": [{"exact_quote": "The main contribution is a reproducible benchmark.", "page": 2}],
-                "verification_status": "source_only",
             },
             {
                 "question": "How is it evaluated?",
                 "answer": "Against three baselines.",
                 "why_it_matters": "It tests the claim.",
                 "evidence": [{"exact_quote": "Evaluation uses three baselines.", "page": 2}],
-                "verification_status": "source_only",
             },
         ],
         "process": [{"step": "Detection", "description": "Run the two-stage classifier."}],
@@ -250,48 +347,15 @@ def test_reading_report_requires_and_persists_verified_page_quotes(monkeypatch, 
 
 
 def test_chat_chunks_include_paper_pages_with_page_metadata(monkeypatch, tmp_path):
-    repo = NoteArtifactRepository(tmp_path)
+    repo = PaperArtifactRepository(tmp_path)
     created = PaperIngestService(repo).ingest_pdf(
         content=_pdf_bytes("This page contains a sufficiently long academic method description for retrieval."),
         filename="paper.pdf",
     )
     monkeypatch.setattr(chat_service, "ARTIFACTS", repo)
 
-    chunks = chat_service._load_task_chunks(created["task_id"])
+    chunks = chat_service._paper_chunks(created["task_id"], repo.read_result(created["task_id"]))
 
     paper_chunks = [chunk for chunk in chunks if chunk["metadata"]["source_type"] == "paper_page"]
     assert paper_chunks
     assert paper_chunks[0]["metadata"]["page_start"] == 1
-
-
-def test_url_verification_rebuilds_claims_from_fetched_body(monkeypatch, tmp_path):
-    repo = NoteArtifactRepository(tmp_path)
-    service = NoteTaskService(repo)
-    created = service.create_verification_task(url="https://example.org/paper.pdf", max_claims=5)
-    task_id = created["task_id"]
-    captured = {}
-
-    monkeypatch.setattr(
-        "app.services.note_task_service.verification_fetching.fetch_source_snapshot",
-        lambda *_args, **_kwargs: {
-            "url": "https://example.org/paper.pdf",
-            "canonical_url": "https://example.org/paper.pdf",
-            "title": "Paper",
-            "text": "The paper introduces a secure protocol. The evaluation uses three datasets.",
-            "page_spans": [{"page": 1, "start": 0, "end": 74}],
-            "fetch_status": "pdf_ok",
-            "source_type": "pdf",
-        },
-    )
-
-    def fake_verify(verification, **_kwargs):
-        captured["claims"] = [item["claim"] for item in verification["claims"]]
-        return {**verification, "result": {"status": "insufficient", "audit": {}}}
-
-    monkeypatch.setattr("app.services.note_task_service.verify_claims_online", fake_verify)
-
-    service.execute_verification_task(task_id)
-
-    assert captured["claims"]
-    assert all("https://example.org" not in claim for claim in captured["claims"])
-    assert any("secure protocol" in claim for claim in captured["claims"])

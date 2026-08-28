@@ -2,16 +2,22 @@ import { useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertCircle,
+  ArrowRight,
   BookOpen,
+  BookOpenCheck,
   Check,
-  ChevronDown,
   Circle,
+  Clock3,
+  FolderCog,
+  FolderOpen,
   Grid2X2,
   List,
   Loader2,
   Plus,
   Search,
   SearchCheck,
+  RotateCcw,
+  Save,
   Settings,
   ShieldCheck,
   Tags,
@@ -20,6 +26,11 @@ import {
 import logo from '@/assets/icon.png'
 import { useTaskStore, type Task } from '@/store/taskStore'
 import { cn } from '@/lib/utils'
+import {
+  buildWorkspaceSearch,
+  compareReadingRecency,
+  workspaceLocationFromResume,
+} from '@/utils/workspaceNavigation'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -30,46 +41,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-type LibraryFilter = 'all' | 'papers' | 'audits'
+type LibraryFilter = 'papers'
 type ViewMode = 'grid' | 'list'
 
-const apiBase = () => String(import.meta.env.VITE_API_BASE_URL || 'api').replace(/\/$/, '')
-
-function coverUrl(task: Task) {
-  const rawCover = task.audioMeta?.cover_url
-  if (!rawCover) return ''
-  return `${apiBase()}/image_proxy?url=${encodeURIComponent(rawCover)}`
-}
-
-function getNotebookTitle(task: Task) {
-  return task.audioMeta?.title || task.formData?.video_url || task.collection?.note || '未命名论文'
-}
-
-function isPaperTask(task: Task) {
-  return task.platform === 'paper' || Boolean(task.paperDocument)
-}
+function getNotebookTitle(task: Task) { return task.title || task.paperDocument?.title || '未命名论文' }
 
 function getSourceLabel(task: Task) {
-  if (isPaperTask(task)) {
-    const pages = task.paperDocument?.page_count || task.paperDocument?.pages.length || 0
-    return pages ? `${pages} 页原文` : '等待分页原文'
-  }
-  const verification = task.insights?.verification
-  const claimSourceUrls = new Set(
-    (verification?.claims || [])
-      .flatMap(claim => claim.online?.sources || [])
-      .map(source => source.canonical_url || source.url)
-      .filter(Boolean)
-  )
-  return `${verification?.sources?.length || claimSourceUrls.size} 个证据来源`
-}
-
-function isFirstClassVerificationTask(task: Task) {
-  return task.platform === 'verification' || ['text', 'url'].includes(task.formData?.input_mode || '')
-}
-
-function isUnverifiedLegacyTask(task: Task) {
-  return task.status === 'SUCCESS' && !task.insights?.verification && !isFirstClassVerificationTask(task)
+  const pages = task.paperDocument?.page_count || task.paperDocument?.pages.length || 0
+  return pages ? `${pages} 页原文` : '等待分页原文'
 }
 
 function formatDate(value?: string) {
@@ -85,92 +64,36 @@ function formatDate(value?: string) {
     .replace(/\s/g, '')
 }
 
-function statusLabel(task: Task) {
-  if (task.status === 'SUCCESS') return '已完成'
-  if (task.status === 'FAILED') return isPaperTask(task) ? '导入失败' : '审计失败'
-  return isPaperTask(task) ? '解析中' : '审计中'
+function formatRelativeTime(value?: string) {
+  if (!value) return ''
+  const openedAt = new Date(value).getTime()
+  if (!Number.isFinite(openedAt)) return ''
+  const minutes = Math.max(0, Math.floor((Date.now() - openedAt) / 60000))
+  if (minutes < 1) return '刚刚打开'
+  if (minutes < 60) return `${minutes} 分钟前打开`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前打开`
+  return `${Math.floor(hours / 24)} 天前打开`
 }
 
-const verdictLabel: Record<string, string> = {
-  supported: '支持',
-  refuted: '反证',
-  mixed: '混合',
-  insufficient: '证据不足',
-  data_void: '数据空缺',
-  source_risk: '信源风险',
-}
-
-const verdictTone: Record<string, string> = {
-  supported: 'bg-emerald-50 text-emerald-700',
-  refuted: 'bg-red-50 text-red-700',
-  mixed: 'bg-amber-50 text-amber-700',
-  insufficient: 'bg-slate-100 text-slate-600',
-  data_void: 'bg-orange-50 text-orange-700',
-  source_risk: 'bg-red-50 text-red-700',
+function resumeLabel(task: Task) {
+  const progress = task.readingProgress
+  if (!progress) return '继续阅读'
+  if (progress.view === 'source') return progress.page ? `继续第 ${progress.page} 页` : '继续阅读原文'
+  if (progress.view === 'report') return '继续查看阅读报告'
+  if (progress.view === 'related') return '继续查看近邻论文'
+  if (progress.view === 'summary') return '继续写 300 字总结'
+  if (progress.view === 'chat') return '继续带页码追问'
+  return '继续阅读'
 }
 
 function VerdictMark({ task }: { task: Task }) {
-  if (isPaperTask(task)) {
-    const report = task.insights?.reading_report
-    const summary = task.insights?.personal_summary?.content
-    return (
-      <span className={cn(
-        'inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs',
-        summary
-          ? 'bg-emerald-50 text-emerald-700'
-          : report
-            ? 'bg-blue-50 text-blue-700'
-            : 'bg-slate-100 text-slate-600'
-      )}>
-        <BookOpen className="h-3 w-3" />
-        {summary ? '总结已完成' : report ? '报告已生成' : '待生成报告'}
-      </span>
-    )
-  }
-  const verification = task.insights?.verification
-  const status = verification?.overall?.status
-  if (!status && isUnverifiedLegacyTask(task)) {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-sm bg-amber-50 px-2 py-1 text-xs text-amber-700">
-        <SearchCheck className="h-3 w-3" />
-        未联网核实
-      </span>
-    )
-  }
-  if (!status) return <StatusMark task={task} />
-
+  const report = task.insights?.reading_report
+  const summary = task.insights?.personal_summary?.content
   return (
-    <span className={cn('inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs', verdictTone[status] || 'bg-slate-100 text-slate-600')}>
-      <ShieldCheck className="h-3 w-3" />
-      {verdictLabel[status] || status}
-      <span className="font-mono opacity-70">
-        {verification.claim_counts?.online_supported ?? 0}/{verification.claim_counts?.online_refuted ?? 0}/{verification.claim_counts?.total ?? 0}
-      </span>
-    </span>
-  )
-}
-
-function StatusMark({ task }: { task: Task }) {
-  if (task.status === 'SUCCESS') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs text-emerald-700">
-        <Check className="h-3 w-3" />
-        {statusLabel(task)}
-      </span>
-    )
-  }
-  if (task.status === 'FAILED') {
-    return (
-      <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-1 text-xs text-rose-700">
-        <AlertCircle className="h-3 w-3" />
-        {statusLabel(task)}
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2 py-1 text-xs text-sky-700">
-      <Loader2 className="h-3 w-3 animate-spin" />
-      {statusLabel(task)}
+    <span className={cn('inline-flex items-center gap-1 rounded-sm px-2 py-1 text-xs', summary ? 'bg-emerald-50 text-emerald-700' : report ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-600')}>
+      <BookOpen className="h-3 w-3" />
+      {summary ? '总结已完成' : report ? '报告已生成' : '待生成报告'}
     </span>
   )
 }
@@ -201,15 +124,18 @@ function RecentNotebookCard({
   viewMode,
   onOpen,
   onDelete,
+  onEditCollection,
 }: {
   task: Task
   index: number
   viewMode: ViewMode
   onOpen: (taskId: string) => void
   onDelete: (task: Task) => void
+  onEditCollection: (task: Task) => void
 }) {
-  const image = coverUrl(task)
+  const image = ''
   const tags = task.collection?.tags || []
+  const folder = task.collection?.folder || '默认收藏夹'
   const NotebookIcon = [SearchCheck, ShieldCheck, AlertCircle, Check, BookOpen, Circle][index % 6]
 
   if (viewMode === 'list') {
@@ -231,12 +157,22 @@ function RecentNotebookCard({
             <div className="line-clamp-1 text-base font-medium text-neutral-950">
               {getNotebookTitle(task)}
             </div>
-            <div className="mt-1 text-sm text-neutral-500">
-              {formatDate(task.createdAt)} · {getSourceLabel(task)}
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-neutral-500">
+              <span>{formatDate(task.readingProgress?.lastOpenedAt || task.createdAt)} · {getSourceLabel(task)}</span>
+              <span className="inline-flex items-center gap-1 text-xs"><FolderOpen className="h-3 w-3" />{folder}</span>
             </div>
           </div>
         </button>
         <VerdictMark task={task} />
+        <button
+          type="button"
+          onClick={() => onEditCollection(task)}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-500 transition hover:bg-blue-50 hover:text-blue-700 focus-visible:ring-2 focus-visible:ring-blue-500"
+          aria-label={`管理收藏信息：${getNotebookTitle(task)}`}
+          title="收藏夹与标签"
+        >
+          <FolderCog className="h-4 w-4" />
+        </button>
         <button
           type="button"
           onClick={() => onDelete(task)}
@@ -254,6 +190,18 @@ function RecentNotebookCard({
     <div
       className="group relative h-[168px] overflow-hidden rounded-lg border border-transparent text-left outline-none transition hover:-translate-y-0.5 hover:shadow-md focus-visible:ring-2 focus-visible:ring-primary"
     >
+      <button
+        type="button"
+        onClick={() => onEditCollection(task)}
+        className={cn(
+          'absolute right-14 top-3 z-20 flex h-10 w-10 items-center justify-center rounded-full opacity-0 transition focus-visible:opacity-100 focus-visible:ring-2 group-hover:opacity-100',
+          image ? 'bg-black/35 text-white hover:bg-blue-600 focus-visible:ring-white' : 'bg-white/75 text-neutral-600 hover:bg-blue-50 hover:text-blue-700 focus-visible:ring-blue-500',
+        )}
+        aria-label={`管理收藏信息：${getNotebookTitle(task)}`}
+        title="收藏夹与标签"
+      >
+        <FolderCog className="h-4 w-4" />
+      </button>
       <button
         type="button"
         onClick={() => onOpen(task.id)}
@@ -296,7 +244,7 @@ function RecentNotebookCard({
         <div className="mt-auto">
           <h3 className="line-clamp-2 text-xl font-medium leading-snug">{getNotebookTitle(task)}</h3>
           <div className={cn('mt-3 text-sm', image ? 'text-white/82' : 'text-neutral-600')}>
-            {formatDate(task.createdAt)} · {getSourceLabel(task)}
+            {formatDate(task.readingProgress?.lastOpenedAt || task.createdAt)} · {getSourceLabel(task)}
           </div>
           {tags.length > 0 && (
             <div className={cn('mt-2 flex items-center gap-1 text-xs', image ? 'text-white/75' : 'text-neutral-500')}>
@@ -330,15 +278,38 @@ export default function LibraryPage() {
   const tasks = useTaskStore(state => state.tasks)
   const setCurrentTask = useTaskStore(state => state.setCurrentTask)
   const removeTask = useTaskStore(state => state.removeTask)
+  const updateTaskCollection = useTaskStore(state => state.updateTaskCollection)
+  const saveTaskCollection = useTaskStore(state => state.saveTaskCollection)
+  const collectionSync = useTaskStore(state => state.collectionSync || {})
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<LibraryFilter>('papers')
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null)
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null)
+  const [folderFilter, setFolderFilter] = useState('all')
+  const [tagFilter, setTagFilter] = useState('all')
+  const [collectionTaskId, setCollectionTaskId] = useState<string | null>(null)
+
+  const collectionTask = tasks.find(task => task.id === collectionTaskId) || null
+  const collectionState = collectionTask ? collectionSync[collectionTask.id] : undefined
 
   const sortedTasks = useMemo(
-    () => [...tasks].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()),
+    () => [...tasks].sort(compareReadingRecency),
     [tasks]
+  )
+
+  const continueTask = useMemo(
+    () => sortedTasks.find(task => Boolean(task.paperDocument) && Boolean(task.readingProgress)),
+    [sortedTasks]
+  )
+
+  const folders = useMemo(
+    () => Array.from(new Set(tasks.map(task => task.collection?.folder || '默认收藏夹'))).sort(),
+    [tasks],
+  )
+  const availableTags = useMemo(
+    () => Array.from(new Set(tasks.flatMap(task => task.collection?.tags || []))).sort(),
+    [tasks],
   )
 
   const searchedTasks = useMemo(() => {
@@ -347,9 +318,9 @@ export default function LibraryPage() {
     return sortedTasks.filter(task => {
       const target = [
         getNotebookTitle(task),
-        task.formData?.video_url,
-        task.insights?.verification?.overall?.status,
-        isUnverifiedLegacyTask(task) ? '未联网核实' : '',
+        task.paperInput.source_url,
+        task.paperDocument?.authors?.join(' '),
+        task.paperDocument?.venue?.short_name,
         task.collection?.folder,
         ...(task.collection?.tags || []),
         task.collection?.note,
@@ -362,23 +333,24 @@ export default function LibraryPage() {
   }, [query, sortedTasks])
 
   const visibleTasks = useMemo(() => {
-    if (filter === 'papers') {
-      return searchedTasks.filter(isPaperTask)
-    }
-    if (filter === 'audits') {
-      return searchedTasks.filter(task => !isPaperTask(task))
-    }
-    return searchedTasks
-  }, [filter, searchedTasks])
+    const collectionFiltered = searchedTasks.filter(task => {
+      if (folderFilter !== 'all' && (task.collection?.folder || '默认收藏夹') !== folderFilter) return false
+      if (tagFilter !== 'all' && !(task.collection?.tags || []).includes(tagFilter)) return false
+      return true
+    })
+    return collectionFiltered
+  }, [folderFilter, searchedTasks, tagFilter])
 
   const openTask = (taskId: string) => {
+    const task = tasks.find(item => item.id === taskId)
+    const location = workspaceLocationFromResume(taskId, task?.readingProgress, 'source')
     setCurrentTask(taskId)
-    navigate('/workspace')
+    navigate(`/workspace?${buildWorkspaceSearch(location)}`)
   }
 
   const createTask = () => {
     setCurrentTask(null)
-    navigate('/workspace')
+    navigate('/workspace?view=source')
   }
 
   const confirmDeleteTask = async () => {
@@ -397,8 +369,6 @@ export default function LibraryPage() {
 
   const tabs: Array<{ id: LibraryFilter; label: string }> = [
     { id: 'papers', label: '论文' },
-    { id: 'all', label: '全部阅读' },
-    { id: 'audits', label: '证据审计' },
   ]
 
   return (
@@ -409,6 +379,20 @@ export default function LibraryPage() {
           <span className="text-2xl font-semibold tracking-normal">FastRead</span>
         </Link>
         <div className="flex items-center gap-3">
+          <Link
+            to="/search"
+            className="inline-flex h-10 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 text-sm font-medium text-emerald-800 transition hover:bg-emerald-100"
+          >
+            <Search className="h-4 w-4" />
+            论文检索
+          </Link>
+          <Link
+            to="/research"
+            className="inline-flex h-10 items-center gap-2 rounded-full border border-blue-200 bg-blue-50 px-4 text-sm font-medium text-blue-800 transition hover:bg-blue-100"
+          >
+            <BookOpenCheck className="h-4 w-4" />
+            专题知识库
+          </Link>
           <Link
             to="/settings"
             className="inline-flex h-10 items-center gap-2 rounded-full border border-neutral-200 px-4 text-sm font-medium text-neutral-900 transition hover:bg-neutral-50"
@@ -428,6 +412,32 @@ export default function LibraryPage() {
       </header>
 
       <main className="mx-auto flex w-full max-w-[1640px] flex-col gap-12 px-8 pb-16 pt-8 lg:px-14">
+        {continueTask && (
+          <section className="flex flex-col gap-5 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 via-white to-indigo-50 px-6 py-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-blue-700">
+                <Clock3 className="h-4 w-4" />
+                继续阅读
+              </div>
+              <h2 className="mt-2 truncate text-xl font-semibold text-neutral-950">
+                {getNotebookTitle(continueTask)}
+              </h2>
+              <p className="mt-1 text-sm text-neutral-600">
+                {formatRelativeTime(continueTask.readingProgress?.lastOpenedAt)}
+                {continueTask.readingProgress?.page ? ` · 上次读到第 ${continueTask.readingProgress.page} 页` : ''}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => openTask(continueTask.id)}
+              className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-neutral-950 px-5 text-sm font-semibold text-white transition hover:bg-neutral-800 focus-visible:ring-2 focus-visible:ring-blue-600"
+            >
+              {resumeLabel(continueTask)}
+              <ArrowRight className="h-4 w-4" />
+            </button>
+          </section>
+        )}
+
         <section className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             {tabs.map(tab => (
@@ -475,14 +485,38 @@ export default function LibraryPage() {
                 <List className="h-5 w-5" />
               </button>
             </div>
-            <button
-              type="button"
-              className="inline-flex h-12 items-center gap-2 rounded-full border border-neutral-200 px-5 text-sm hover:bg-neutral-50"
-            >
-              最近
-              <ChevronDown className="h-4 w-4" />
-            </button>
+            <div className="inline-flex h-12 items-center gap-2 rounded-full border border-neutral-200 px-5 text-sm text-neutral-600">
+              <Clock3 className="h-4 w-4" />
+              最近打开
+            </div>
           </div>
+        </section>
+
+        <section className="flex flex-wrap items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-neutral-800">
+            <FolderOpen className="h-4 w-4" />
+            收藏目录
+          </div>
+          <label className="flex items-center gap-2 text-xs text-neutral-500">
+            收藏夹
+            <select value={folderFilter} onChange={event => setFolderFilter(event.target.value)} className="h-9 rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-800">
+              <option value="all">全部收藏夹</option>
+              {folders.map(folder => <option key={folder} value={folder}>{folder}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-xs text-neutral-500">
+            标签
+            <select value={tagFilter} onChange={event => setTagFilter(event.target.value)} className="h-9 rounded-md border border-neutral-200 bg-white px-3 text-sm text-neutral-800">
+              <option value="all">全部标签</option>
+              {availableTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+            </select>
+          </label>
+          {(folderFilter !== 'all' || tagFilter !== 'all') && (
+            <button type="button" onClick={() => { setFolderFilter('all'); setTagFilter('all') }} className="text-xs text-blue-700 underline underline-offset-2">
+              清除分类筛选
+            </button>
+          )}
+          <span className="ml-auto text-xs text-neutral-500">{visibleTasks.length} 条匹配记录</span>
         </section>
 
         <section>
@@ -500,6 +534,7 @@ export default function LibraryPage() {
                   viewMode={viewMode}
                   onOpen={openTask}
                   onDelete={setTaskToDelete}
+                  onEditCollection={task => setCollectionTaskId(task.id)}
                 />
               ))}
             </div>
@@ -514,6 +549,7 @@ export default function LibraryPage() {
                   viewMode={viewMode}
                   onOpen={openTask}
                   onDelete={setTaskToDelete}
+                  onEditCollection={task => setCollectionTaskId(task.id)}
                 />
               ))}
             </div>
@@ -563,6 +599,76 @@ export default function LibraryPage() {
                   删除
                 </>
               )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(collectionTask)} onOpenChange={open => !open && setCollectionTaskId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>收藏夹与标签</DialogTitle>
+            <DialogDescription>
+              「{collectionTask ? getNotebookTitle(collectionTask) : ''}」保存后可在资料库的收藏目录中单独筛选。
+            </DialogDescription>
+          </DialogHeader>
+          {collectionTask && (
+            <div className="space-y-4 py-2">
+              <label className="block text-sm font-medium text-neutral-800">
+                收藏夹
+                <input
+                  value={collectionTask.collection?.folder || '默认收藏夹'}
+                  onChange={event => updateTaskCollection(collectionTask.id, { folder: event.target.value })}
+                  className="mt-1.5 h-10 w-full rounded-md border border-neutral-200 px-3 text-sm outline-none focus:border-blue-500"
+                  placeholder="例如：大模型安全"
+                />
+              </label>
+              <label className="block text-sm font-medium text-neutral-800">
+                标签
+                <input
+                  value={(collectionTask.collection?.tags || []).join('，')}
+                  onChange={event => updateTaskCollection(collectionTask.id, {
+                    tags: event.target.value.split(/[，,\s]+/).map(tag => tag.trim()).filter(Boolean),
+                  })}
+                  className="mt-1.5 h-10 w-full rounded-md border border-neutral-200 px-3 text-sm outline-none focus:border-blue-500"
+                  placeholder="例如：prompt-injection，survey"
+                />
+              </label>
+              <label className="block text-sm font-medium text-neutral-800">
+                归档备注
+                <textarea
+                  value={collectionTask.collection?.note || ''}
+                  onChange={event => updateTaskCollection(collectionTask.id, { note: event.target.value })}
+                  className="mt-1.5 min-h-24 w-full resize-y rounded-md border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-blue-500"
+                  placeholder="记录为什么收藏、后续要读什么"
+                />
+              </label>
+              <div className={cn(
+                'rounded-md border px-3 py-2 text-xs',
+                collectionState?.status === 'error'
+                  ? 'border-red-200 bg-red-50 text-red-700'
+                  : collectionState?.status === 'saved'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                    : 'border-slate-200 bg-slate-50 text-slate-600',
+              )}>
+                {collectionState?.message || '修改后会自动保存，也可以点击下方按钮立即保存。'}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            {collectionTask && collectionState?.status === 'error' && (
+              <Button type="button" variant="outline" onClick={() => void saveTaskCollection(collectionTask.id).catch(() => undefined)}>
+                <RotateCcw className="h-4 w-4" />重试
+              </Button>
+            )}
+            <Button type="button" variant="outline" onClick={() => setCollectionTaskId(null)}>关闭</Button>
+            <Button
+              type="button"
+              disabled={!collectionTask || collectionState?.status === 'saving'}
+              onClick={() => collectionTask && void saveTaskCollection(collectionTask.id).catch(() => undefined)}
+            >
+              {collectionState?.status === 'saving' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              立即保存
             </Button>
           </DialogFooter>
         </DialogContent>

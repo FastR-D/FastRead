@@ -5,12 +5,11 @@ from types import SimpleNamespace
 
 import fitz
 
-from app.repositories.note_artifacts import NoteArtifactRepository
+from app.repositories.paper_artifacts import PaperArtifactRepository
 from app.services.academic_evidence import assess_academic_identity
+from app.services import paper_fetching as fetching
 from app.services.paper_ingest_service import PaperIngestService
 from app.services.reading_report_service import ReadingReportService, _normalize_report
-from app.services.verification import fetching
-from app.services.verification.evidence import evidence_counts
 
 
 def _public_dns(monkeypatch):
@@ -210,7 +209,7 @@ def test_fetched_official_metadata_can_pass_academic_gate():
 
 
 def test_paper_overrides_are_unverified_supplement(tmp_path):
-    repo = NoteArtifactRepository(tmp_path)
+    repo = PaperArtifactRepository(tmp_path)
     created = PaperIngestService(repo)._persist(
         snapshot={
             "url": "https://evil.example/p.pdf",
@@ -248,7 +247,6 @@ def test_report_status_and_quotes_are_backend_derived():
         "page_end": 1,
         "text": "The paper studies phishing detection.",
         "evidence_kind": "paper_source",
-        "verification_status": "source_only",
     }]
     report = _normalize_report(
         {
@@ -257,7 +255,6 @@ def test_report_status_and_quotes_are_backend_derived():
                     "question": "What is studied?",
                     "answer": "Phishing.",
                     "evidence": [{"exact_quote": "The paper studies phishing detection.", "page": 1}],
-                    "verification_status": "supported",
                 },
                 {
                     "question": "What else?",
@@ -266,7 +263,6 @@ def test_report_status_and_quotes_are_backend_derived():
                         "exact_quote": "The paper studies phishing detection. Extra fabricated words.",
                         "page": 1,
                     }],
-                    "verification_status": "supported",
                 },
             ],
             "process": [{}],
@@ -280,117 +276,21 @@ def test_report_status_and_quotes_are_backend_derived():
         sources,
     )
 
-    assert report["key_questions"][0]["verification_status"] == "source_only"
+    assert report["key_questions"][0]["grounding_status"] == "source_grounded"
     assert report["key_questions"][0]["evidence"][0]["exact_quote"] == "The paper studies phishing detection."
-    assert report["key_questions"][1]["verification_status"] == "insufficient"
+    assert report["key_questions"][1]["grounding_status"] == "unresolved"
     assert report["key_questions"][1]["evidence"] == []
     assert report["process"] == []
     assert report["contributions"][0]["evidence"] == []
     assert report["report_grounding_status"] == "partial"
 
 
-def test_completed_verification_evidence_controls_report_status():
-    report = _normalize_report(
-        {
-            "key_questions": [{
-                "question": "Is the claim supported?",
-                "answer": "Yes.",
-                "evidence": [{"exact_quote": "Independent evidence supports the claim."}],
-                "verification_status": "refuted",
-            }],
-        },
-        {"gate_passed": False, "label": "unverified"},
-        [{
-            "source_id": "ev-1",
-            "source_url": "https://evidence.example/item",
-            "text": "Independent evidence supports the claim.",
-            "evidence_kind": "verification",
-            "verification_status": "supported",
-            "claim_id": "claim-1",
-        }],
-    )
-
-    question = report["key_questions"][0]
-    assert question["verification_status"] == "supported"
-    assert question["evidence"][0]["claim_id"] == "claim-1"
-
-
-def test_claim_verdict_is_not_blanket_applied_to_context_or_risky_evidence(tmp_path):
-    result = {
-        "transcript": {"full_text": "Original paper text."},
-        "insights": {
-            "verification": {
-                "claims": [{
-                    "claim": "A claim",
-                    "online": {
-                        "checked": True,
-                        "status": "supported",
-                        "claim_id": "claim-1",
-                        "sources": [
-                            {
-                                "url": "https://evidence.example/context",
-                                "trust_tier": "A",
-                                "fetch_status": "ok",
-                                "risk_flags": [],
-                            },
-                            {
-                                "url": "https://evidence.example/retracted",
-                                "trust_tier": "A",
-                                "fetch_status": "ok",
-                                "risk_flags": ["retracted_or_withdrawn"],
-                            },
-                        ],
-                        "evidence": [
-                            {
-                                "evidence_id": "ev-context",
-                                "source_url": "https://evidence.example/context",
-                                "passage": "Context passage without supporting stance.",
-                                "stance": "context",
-                            },
-                            {
-                                "evidence_id": "ev-retracted",
-                                "source_url": "https://evidence.example/retracted",
-                                "passage": "Retracted passage that appears supportive.",
-                                "stance": "support",
-                            },
-                        ],
-                    },
-                }],
-            },
-        },
-    }
-
-    _context, _gate, sources = ReadingReportService(NoteArtifactRepository(tmp_path))._source_context(result)
-
-    statuses = {source["source_id"]: source["verification_status"] for source in sources}
-    assert statuses == {"ev-context": "insufficient", "ev-retracted": "insufficient"}
-
-
-def test_retracted_source_is_not_high_quality_support():
-    source_url = "https://nature.example/retracted"
-    counts = evidence_counts(
-        [{"source_url": source_url, "stance": "support"}],
-        {source_url: {
-            "url": source_url,
-            "domain": "nature.example",
-            "trust_tier": "B",
-            "fetch_status": "ok",
-            "risk_flags": ["retracted_or_withdrawn"],
-        }},
-    )
-
-    assert counts["support"] == 1
-    assert counts["high_support_independent"] == 0
-
-
-def test_report_generation_atomically_merges_summary_and_verification(monkeypatch, tmp_path):
-    repo = NoteArtifactRepository(tmp_path)
+def test_report_generation_atomically_merges_summary_and_topic_state(monkeypatch, tmp_path):
+    repo = PaperArtifactRepository(tmp_path)
     task_id = "paper-task"
     page_text = "Problem statement. Method statement. Contribution statement. Evaluation statement."
     repo.write_result(task_id, {
         "paper_task": True,
-        "audio_meta": {"title": "Paper", "raw_info": {"url": "https://paper.example/p.pdf"}},
-        "transcript": {"full_text": page_text},
         "paper_document": {
             "id": task_id,
             "title": "Paper",
@@ -457,18 +357,18 @@ def test_report_generation_atomically_merges_summary_and_verification(monkeypatc
     assert started.wait(5)
     service.save_personal_summary(task_id=task_id, summary="My summary")
 
-    def add_verification(payload):
-        payload.setdefault("insights", {})["verification"] = {"result": {"status": "completed"}}
+    def add_topic_state(payload):
+        payload.setdefault("insights", {})["topic_state"] = {"status": "ready"}
         return payload
 
-    repo.update_result(task_id, add_verification)
+    repo.update_result(task_id, add_topic_state)
     release.set()
     worker.join(5)
 
     assert not errors
     saved = repo.read_result(task_id)
     assert saved["insights"]["personal_summary"]["content"] == "My summary"
-    assert saved["insights"]["verification"]["result"]["status"] == "completed"
+    assert saved["insights"]["topic_state"]["status"] == "ready"
     assert saved["insights"]["reading_report"]["title"] == "Report"
     assert json.loads(repo.result_path(task_id).read_text(encoding="utf-8"))["paper_task"] is True
     assert not list(tmp_path.glob(".*.tmp"))

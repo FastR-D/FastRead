@@ -37,26 +37,17 @@ if not exist ".env" (
   >> ".env" echo # Backend paths
   >> ".env" echo STATIC=/static
   >> ".env" echo OUT_DIR=./static/screenshots
-  >> ".env" echo NOTE_OUTPUT_DIR=note_results
+  >> ".env" echo PAPER_OUTPUT_DIR=paper_results
   >> ".env" echo IMAGE_BASE_URL=/static/screenshots
   >> ".env" echo DATA_DIR=data
   >> ".env" echo PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
   >> ".env" echo.
-  >> ".env" echo # FFmpeg is installed inside Docker images.
-  >> ".env" echo FFMPEG_BIN_PATH=
   >> ".env" echo.
-  >> ".env" echo # Transcriber
-  >> ".env" echo TRANSCRIBER_TYPE=bcut
-  >> ".env" echo WHISPER_MODEL_SIZE=tiny
-  >> ".env" echo GROQ_TRANSCRIBER_MODEL=whisper-large-v3-turbo
-  >> ".env" echo.
-  >> ".env" echo # Online verification search
-  >> ".env" echo ONLINE_VERIFY_SEARCH_PROVIDER=brave
-  >> ".env" echo ONLINE_VERIFY_SEARCH_FALLBACK_PROVIDERS=bing_academic,bing_cn,baidu
-  >> ".env" echo BRAVE_SEARCH_API_KEY=your_brave_search_api_key
-  >> ".env" echo BRAVE_SEARCH_COUNTRY=CN
-  >> ".env" echo BRAVE_SEARCH_LANG=zh-hans
-  >> ".env" echo BRAVE_SEARCH_UI_LANG=zh-CN
+  >> ".env" echo # Paper metadata discovery
+  >> ".env" echo PAPER_SEARCH_DEADLINE=8
+  >> ".env" echo ELASTICSEARCH_URL=
+  >> ".env" echo GOOGLE_SCHOLAR_API_URL=
+  >> ".env" echo SERPAPI_API_KEY=
 )
 
 for /f "usebackq tokens=1,* delims==" %%A in (".env") do (

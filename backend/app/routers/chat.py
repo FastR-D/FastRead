@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel
 from typing import Literal, Optional
 import os
@@ -7,18 +7,20 @@ from app.services.chat_service import chat as chat_service
 from app.services.vector_store import VectorStoreManager
 from app.utils.logger import get_logger
 from app.utils.response import ResponseWrapper as R
+from app.utils.local_access import require_local_request
+from app.validators.task_id_validator import CanonicalTaskId
 
 logger = get_logger(__name__)
 CHAT_VECTOR_INDEX_ENABLED = os.getenv("CHAT_VECTOR_INDEX_ENABLED", "0").lower() in {"1", "true", "yes", "on"}
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_local_request)])
 
 # 索引状态追踪: task_id -> "indexing" | "indexed" | "failed"
 _index_status: dict[str, str] = {}
 
 
 class IndexRequest(BaseModel):
-    task_id: str
+    task_id: CanonicalTaskId
 
 
 class ChatMessage(BaseModel):
@@ -27,7 +29,7 @@ class ChatMessage(BaseModel):
 
 
 class AskRequest(BaseModel):
-    task_id: Optional[str] = None
+    task_id: Optional[CanonicalTaskId] = None
     scope: Literal["task", "library"] = "task"
     question: str
     history: list[ChatMessage] = []
@@ -82,7 +84,7 @@ def index_task(data: IndexRequest, background_tasks: BackgroundTasks):
 
 
 @router.get("/chat/status")
-def chat_status(task_id: str):
+def chat_status(task_id: CanonicalTaskId):
     """返回索引状态：disabled / idle / indexing / indexed / failed。"""
     if not CHAT_VECTOR_INDEX_ENABLED:
         return R.success(data={"status": "disabled", "indexed": False})
@@ -106,10 +108,10 @@ def chat_status(task_id: str):
 
 @router.post("/chat/ask")
 def ask_question(data: AskRequest):
-    """基于笔记内容的 RAG 问答。"""
+    """基于论文分页原文的问答。"""
     try:
         if data.scope == "task" and not data.task_id:
-            return R.error(msg="当前视频问答需要 task_id")
+            return R.error(msg="当前论文问答需要 task_id")
         history = [{"role": m.role, "content": m.content} for m in data.history]
         result = chat_service(
             task_id=data.task_id,

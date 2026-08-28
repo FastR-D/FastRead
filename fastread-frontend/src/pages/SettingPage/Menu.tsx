@@ -1,9 +1,9 @@
 import {
   BotMessageSquare,
-  Captions,
-  HardDriveDownload,
   Info,
   Activity,
+  Cable,
+  Search,
 } from 'lucide-react'
 import MenuBar, { IMenuProps } from '@/pages/SettingPage/components/menuBar.tsx'
 
@@ -15,18 +15,6 @@ const Menu = () => {
       icon: <BotMessageSquare />,
       path: '/settings/model',
     },
-    {
-      id: 'transcriber',
-      name: '音频转写配置',
-      icon: <Captions />,
-      path: '/settings/transcriber',
-    },
-    {
-      id: 'download',
-      name: '下载配置',
-      icon: <HardDriveDownload />,
-      path: '/settings/download',
-    },
     // //其他配置
     // {
     //   id: 'prompt',
@@ -34,6 +22,18 @@ const Menu = () => {
     //   icon: <SquareChevronRight />,
     //   path: '/settings/prompt',
     // },
+    {
+      id: 'search-connections',
+      name: '学术检索连接',
+      icon: <Search />,
+      path: '/settings/search-connections',
+    },
+    {
+      id: 'integrations',
+      name: '外部连接',
+      icon: <Cable />,
+      path: '/settings/integrations',
+    },
     {
       id: 'monitor',
       name: '部署监控',

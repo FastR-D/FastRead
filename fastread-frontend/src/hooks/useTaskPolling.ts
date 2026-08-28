@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
 import { useTaskStore } from '@/store/taskStore'
-import type { Task } from '@/store/taskStore'
 import { get_task_status } from '@/services/note.ts'
 import toast from 'react-hot-toast'
 
@@ -21,7 +20,7 @@ const getRetryDelay = (attempts: number) => {
 
 export const useTaskPolling = (interval = 3000) => {
   const tasks = useTaskStore(state => state.tasks)
-  const updateTaskContent = useTaskStore(state => state.updateTaskContent)
+  const applyTaskSnapshot = useTaskStore(state => state.applyTaskSnapshot)
 
   const tasksRef = useRef(tasks)
   const retryStateRef = useRef<Map<string, PollRetryState>>(new Map())
@@ -69,40 +68,17 @@ export const useTaskPolling = (interval = 3000) => {
 
             retryStateRef.current.delete(task.id)
 
-            const result = res.result
-            const hasSuccessContent = Boolean(
-              result?.markdown || result?.transcript || result?.audioMeta || result?.insights || result?.paperDocument
-            )
-
             const messageChanged = res.message !== latestTask.message
 
-            if (status && (status !== latestTask.status || messageChanged || (status === 'SUCCESS' && hasSuccessContent))) {
+            if (status && (status !== latestTask.status || messageChanged || status === 'SUCCESS')) {
               if (status === 'SUCCESS') {
                 if (latestTask.status !== 'SUCCESS') {
-                  toast.success('笔记生成成功')
+                  toast.success('论文已就绪')
                 }
-                const next: Partial<Omit<Task, 'id' | 'createdAt'>> = {
-                  status,
-                  message: undefined,
-                  error: undefined,
-                }
-                if (result && 'markdown' in result) next.markdown = result.markdown
-                if (result && 'transcript' in result) next.transcript = result.transcript
-                if (result && 'audioMeta' in result) next.audioMeta = result.audioMeta
-                if (result && 'insights' in result) next.insights = result.insights
-                if (result && 'paperDocument' in result) next.paperDocument = result.paperDocument
-                updateTaskContent(latestTask.id, next)
-              } else if (status === 'FAILED') {
-                updateTaskContent(latestTask.id, {
-                  status,
-                  message: res.message,
-                  error: res.error,
-                })
-                console.warn(`⚠️ 任务 ${latestTask.id} 失败`, res.error || res.message)
-              } else {
-                const next: Partial<Omit<Task, 'id' | 'createdAt'>> = { status }
-                if (res.message !== undefined) next.message = res.message
-                updateTaskContent(latestTask.id, next)
+                applyTaskSnapshot(res, latestTask.paperInput)
+              }
+              else {
+                applyTaskSnapshot(res, latestTask.paperInput)
               }
             }
           } catch (e) {
@@ -133,5 +109,5 @@ export const useTaskPolling = (interval = 3000) => {
       retryStates.clear()
       pollingRef.current = false
     }
-  }, [interval, updateTaskContent])
+  }, [applyTaskSnapshot, interval])
 }

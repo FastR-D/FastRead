@@ -6,14 +6,26 @@ import uuid
 from urllib.parse import urljoin
 
 from app.enmus.task_status_enums import TaskStatus
-from app.repositories.note_artifacts import NoteArtifactRepository
-from app.services.academic_evidence import assess_academic_identity
-from app.services.verification.fetching import fetch_source_snapshot, parse_pdf_bytes
+from app.repositories.paper_artifacts import PaperArtifactRepository
+from app.db.paper_task_dao import upsert_paper_task
+from app.services.academic_identity_service import AcademicIdentityService
+from app.services.academic_identity_resolver import resolve_document_claim_record
+from app.services.paper_fetching import fetch_source_snapshot, parse_pdf_bytes
+from app.utils.logger import get_logger
+
+
+logger = get_logger(__name__)
 
 
 class PaperIngestService:
-    def __init__(self, artifacts: NoteArtifactRepository | None = None):
-        self.artifacts = artifacts or NoteArtifactRepository()
+    def __init__(
+        self,
+        artifacts: PaperArtifactRepository | None = None,
+        academic_resolver=None,
+    ):
+        self.artifacts = artifacts or PaperArtifactRepository()
+        self._academic_resolver = academic_resolver or resolve_document_claim_record
+        self._identity = AcademicIdentityService()
 
     @staticmethod
     def _pages_from_snapshot(snapshot: dict) -> list[dict]:
@@ -77,7 +89,7 @@ class PaperIngestService:
             or ([unverified_supplement.get("author")] if unverified_supplement.get("author") else [])
         )
         pages = self._pages_from_snapshot(snapshot)
-        academic_gate = assess_academic_identity(metadata)
+        academic_gate = self._identity.assess(metadata)
         task_id = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc).isoformat()
         paper_document = {
@@ -101,6 +113,7 @@ class PaperIngestService:
             "text_truncated": bool(metadata.get("text_truncated")),
             "extraction_limits": metadata.get("extraction_limits") or {},
             "unverified_supplement": unverified_supplement,
+            "document_claimed_metadata": metadata.get("document_claimed_metadata") or {},
             "pages": pages,
             "page_count": len(pages),
             "text_chars": len(text),
@@ -109,24 +122,6 @@ class PaperIngestService:
         }
         result = {
             "paper_task": True,
-            "markdown": "",
-            "transcript": {
-                "full_text": text,
-                "segments": [],
-                "language": "unknown",
-                "page_spans": snapshot.get("page_spans") or [],
-            },
-            "audio_meta": {
-                "title": title,
-                "platform": "paper",
-                "raw_info": {
-                    "url": paper_document["source_url"],
-                    "authors": authors,
-                    "venue": paper_document["venue"],
-                    "year": paper_document["year"],
-                    "doi": paper_document["doi"],
-                },
-            },
             "paper_input": {
                 "source_url": paper_document["source_url"],
                 "filename": filename,
@@ -137,13 +132,27 @@ class PaperIngestService:
             "paper_document": paper_document,
             "insights": {
                 "version": 1,
-                "scores": {},
-                "cards": [],
                 "academic_gate": academic_gate,
             },
         }
         self.artifacts.write_result(task_id, result)
         self.artifacts.write_status(task_id, TaskStatus.SUCCESS, "论文正文与分页信息已导入")
+        upsert_paper_task(
+            {
+                "task_id": task_id,
+                "title": title,
+                "authors": authors,
+                "year": paper_document["year"],
+                "venue": paper_document["venue"],
+                "identity_status": academic_gate["identity_status"],
+                "doi": paper_document["doi"],
+                "source_url": paper_document["source_url"],
+                "resolved_source_url": paper_document["resolved_source_url"],
+                "pdf_url": paper_document["pdf_url"],
+                "filename": filename,
+                "content_hash": paper_document["content_hash"],
+            }
+        )
         return {"task_id": task_id, "result": result}
 
     def ingest_pdf(
@@ -159,6 +168,14 @@ class PaperIngestService:
         if not content:
             raise ValueError("PDF 文件为空")
         snapshot = parse_pdf_bytes(content, source_url)
+        document_claim = snapshot.get("document_claimed_metadata") or {}
+        if document_claim:
+            try:
+                resolved = self._academic_resolver(document_claim) or {}
+                if resolved:
+                    snapshot = {**snapshot, **resolved}
+            except Exception as exc:
+                logger.warning(f"论文官方身份索引匹配失败（保留文档声明信息）: {exc}")
         return self._persist(
             snapshot=snapshot,
             source_url=source_url,

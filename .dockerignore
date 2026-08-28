@@ -16,7 +16,6 @@ backend/models
 backend/logs
 backend/uploads
 backend/*.db
-backend/note_results
 backend/bin/
 
 # 依赖和构建缓存

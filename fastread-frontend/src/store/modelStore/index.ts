@@ -5,33 +5,19 @@ import {
   addModel,
   fetchEnableModels,
   fetchEnableModelById,
-  deleteModelById
+  deleteModelById,
+  type EnabledModel,
+  type RemoteModel,
 } from '@/services/model'
 
-interface IModel {
-  id: string
-  created: number
-  object: string
-  owned_by: string
-  permission: string
-  root: string
-}
-
-interface IModelListItem {
-  id: string
-  provider_id: string
-  model_name: string
-  created_at?: string
-}
-
 interface ModelStore {
-  models: IModel[]
-  modelList: IModelListItem[]
+  models: RemoteModel[]
+  modelList: EnabledModel[]
   loading: boolean
   selectedModel: string
 
   loadModels: (providerId: string) => Promise<void>
-  loadModelsById: (providerId: string) => Promise<IModelListItem[]>
+  loadModelsById: (providerId: string) => Promise<EnabledModel[]>
   loadEnabledModels: () => Promise<void>
   addNewModel: (providerId: string, modelId: string) => Promise<void>
   deleteModel: (modelId: number) => Promise<void>
@@ -66,7 +52,7 @@ export const useModelStore = create<ModelStore>()(
         set({ loading: true })
         const res = await fetchModels(providerId)
 
-        let models: IModel[] = []
+        let models: RemoteModel[] = []
 
         // 兼容 SyncPage 分页对象与普通数组两种格式
         if (Array.isArray(res.models)) {

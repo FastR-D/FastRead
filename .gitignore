@@ -42,6 +42,8 @@ __pycache__/
 *$py.class
 *.so
 .pytest_cache/
+.pytest-*/
+.pytest_*/
 .mypy_cache/
 .ruff_cache/
 .coverage
@@ -77,11 +79,11 @@ backend/static/
 backend/models/
 backend/logs/
 backend/uploads/
-backend/note_results/
 backend/bin/
 backend/*.db
 backend/*.db-*
 backend/vector_db/
+backend/paper_results/
 backend/config/*.json
 backend/config/*.local.json
 !backend/config/*.example.json

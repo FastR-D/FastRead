@@ -4,8 +4,7 @@ from app.db.model_dao import insert_model, get_all_models, get_model_by_provider
 from app.db.provider_dao import get_enabled_providers
 from app.enmus.exception import ProviderErrorEnum
 from app.exceptions.provider import ProviderError
-from app.gpt.gpt_factory import GPTFactory
-from app.gpt.provider.OpenAI_compatible_provider import OpenAICompatibleProvider
+from openai import OpenAI
 from app.models.model_config import ModelConfig
 from app.services.provider import ProviderService
 from app.utils.logger import get_logger
@@ -31,8 +30,7 @@ class ModelService:
 
         try:
             config = ModelService._build_model_config(provider)
-            gpt = GPTFactory().from_config(config)
-            models = gpt.list_models()
+            models = OpenAI(api_key=config.api_key, base_url=config.base_url).models.list()
             if verbose:
                 print(f"[{provider['name']}] 模型列表: {models}")
             return models
@@ -107,14 +105,18 @@ class ModelService:
         if provider:
             if not provider.get('api_key'):
                 raise ProviderError(code=ProviderErrorEnum.NOT_FOUND.code, message=ProviderErrorEnum.NOT_FOUND.message)
-            result =  OpenAICompatibleProvider.test_connection(
-                api_key=provider.get('api_key'),
-                base_url=provider.get('base_url')
-            )
-            if result:
+            try:
+                OpenAI(
+                    api_key=provider.get('api_key'),
+                    base_url=provider.get('base_url'),
+                ).models.list()
                 return True
-            else:
-                raise ProviderError(code=ProviderErrorEnum.WRONG_PARAMETER.code,message=ProviderErrorEnum.WRONG_PARAMETER.message)
+            except Exception as exc:
+                logger.warning(f"模型供应商连通性测试失败: {exc}")
+                raise ProviderError(
+                    code=ProviderErrorEnum.WRONG_PARAMETER.code,
+                    message=ProviderErrorEnum.WRONG_PARAMETER.message,
+                ) from exc
 
         raise ProviderError(code=ProviderErrorEnum.NOT_FOUND.code, message=ProviderErrorEnum.NOT_FOUND.message)
 
