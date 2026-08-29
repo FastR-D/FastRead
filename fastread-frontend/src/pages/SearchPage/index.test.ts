@@ -21,4 +21,11 @@ describe('paper search disclosure', () => {
       expect(source).toContain(copy)
     }
   })
+
+  it('puts paged results before diagnostics and scrolls them into view', () => {
+    expect(source.indexOf('检索结果 ·')).toBeLessThan(source.indexOf('检索来源、时效与证据边界'))
+    for (const copy of ['limit: 100', '每页显示数量', '上一页', '下一页', 'scrollIntoView']) {
+      expect(source).toContain(copy)
+    }
+  })
 })

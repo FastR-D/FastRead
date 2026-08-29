@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -164,6 +164,9 @@ export default function SearchPage() {
   const [importingId, setImportingId] = useState('')
   const [indexJob, setIndexJob] = useState<PaperIndexJob | null>(null)
   const [rebuildingIndex, setRebuildingIndex] = useState(false)
+  const [pageSize, setPageSize] = useState(10)
+  const [currentPage, setCurrentPage] = useState(1)
+  const resultsRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     loadEnabledModels()
@@ -175,6 +178,21 @@ export default function SearchPage() {
     () => venues.filter(venue => tracks.includes(venue.track as SearchTrack)),
     [tracks, venues],
   )
+
+  const totalPages = Math.max(1, Math.ceil((response?.results.length || 0) / pageSize))
+  const visibleResults = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return (response?.results || []).slice(start, start + pageSize)
+  }, [currentPage, pageSize, response])
+
+  useEffect(() => {
+    if (!response) return
+    requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+  }, [response])
+
+  useEffect(() => {
+    setCurrentPage(page => Math.min(page, totalPages))
+  }, [totalPages])
 
   const toggleTrack = (track: SearchTrack) => {
     setTracks(current => {
@@ -195,12 +213,13 @@ export default function SearchPage() {
         query: cleaned,
         tracks,
         venue_ids: selectedVenues,
-        limit: 30,
+        limit: 100,
         include_unconfirmed: true,
         include_arxiv: includeArxiv,
         include_scholar: includeScholar,
       })
       setResponse(data)
+      setCurrentPage(1)
       if (!data.result_count) toast('当前索引与在线来源均未命中，可换一组关键词', { icon: 'ℹ️' })
     }
     catch {
@@ -372,11 +391,55 @@ export default function SearchPage() {
         </section>
 
         {response && (
-          <section className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-950">
-            <div className="flex items-start gap-2">
+          <section ref={resultsRef} className="scroll-mt-20 space-y-3">
+            <div className="sticky top-14 z-[5] flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">检索结果 · {response.result_count} 篇</h2>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  核心 {response.scope_counts.core} · arXiv {response.scope_counts.arxiv} · Scholar {response.scope_counts.scholar}
+                  {response.result_count > 0 && ` · 当前显示 ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, response.result_count)}`}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                <label className="flex items-center gap-1.5">
+                  每页
+                  <select
+                    aria-label="每页显示数量"
+                    value={pageSize}
+                    onChange={event => {
+                      setPageSize(Number(event.target.value))
+                      setCurrentPage(1)
+                    }}
+                    className="rounded border border-slate-200 bg-white px-2 py-1"
+                  >
+                    {[10, 20, 50].map(size => <option key={size} value={size}>{size} 篇</option>)}
+                  </select>
+                </label>
+                <span className="font-mono">{currentPage} / {totalPages}</span>
+                <Button variant="outline" size="sm" disabled={currentPage <= 1} onClick={() => setCurrentPage(page => page - 1)}>上一页</Button>
+                <Button variant="outline" size="sm" disabled={currentPage >= totalPages} onClick={() => setCurrentPage(page => page + 1)}>下一页</Button>
+              </div>
+            </div>
+
+            {visibleResults.map(paper => (
+              <ResultCard key={paper.id} paper={paper} importing={importingId === paper.id} onImport={handleImport} />
+            ))}
+            {!response.result_count && (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
+                没有命中。下方已展开本次来源状态；也可以清除会议筛选，或换一组标题、方法和研究问题关键词。
+              </div>
+            )}
+          </section>
+        )}
+
+        {response && (
+          <details open={!response.result_count} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-950">
+            <summary className="cursor-pointer select-none font-semibold">
+              检索来源、时效与证据边界 · {response.search_backend} · 点击{response.result_count ? '展开' : '查看'}
+            </summary>
+            <div className="mt-2 flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
               <div>
-                <div className="font-semibold">收录范围、时效与证据边界</div>
                 <p className="mt-0.5">{response.coverage_note}</p>
                 <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-amber-800">
                   <span className="inline-flex items-center gap-1"><Database className="h-3 w-3" />{response.search_backend}</span>
@@ -415,20 +478,7 @@ export default function SearchPage() {
                 ) : null}
               </div>
             </div>
-          </section>
-        )}
-
-        {response && (
-          <section className="space-y-3">
-            {response.results.map(paper => (
-              <ResultCard key={paper.id} paper={paper} importing={importingId === paper.id} onImport={handleImport} />
-            ))}
-            {!response.result_count && (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
-                没有命中。请检查代理与提供方状态，或换一组更具体的标题、方法和研究问题关键词。
-              </div>
-            )}
-          </section>
+          </details>
         )}
 
         {!response && !searching && (

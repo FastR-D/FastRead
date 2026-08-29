@@ -74,6 +74,7 @@ pydyf==0.11.0
 Pygments==2.19.1
 pyinstaller==6.13.0
 pyinstaller-hooks-contrib==2025.2
+backports.tarfile==1.2.0; python_version < "3.12"
 PyMuPDF==1.25.3
 pyphen==0.17.2
 pyreadline3==3.5.4

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -30,7 +30,6 @@ import type { EnabledModel } from '@/services/model'
 import { buildWorkspaceSearch } from '@/utils/workspaceNavigation'
 import {
   addTopicPaper,
-  addTopicEvidence,
   askTopic,
   confirmImport,
   createHandoff,
@@ -48,6 +47,7 @@ import {
   importFastNews,
   listHandoffs,
   listImports,
+  listTopicSyntheses,
   listTopics,
   removeTopicPaper,
   retryHandoff,
@@ -69,20 +69,7 @@ type KnowledgeMessage = {
   sources?: TopicAnswerSource[]
 }
 
-const roleLabels: Record<string, string> = {
-  question: '问题',
-  method: '方法',
-  experiment: '实验',
-  limitation: '局限',
-  other: '其他',
-}
-
-const evidenceSourceLabels: Record<string, string> = {
-  manual: '手工证据',
-  annotation: '阅读批注',
-  report: '阅读报告（待分类）',
-  model_classified: '模型选证（逐字复核）',
-}
+const SELECTED_TOPIC_STORAGE_KEY = 'fastread-selected-research-topic'
 
 export default function ResearchPage() {
   const navigate = useNavigate()
@@ -303,12 +290,6 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
   const [topic, setTopic] = useState<ResearchTopic | null>(null)
   const [synthesis, setSynthesis] = useState<TopicSynthesis | null>(null)
   const [paperId, setPaperId] = useState('')
-  const [evidencePaper, setEvidencePaper] = useState('')
-  const [evidencePage, setEvidencePage] = useState('1')
-  const [evidenceQuote, setEvidenceQuote] = useState('')
-  const [evidenceNote, setEvidenceNote] = useState('')
-  const [evidenceRole, setEvidenceRole] = useState<'question' | 'method' | 'experiment' | 'limitation' | 'other'>('other')
-  const [evidenceContextSize, setEvidenceContextSize] = useState<80 | 120 | 160>(120)
   const [knowledgeInput, setKnowledgeInput] = useState('')
   const [knowledgeMessages, setKnowledgeMessages] = useState<KnowledgeMessage[]>([])
   const [selectedModelId, setSelectedModelId] = useState('')
@@ -323,12 +304,37 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
     if (!modelList.length) loadEnabledModels()
   }, [loadEnabledModels, modelList.length])
 
-  const loadTopic = async (id: string, resetChat = true) => {
+  const loadTopic = useCallback(async (id: string, resetChat = true) => {
     setSelectedId(id)
-    setTopic(await getTopic(id))
-    setSynthesis(null)
+    window.localStorage.setItem(SELECTED_TOPIC_STORAGE_KEY, id)
+    const nextTopic = await getTopic(id)
+    setTopic(nextTopic)
+    try {
+      const syntheses = await listTopicSyntheses(id)
+      setSynthesis(syntheses[0] || null)
+    }
+    catch {
+      setSynthesis(null)
+      toast.error('知识库已加载，但历史跨论文综合读取失败')
+    }
     if (resetChat) setKnowledgeMessages([])
-  }
+  }, [])
+
+  useEffect(() => {
+    if (selectedId || !topics.length) return
+    const savedId = window.localStorage.getItem(SELECTED_TOPIC_STORAGE_KEY)
+    const nextId = topics.some((item: ResearchTopic) => item.id === savedId) ? savedId : topics[0].id
+    if (nextId) void loadTopic(nextId)
+  }, [loadTopic, selectedId, topics])
+
+  const evidencePreparedForEveryPaper = useMemo(() => {
+    const classifiedPapers = new Set(
+      (topic?.evidence_items || [])
+        .filter(item => item.source_kind === 'model_classified')
+        .map(item => item.task_id),
+    )
+    return Boolean(topic?.papers?.length) && (topic?.papers || []).every(paper => classifiedPapers.has(paper.task_id))
+  }, [topic])
 
   const runKnowledgeQuery = async (mode: 'question' | 'summary') => {
     if (!topic) return
@@ -396,7 +402,7 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
                   <h3 className="text-sm font-semibold text-slate-900">论文管理</h3>
                   <p className="mt-1 text-xs text-slate-500">本知识库当前包含 {topic.papers?.length || 0} 篇论文。</p>
                 </div>
-                <button type="button" className="icon-button text-red-500" title="删除整个知识库" onClick={async () => { if (window.confirm('删除知识库及其论文关系、证据和综合产物？')) { await deleteTopic(topic.id); setTopic(null); setSelectedId(''); await reload() } }}><Trash2 className="h-4 w-4" /></button>
+                <button type="button" className="icon-button text-red-500" title="删除整个知识库" onClick={async () => { if (window.confirm('删除知识库及其论文关系、证据和综合产物？')) { await deleteTopic(topic.id); window.localStorage.removeItem(SELECTED_TOPIC_STORAGE_KEY); setTopic(null); setSynthesis(null); setSelectedId(''); await reload() } }}><Trash2 className="h-4 w-4" /></button>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <select className="field min-w-64 flex-1" value={paperId} onChange={event => setPaperId(event.target.value)}>
@@ -404,10 +410,20 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
                   {tasks.filter((task: any) => !(topic.papers || []).some(link => link.task_id === task.id)).map((task: any) => <option key={task.id} value={task.id}>{task.title || task.paperDocument?.title || task.id}</option>)}
                 </select>
                 <button type="button" className="secondary-button" disabled={!paperId} onClick={async () => { await addTopicPaper(topic.id, paperId); setPaperId(''); await loadTopic(topic.id); await reload() }}><Plus className="h-4 w-4" />加入论文</button>
-                <button type="button" className="secondary-button" disabled={busy === 'synthesis' || !model || (topic.papers?.length || 0) < 2} onClick={async () => {
+                <button type="button" className="primary-button" disabled={busy === 'synthesis' || !model || (topic.papers?.length || 0) < 2} onClick={async () => {
                   if (!model) return
                   setBusy('synthesis')
                   try {
+                    if (!evidencePreparedForEveryPaper) {
+                      const extraction = await extractTopicEvidence(topic.id, {
+                        provider_id: model.provider_id,
+                        model_name: model.model_name,
+                        max_candidates: 120,
+                      })
+                      setTopic(extraction.topic)
+                      const failed = extraction.runs.filter(run => run.status === 'failed')
+                      if (failed.length) toast.error(`${failed.length} 篇论文的内部选证失败；未用伪造证据补齐`)
+                    }
                     const result = await createTopicSynthesis(topic.id, {
                       provider_id: model.provider_id,
                       model_name: model.model_name,
@@ -416,8 +432,11 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
                     await loadTopic(topic.id, false)
                     setSynthesis(result)
                   }
+                  catch {
+                    toast.error('跨论文综合生成失败，请检查模型与论文全文状态')
+                  }
                   finally { setBusy('') }
-                }}>{busy === 'synthesis' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lightbulb className="h-4 w-4" />}生成跨论文综合</button>
+                }}>{busy === 'synthesis' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lightbulb className="h-4 w-4" />}{busy === 'synthesis' ? '校验证据并综合中…' : '生成跨论文综合'}</button>
               </div>
               <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 {(topic.papers || []).map(link => (
@@ -434,7 +453,9 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
                 ))}
                 {!(topic.papers || []).length && <div className="sm:col-span-2 xl:col-span-3"><Empty text="请先从上方选择已导入论文加入知识库" /></div>}
               </div>
+              <p className="mt-3 text-[11px] leading-5 text-slate-500">生成时会在后台准备逐字引文并复核页码，不再要求你维护单独的证据条目。</p>
             </section>
+            {synthesis && <SynthesisView synthesis={synthesis} navigate={navigate} />}
             <KnowledgeBaseChat
               topic={topic}
               messages={knowledgeMessages}
@@ -448,111 +469,10 @@ function TopicsPanel({ topics, reload, tasks, navigate, busy, setBusy }: any) {
               onSummary={() => runKnowledgeQuery('summary')}
               navigate={navigate}
             />
-            <section className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-              <h3 className="text-xs font-semibold text-slate-700">手工补充逐字证据</h3>
-              <p className="mt-1 text-[10px] text-slate-400">即使没有模型也可建立矩阵；服务端会逐字核对页码和原文。</p>
-              <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1fr)_90px_130px]">
-                <select className="field" value={evidencePaper} onChange={event => setEvidencePaper(event.target.value)}><option value="">选择专题论文</option>{(topic.papers || []).map(link => <option key={link.task_id} value={link.task_id}>{link.title || link.task_id}</option>)}</select>
-                <input className="field" type="number" min={1} value={evidencePage} onChange={event => setEvidencePage(event.target.value)} placeholder="页码" />
-                <select className="field" value={evidenceRole} onChange={event => setEvidenceRole(event.target.value as typeof evidenceRole)}>{Object.entries(roleLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-              </div>
-              <textarea className="field mt-2 min-h-20" value={evidenceQuote} onChange={event => setEvidenceQuote(event.target.value)} placeholder="粘贴指定页中的逐字原文" />
-              <input className="field mt-2" value={evidenceNote} onChange={event => setEvidenceNote(event.target.value)} placeholder="用户备注（不会混入论文主张）" />
-              <button type="button" className="secondary-button mt-2" disabled={!evidencePaper || !evidenceQuote.trim()} onClick={async () => {
-                await addTopicEvidence(topic.id, { task_id: evidencePaper, page: Number(evidencePage), exact_quote: evidenceQuote, user_note: evidenceNote, role: evidenceRole })
-                setEvidenceQuote(''); setEvidenceNote(''); await loadTopic(topic.id)
-              }}><Plus className="h-4 w-4" />核对并加入矩阵</button>
-            </section>
-            <section className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
-              <div className="flex flex-wrap items-end justify-between gap-2">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-900">证据矩阵</h3>
-                  <p className="mt-1 text-xs leading-5 text-slate-500">程序提供长上下文逐字候选，模型只为每条候选选择一个主要角色；页码、原文、去重和论文成员关系由服务端复核。报告证据在智能选证前只作未分类补充；空缺会保留，不由模型补写。</p>
-                </div>
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <span className="rounded bg-white px-2 py-1 text-[10px] text-slate-500">{topic.evidence_items?.length || 0} 条已校验证据</span>
-                  <select
-                    aria-label="智能证据分类上下文规模"
-                    className="h-8 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-600"
-                    value={evidenceContextSize}
-                    disabled={busy === 'evidence-extract'}
-                    onChange={event => setEvidenceContextSize(Number(event.target.value) as 80 | 120 | 160)}
-                  >
-                    <option value={80}>精简 · 每篇最多 80 条</option>
-                    <option value={120}>长上下文 · 每篇最多 120 条</option>
-                    <option value={160}>最大 · 每篇最多 160 条</option>
-                  </select>
-                  <button
-                    type="button"
-                    className="secondary-button h-8"
-                    disabled={!model || busy === 'evidence-extract' || !(topic.papers || []).length}
-                    onClick={async () => {
-                      if (!model) return
-                      setBusy('evidence-extract')
-                      try {
-                        const result = await extractTopicEvidence(topic.id, {
-                          provider_id: model.provider_id,
-                          model_name: model.model_name,
-                          max_candidates: evidenceContextSize,
-                        })
-                        setTopic(result.topic)
-                        const completed = result.runs.filter(run => run.status !== 'failed').length
-                        const selected = result.runs.reduce((sum, run) => sum + run.selected_count, 0)
-                        if (completed) toast.success(`已分类 ${completed}/${result.runs.length} 篇，选中 ${selected} 条逐字证据`)
-                        if (completed < result.runs.length) toast.error('部分论文分类失败；旧证据已保留，可查看运行状态后重试')
-                      }
-                      finally { setBusy('') }
-                    }}
-                  >
-                    {busy === 'evidence-extract' ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-                    智能补全矩阵
-                  </button>
-                </div>
-              </div>
-              {!!topic.evidence_extraction_runs?.length && (
-                <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-slate-500">
-                  {topic.evidence_extraction_runs.map(run => (
-                    <span key={run.task_id} title={run.error || run.fallback_reason || ''} className={cn('rounded border px-2 py-1', run.status === 'failed' ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-700')}>
-                      {run.title} · {run.status === 'failed' ? '分类失败，未回退' : `${run.selected_count}/${run.candidate_count} 条`} · {run.model_name}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className="mt-4 grid gap-3 lg:grid-cols-2">
-                {Object.entries(roleLabels).map(([role, label]) => {
-                  const items = topic.evidence_matrix?.[role] || []
-                  return (
-                    <div key={role} className="rounded-lg border border-slate-200 bg-white p-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="text-xs font-semibold text-slate-800">{label}</div>
-                        <span className="font-mono text-[10px] text-slate-400">{items.length}</span>
-                      </div>
-                      <div className="mt-2 space-y-2">
-                        {items.map(item => {
-                          const paperTitle = topic.papers?.find(paper => paper.task_id === item.task_id)?.title || item.task_id
-                          return (
-                            <button key={item.id} type="button" className="block w-full rounded-md border border-slate-200 bg-slate-50 p-3 text-left transition hover:border-blue-300 hover:bg-blue-50/50" onClick={() => navigate(`/workspace?${buildWorkspaceSearch({ taskId: item.task_id, view: 'source', page: item.page, quote: item.exact_quote })}`)}>
-                              <span className="flex items-center justify-between gap-3 text-[10px] text-slate-500">
-                                <span className="min-w-0 truncate font-medium text-slate-700">{paperTitle}</span>
-                                <span className="shrink-0 font-mono text-blue-700">第 {item.page} 页</span>
-                              </span>
-                              <span className="mt-2 line-clamp-3 block text-xs leading-5 text-slate-700">“{item.exact_quote}”</span>
-                              <span className="mt-2 block text-[10px] text-slate-400">{evidenceSourceLabels[item.source_kind] || item.source_kind}</span>
-                            </button>
-                          )
-                        })}
-                        {!items.length && <p className="rounded border border-dashed border-slate-200 px-3 py-5 text-center text-[10px] leading-5 text-slate-400">尚未选中可核验证据，不代表论文中不存在；可运行智能分类或手工补充。</p>}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </section>
             <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
               <h3 className="text-xs font-semibold text-amber-900">用户假设（不计入论文共同报告）</h3>
               <ul className="mt-2 list-disc pl-5 text-xs leading-5 text-amber-900">{topic.user_hypotheses.map(item => <li key={item}>{item}</li>)}{!topic.user_hypotheses.length && <li className="list-none text-amber-700">未填写</li>}</ul>
             </section>
-            {synthesis && <SynthesisView synthesis={synthesis} navigate={navigate} />}
           </div>
         )}
       </Panel>
@@ -697,7 +617,10 @@ function SynthesisView({ synthesis, navigate }: { synthesis: TopicSynthesis; nav
           <h3 className="text-sm font-semibold text-blue-950">Idea 可行性与跨论文综合</h3>
           <p className="mt-1 text-xs leading-5 text-blue-800">模型只归纳已编号证据；页码、逐字引文和论文成员关系由程序复核。</p>
         </div>
-        {synthesis.model && <span className="rounded bg-white px-2 py-1 font-mono text-[10px] text-slate-500">{synthesis.model.model_name} · {synthesis.model.provider_id}</span>}
+        <div className="flex flex-wrap justify-end gap-2">
+          {synthesis.generation && <span className="rounded bg-white px-2 py-1 font-mono text-[10px] text-slate-500">正文 {synthesis.generation.page_context_count} 段 / {synthesis.generation.page_context_characters.toLocaleString()} 字 · 候选 {synthesis.generation.evidence_candidate_count}</span>}
+          {synthesis.model && <span className="rounded bg-white px-2 py-1 font-mono text-[10px] text-slate-500">{synthesis.model.model_name} · {synthesis.model.provider_id}</span>}
+        </div>
       </div>
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         {sections.map(([label, entries]) => (

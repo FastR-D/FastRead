@@ -16,4 +16,13 @@ describe('academic identity gate disclosure', () => {
     expect(source).toContain('get_reading_report_markdown_url(task.id)')
     expect(source).not.toContain('写 300 字总结')
   })
+
+  it('discloses the model context used for a generated report', () => {
+    expect(source).toContain('generation_provenance?.context_policy')
+    expect(source).toContain('included_page_count')
+    expect(source).toContain('context_characters.toLocaleString()')
+    expect(source).toContain('通读更长的分页正文')
+    expect(source).toContain("item.evidence?.length ? <EvidenceQuotes")
+    expect(source).toContain("item.page_start || 'page'")
+  })
 })

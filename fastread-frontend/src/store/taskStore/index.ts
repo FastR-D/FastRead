@@ -133,6 +133,25 @@ export interface ReadingReport {
   academic_gate: AcademicGate
   report_grounding_status?: string
   model?: { provider_id: string; model_name: string }
+  generation_provenance?: {
+    provider_id: string
+    model_name: string
+    schema_version: number
+    prompt_version?: string
+    parser?: string
+    parser_version?: string
+    context_policy?: {
+      policy_version: string
+      character_budget: number
+      per_page_character_limit: number
+      source_page_count: number
+      pages_with_text: number
+      included_page_count: number
+      context_characters: number
+      fully_included_pages: number
+      truncated_pages: number
+    }
+  }
 }
 
 export interface NoteInsights {
@@ -206,11 +225,20 @@ const DEFAULT_COLLECTION: CollectionMeta = {
 
 const collectionSyncTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
+const uniqueTasksById = <T extends { id: string }>(items: T[]): T[] => {
+  const seen = new Set<string>()
+  return items.filter(item => {
+    if (seen.has(item.id)) return false
+    seen.add(item.id)
+    return true
+  })
+}
+
 export const migratePaperTaskState = (persisted: unknown) => {
   const state = (persisted || {}) as Partial<TaskStore>
-  const tasks = Array.isArray(state.tasks)
+  const tasks = uniqueTasksById(Array.isArray(state.tasks)
     ? state.tasks.filter((task): task is Task => task?.kind === 'paper')
-    : []
+    : [])
   return {
     ...state,
     tasks,
@@ -290,7 +318,7 @@ export const useTaskStore = create<TaskStore>()(
         const snapshots = await list_generated_tasks()
         setState(state => {
           const previousById = new Map(state.tasks.map(task => [task.id, task]))
-          const tasks = snapshots
+          const tasks = uniqueTasksById(snapshots)
             .map(snapshot => taskFromSnapshot(snapshot, previousById.get(snapshot.id)))
             .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
           const currentTaskId = state.currentTaskId && tasks.some(task => task.id === state.currentTaskId)

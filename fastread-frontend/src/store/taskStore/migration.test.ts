@@ -49,4 +49,17 @@ describe('paper-only persisted task migration', () => {
 
     expect(migrated.collectionFolders).toEqual(['默认收藏夹', '空收藏夹', '组会必读'])
   })
+
+  it('deduplicates stale persisted task snapshots by paper id', () => {
+    const migrated = migratePaperTaskState({
+      tasks: [
+        { id: 'paper-1', kind: 'paper', title: 'newest' },
+        { id: 'paper-1', kind: 'paper', title: 'stale duplicate' },
+      ],
+      currentTaskId: 'paper-1',
+    })
+
+    expect(migrated.tasks).toHaveLength(1)
+    expect(migrated.tasks[0].title).toBe('newest')
+  })
 })

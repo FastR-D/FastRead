@@ -106,7 +106,7 @@ function EvidenceQuotes({
       {evidence.map((item, index) => {
         const sourceHref = resolve_backend_resource_url(item.source_url)
         return (
-          <blockquote key={`${item.source_id || item.source_url || index}`} className="border-l-2 border-blue-300 pl-3 text-xs leading-5 text-slate-600">
+          <blockquote key={`${item.source_id || item.source_url || 'source'}-${item.page_start || 'page'}-${index}`} className="border-l-2 border-blue-300 pl-3 text-xs leading-5 text-slate-600">
             “{item.exact_quote}”
             <div className="mt-1 flex flex-wrap items-center gap-2 font-mono text-[10px] text-slate-400">
               {item.page_start ? (
@@ -138,6 +138,7 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
   const [generating, setGenerating] = useState(false)
   const report = task?.insights?.reading_report
   const personalSummary = task?.insights?.personal_summary?.content?.trim() || ''
+  const reportContext = report?.generation_provenance?.context_policy
 
   useEffect(() => {
     loadEnabledModels()
@@ -197,7 +198,7 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
           </div>
           <h2 className="mt-4 text-xl font-semibold text-slate-900">一键生成关键问题阅读报告</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            按 NotebookLM 式理解路径，固定回答研究问题、方法过程、主要贡献、实验与局限；引用必须能匹配论文原文页码或已抽取证据。
+            模型会通读更长的分页正文，自由选择最值得解释的关键问题，并主动寻找负结果、异常与跨章节联系；引用仍必须匹配论文原文页码。
           </p>
           <div className="mt-5 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
             {['研究问题是什么', '方法如何一步步完成', '主要贡献相对已有工作是什么', '实验依据与局限在哪里'].map(item => (
@@ -246,6 +247,14 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
               </Button>
             </div>
           </div>
+          {(reportContext || report.model?.model_name) && (
+            <p className="mt-3 text-xs text-slate-500">
+              {reportContext
+                ? `正文 ${reportContext.included_page_count} 页 / ${reportContext.context_characters.toLocaleString()} 字`
+                : '正文范围未记录'}
+              {report.model?.model_name ? ` · ${report.model.model_name}` : ''}
+            </p>
+          )}
           <p className="mt-5 whitespace-pre-wrap text-[15px] leading-7 text-slate-700">{report.executive_summary}</p>
           <div className="mt-5 space-y-2">
             <AcademicGateBadge report={report} />
@@ -324,7 +333,11 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
               {report.process.map((item, index) => (
                 <li key={`${item.step}-${index}`} className="flex gap-3 text-sm leading-6 text-slate-700">
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-900 font-mono text-[11px] text-white">{index + 1}</span>
-                  <div><strong>{item.step}</strong><p>{item.description}</p></div>
+                  <div>
+                    <strong>{item.step}</strong>
+                    <p>{item.description}</p>
+                    {item.evidence?.length ? <EvidenceQuotes evidence={item.evidence} taskId={task.id} /> : null}
+                  </div>
                 </li>
               ))}
             </ol>

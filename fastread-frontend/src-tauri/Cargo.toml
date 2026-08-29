@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "2.0.0"
+version = "2.0.1"
 description = "FastRead desktop client for page-aware academic paper reading"
 authors = ["FastRead contributors"]
 license = "MIT"

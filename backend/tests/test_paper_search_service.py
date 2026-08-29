@@ -142,6 +142,30 @@ def test_index_persists_and_supports_refresh_false(tmp_path):
     assert result["index_stats"]["documents"] == 2
 
 
+def test_single_term_query_can_return_title_keyword_matches(tmp_path):
+    result = make_service(tmp_path).search(
+        query="LLM",
+        tracks=("security", "ai"),
+        include_scholar=False,
+    )
+
+    assert result["result_count"] == 1
+    assert result["results"][0]["title"] == "Adaptive Prompt Injection Against LLM Safety Filters"
+
+
+def test_venue_filter_keeps_unconfirmed_external_results_when_requested(tmp_path):
+    result = make_service(tmp_path).search(
+        query="prompt injection",
+        tracks=("security", "ai"),
+        venue_ids=("iclr",),
+        include_unconfirmed=True,
+        include_scholar=False,
+    )
+
+    assert [paper["title"] for paper in result["results"]] == ["Prompt Injection Benchmarks for Agents"]
+    assert result["scope_counts"] == {"core": 0, "arxiv": 1, "scholar": 0}
+
+
 class FakeScholarClient:
     def __init__(self, **kwargs):
         pass

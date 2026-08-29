@@ -46,6 +46,17 @@ if errorlevel 1 goto :fail
 move /Y "%BUNDLE_DIR%\FastReadBackend.exe" "%BUNDLE_DIR%\FastReadBackend-%TARGET_TRIPLE%.exe" >nul
 if errorlevel 1 goto :fail
 
+rem Conda-backed virtual environments keep ctypes/sqlite runtime DLLs under
+rem sys.base_prefix\Library\bin. PyInstaller can miss them when the venv itself
+rem has no conda-meta directory, so copy only the DLLs that actually exist.
+"%PYTHON_EXE%" -c "import sys; print(sys.base_prefix)" > "%STAGING_DIR%\python-base.txt"
+if errorlevel 1 goto :fail
+set /p PYTHON_BASE=<"%STAGING_DIR%\python-base.txt"
+if exist "%PYTHON_BASE%\Library\bin\ffi.dll" copy /Y "%PYTHON_BASE%\Library\bin\ffi.dll" "%BUNDLE_DIR%\_internal\ffi.dll" >nul
+if errorlevel 1 goto :fail
+if exist "%PYTHON_BASE%\Library\bin\sqlite3.dll" copy /Y "%PYTHON_BASE%\Library\bin\sqlite3.dll" "%BUNDLE_DIR%\_internal\sqlite3.dll" >nul
+if errorlevel 1 goto :fail
+
 echo Scanning staged and generated files for private-key or high-confidence token material...
 pwsh -NoProfile -Command "$roots = @('backend/.build-staging','backend/build','backend/dist','fastread-frontend/src-tauri/bin') | Where-Object { Test-Path -LiteralPath $_ }; $textNames = @('.env','.env.example'); $textExtensions = @('.cfg','.ini','.json','.map','.md','.pem','.py','.spec','.toml','.ts','.txt','.yaml','.yml'); $pattern = '-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----|(?:sk|rk)-[A-Za-z0-9_-]{32,}|gh[pousr]_[A-Za-z0-9]{30,}|xox[baprs]-[A-Za-z0-9-]{20,}'; $bad = foreach ($file in Get-ChildItem -LiteralPath $roots -Recurse -File -ErrorAction SilentlyContinue) { if ($textNames -notcontains $file.Name -and $textExtensions -notcontains $file.Extension.ToLowerInvariant()) { continue }; $text = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction SilentlyContinue; if ($null -ne $text -and $text -match $pattern) { $file.Name } }; if ($bad) { Write-Error ('Potential secret material in artifact file(s): ' + (($bad | Sort-Object -Unique) -join ', ')); exit 1 }"
 if errorlevel 1 goto :fail

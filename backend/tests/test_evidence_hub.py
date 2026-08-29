@@ -188,13 +188,14 @@ def test_topic_synthesis_requires_two_distinct_papers_and_closes_quotes(tmp_path
 def test_topic_synthesis_uses_selected_model_and_binds_evidence_ids(monkeypatch, tmp_path):
     dao = make_dao()
     artifacts = PaperArtifactRepository(tmp_path / "notes")
-    write_paper(artifacts, TASK_A, "Alpha", "Alpha method is exact.")
+    write_paper(artifacts, TASK_A, "Alpha", "Alpha method is exact. Broken result lack the c")
     write_paper(artifacts, TASK_B, "Beta", "Beta method is exact.")
     hub = EvidenceHubService(dao, artifacts, tmp_path / "integrations")
     topic = hub.create_topic({"question": "Can the idea work?", "user_hypotheses": ["It scales"]})
     hub.add_topic_paper(topic["id"], TASK_A)
     hub.add_topic_paper(topic["id"], TASK_B)
     hub.add_evidence(topic["id"], {"task_id": TASK_A, "page": 1, "exact_quote": "Alpha method is exact.", "role": "method"})
+    hub.add_evidence(topic["id"], {"task_id": TASK_A, "page": 1, "exact_quote": "Broken result lack the c", "role": "other"})
     hub.add_evidence(topic["id"], {"task_id": TASK_B, "page": 1, "exact_quote": "Beta method is exact.", "role": "method"})
     calls = []
 
@@ -241,9 +242,22 @@ def test_topic_synthesis_uses_selected_model_and_binds_evidence_ids(monkeypatch,
     assert synthesis["idea_feasibility"]["evidence_to_read"] == ["补充规模实验。"]
     assert calls[0]["model"] == "selected-model"
     assert "只负责把程序给出的跨论文证据整理成结构化比较" in calls[0]["messages"][0]["content"]
+    assert "两个模型不能同时承担数十或数百个源模型的角色" in calls[0]["messages"][0]["content"]
     model_context = json.loads(calls[0]["messages"][1]["content"])
     assert len(model_context["evidence"]) >= 2
     assert all(item.get("verbatim_evidence") for item in model_context["evidence"])
+    assert all("lack the c" not in item["verbatim_evidence"] for item in model_context["evidence"])
+    assert len(model_context["page_contexts"]) == 2
+    assert all(item.get("text") for item in model_context["page_contexts"])
+    assert model_context["context_policy"] == {
+        "policy_version": "balanced-body-context-v2",
+        "page_context_limit_per_paper": 10,
+        "page_context_limit_total": 36,
+        "evidence_candidate_limit": 240,
+    }
+    assert synthesis["version"] == 2
+    assert synthesis["generation"]["prompt_version"] == "topic-synthesis-long-context-v2"
+    assert synthesis["generation"]["page_context_count"] == 2
 
 
 def test_topic_evidence_classifier_selects_ids_and_preserves_old_evidence_on_invalid_rerun(monkeypatch, tmp_path):

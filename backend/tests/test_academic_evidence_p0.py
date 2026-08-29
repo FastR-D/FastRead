@@ -316,7 +316,11 @@ def test_report_generation_atomically_merges_summary_and_topic_state(monkeypatch
                 "Evaluation statement.",
             ), start=1)
         ],
-        "process": [{"step": "Method", "description": "Method statement."}],
+        "process": [{
+            "step": "Method",
+            "description": "Method statement.",
+            "evidence": [{"exact_quote": "Method statement.", "page": 1}],
+        }],
         "contributions": [{
             "title": "Contribution",
             "description": "Contribution statement.",

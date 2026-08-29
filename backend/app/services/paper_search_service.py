@@ -1351,10 +1351,13 @@ class PaperSearchService:
         allowed_tracks = set(tracks)
         allowed_venues = set(venue_ids)
         general_query_terms = set(_tokenize(query)) if not semantic_queries else set()
-        required_general_matches = min(
-            4,
-            max(2, math.ceil(len(general_query_terms) * 0.5)),
-        ) if general_query_terms else 0
+        required_general_matches = (
+            1
+            if len(general_query_terms) == 1
+            else min(4, max(2, math.ceil(len(general_query_terms) * 0.5)))
+            if general_query_terms
+            else 0
+        )
         # Page-anchored bibliography leads are the strongest discovery provenance
         # available before full-text import, so keep them ahead of broad public
         # metadata expansion while still placing confirmed core records first.
@@ -1371,8 +1374,12 @@ class PaperSearchService:
                 if local_title_key in resolved_local_titles:
                     continue
             venue = paper.get("venue") or {}
-            if allowed_venues and venue.get("id") not in allowed_venues:
-                continue
+            if allowed_venues:
+                venue_id = venue.get("id")
+                if paper.get("scope_tier") == "core" and venue_id not in allowed_venues:
+                    continue
+                if paper.get("scope_tier") != "core" and venue_id and venue_id not in allowed_venues:
+                    continue
             if paper.get("scope_tier") == "core" and allowed_tracks and venue.get("track") not in allowed_tracks:
                 continue
             if paper.get("scope_tier") != "core" and allowed_tracks and paper.get("track") and paper.get("track") not in allowed_tracks:

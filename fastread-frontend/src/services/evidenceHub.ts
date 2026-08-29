@@ -103,6 +103,13 @@ export type TopicSynthesis = {
   question: string
   kind: 'model' | 'manual'
   model?: { provider_id: string; model_name: string }
+  generation?: {
+    prompt_version: string
+    context_policy_version: string
+    page_context_count: number
+    page_context_characters: number
+    evidence_candidate_count: number
+  }
   common_reports: TopicSynthesisClaim[]
   differences: TopicSynthesisClaim[]
   conflicts: TopicSynthesisClaim[]
