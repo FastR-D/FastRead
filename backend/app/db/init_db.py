@@ -4,6 +4,7 @@ from app.db.models.paper_tasks import (
     PaperIndexJob,
     PaperKeywordRecord,
     PaperTask,
+    RelatedWorkSelectionRecord,
     RelatedWorkSnapshotRecord,
 )
 from app.db.models.evidence_hub import (

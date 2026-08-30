@@ -107,6 +107,8 @@ def test_related_work_is_metadata_only_ranked_and_bounded(monkeypatch, tmp_path)
     ]
     assert snapshot["neighbors"][0]["matched_anchor_ids"]
     assert snapshot["neighbors"][0]["overlapping_terms"]
+    assert snapshot["neighbors"][0]["abstract"] == "Adaptive attacks against agent safety filters."
+    assert "adaptive" in snapshot["neighbors"][0]["keywords"]
     assert snapshot["provider_status"]["google_scholar"]["reason"] == "not_configured"
     assert snapshot["search_backend"] == "local_inverted_index"
     assert snapshot["search_policy"]["mode"] == "keyword_first"

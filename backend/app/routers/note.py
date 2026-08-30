@@ -7,7 +7,7 @@ from typing import Optional
 from urllib.parse import quote
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response
 from pydantic import BaseModel, Field, field_validator
 
@@ -19,6 +19,7 @@ from app.services.paper_search_service import PaperSearchService
 from app.services.paper_task_service import PaperTaskService
 from app.services.reading_report_service import PERSONAL_SUMMARY_MAX_CHARS, ReadingReportService
 from app.services.related_work_service import RelatedWorkService
+from app.services.smart_neighbor_service import SmartNeighborService
 from app.services.venue_catalog import allowed_venue_catalog
 from app.utils.local_access import require_local_request
 from app.utils.logger import get_logger
@@ -127,6 +128,26 @@ class RelatedWorkRequest(BaseModel):
         return max(1, min(int(value or 120), 200))
 
 
+class SmartNeighborRequest(BaseModel):
+    provider_id: str
+    model_name: str
+    force: bool = False
+    selection_limit: int = 16
+
+    @field_validator("provider_id", "model_name")
+    @classmethod
+    def validate_model_fields(cls, value: str) -> str:
+        cleaned = str(value or "").strip()
+        if not cleaned:
+            raise ValueError("AI 智能精选需要选择已配置模型")
+        return cleaned
+
+    @field_validator("selection_limit")
+    @classmethod
+    def validate_selection_limit(cls, value: int) -> int:
+        return max(1, min(int(value or 16), 20))
+
+
 settings = get_settings()
 UPLOAD_DIR = settings.uploads_dir
 MAX_UPLOAD_BYTES = settings.max_upload_bytes
@@ -138,6 +159,7 @@ PAPERS = PaperIngestService(ARTIFACTS)
 PAPER_SEARCH = PaperSearchService()
 PAPER_INDEX = PaperIndexService(PAPER_SEARCH, ARTIFACTS)
 RELATED_WORK = RelatedWorkService(ARTIFACTS, PAPER_SEARCH)
+SMART_NEIGHBORS = SmartNeighborService(ARTIFACTS)
 
 
 @router.get("/tasks")
@@ -254,6 +276,35 @@ def generate_related_work(task_id: CanonicalTaskId, data: RelatedWorkRequest | N
 def get_related_work(task_id: CanonicalTaskId):
     snapshot = RELATED_WORK.get(task_id)
     return R.success(snapshot)
+
+
+@router.post("/papers/{task_id}/related-work/smart-selection")
+def start_smart_neighbor_selection(
+    task_id: CanonicalTaskId,
+    data: SmartNeighborRequest,
+    background_tasks: BackgroundTasks,
+):
+    try:
+        job, scheduled = SMART_NEIGHBORS.start(
+            task_id,
+            provider_id=data.provider_id,
+            model_name=data.model_name,
+            selection_limit=data.selection_limit,
+            force=data.force,
+        )
+        if scheduled:
+            background_tasks.add_task(SMART_NEIGHBORS.run, job["id"])
+        return R.success({**job, "scheduled": scheduled})
+    except ValueError as exc:
+        return R.error(msg=str(exc), code=400)
+    except Exception as exc:
+        logger.error(f"启动 AI 近邻精选失败 (task_id={task_id}): {exc}", exc_info=True)
+        return R.error(msg=f"启动 AI 近邻精选失败: {exc}")
+
+
+@router.get("/papers/{task_id}/related-work/smart-selection")
+def get_smart_neighbor_selection(task_id: CanonicalTaskId):
+    return R.success(SMART_NEIGHBORS.latest(task_id))
 
 
 @router.post("/reading_reports")

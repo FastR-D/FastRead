@@ -11,6 +11,8 @@ export type RelatedWorkAnchor = {
 export type RelatedWorkNeighbor = {
   canonical_paper_id: string
   title: string
+  abstract?: string
+  keywords?: string[]
   authors: string[]
   year?: number | null
   venue: string
@@ -21,6 +23,8 @@ export type RelatedWorkNeighbor = {
   matched_anchor_ids: string[]
   overlapping_terms: string[]
   relevance_score: number
+  cited_by?: number | null
+  full_text_verified?: boolean
   source_role?: 'primary' | 'supplemental'
   discovery_channel?: 'arxiv' | 'elasticsearch' | 'supplemental'
   provenance: {
@@ -31,6 +35,65 @@ export type RelatedWorkNeighbor = {
     source_page?: number
     exact_quote?: string
   }
+}
+
+export type SmartNeighborRole =
+  | 'direct_competitor'
+  | 'same_problem_different_method'
+  | 'same_method_different_problem'
+  | 'evaluation_or_control_neighbor'
+  | 'background'
+
+export type SmartNeighborSelectionItem = {
+  candidate_id: string
+  role: SmartNeighborRole
+  reason: string
+  contrast: string
+  scores: {
+    research_problem: number
+    method: number
+    evidence: number
+    novelty_threat: number
+  }
+  semantic_score: number
+  combined_score: number
+}
+
+export type SmartNeighborSelection = {
+  id: string
+  task_id: string
+  snapshot_id: string
+  cache_key: string
+  status: 'pending' | 'running' | 'completed' | 'failed'
+  provider_id: string
+  model_name: string
+  prompt_version: string
+  strategy_version: string
+  candidate_count: number
+  selected_count: number
+  metadata: {
+    candidate_hash?: string
+    selection_limit?: number
+    evidence_boundary?: string
+    validation?: string
+    code_filter?: {
+      minimum_combined_score: number
+      maximum_background_items: number
+    }
+    context_policy?: {
+      policy_version: string
+      source_page_count: number
+      included_page_count: number
+      context_characters: number
+    }
+  }
+  selections: SmartNeighborSelectionItem[]
+  failure_reason: string
+  error: string
+  created_at: string
+  started_at: string
+  completed_at: string
+  scheduled?: boolean
 }
 
 export type RelatedWorkProviderStatus = {
@@ -77,3 +140,12 @@ export const generateRelatedWork = (
   options: { force?: boolean; limit?: number } = {},
 ): Promise<RelatedWorkSnapshot> =>
   request.post(`/papers/${encodeURIComponent(taskId)}/related-work`, options, { timeout: 12000 }) as any
+
+export const getSmartNeighborSelection = (taskId: string): Promise<SmartNeighborSelection | null> =>
+  request.get(`/papers/${encodeURIComponent(taskId)}/related-work/smart-selection`) as any
+
+export const startSmartNeighborSelection = (
+  taskId: string,
+  options: { provider_id: string; model_name: string; force?: boolean; selection_limit?: number },
+): Promise<SmartNeighborSelection> =>
+  request.post(`/papers/${encodeURIComponent(taskId)}/related-work/smart-selection`, options, { timeout: 12000 }) as any

@@ -15,7 +15,7 @@ from app.repositories.paper_artifacts import PaperArtifactRepository
 from app.services.paper_search_service import PaperSearchService, extract_keywords
 
 
-RELATED_WORK_CONFIG_VERSION = "related-work-v4-keyword-paged"
+RELATED_WORK_CONFIG_VERSION = "related-work-v5-smart-ready"
 DEFAULT_RELATED_WORK_LIMIT = 120
 MAX_RELATED_WORK_LIMIT = 200
 TOKEN_RE = re.compile(r"[a-z][a-z0-9+.#-]{2,}", re.IGNORECASE)
@@ -461,6 +461,12 @@ class RelatedWorkService:
                 {
                     "canonical_paper_id": str(candidate.get("id") or uuid.uuid4()),
                     "title": str(candidate.get("title") or ""),
+                    "abstract": str(candidate.get("abstract") or "")[:6000],
+                    "keywords": [
+                        str(keyword)
+                        for keyword in (candidate.get("keywords") or [])[:20]
+                        if str(keyword).strip()
+                    ],
                     "authors": candidate.get("authors") or [],
                     "year": candidate.get("year"),
                     "venue": venue.get("short_name") or venue.get("name") or candidate.get("journal_ref") or "",
@@ -474,6 +480,8 @@ class RelatedWorkService:
                     "matched_anchor_ids": matched_ids,
                     "overlapping_terms": overlap,
                     "relevance_score": score,
+                    "cited_by": candidate.get("cited_by"),
+                    "full_text_verified": bool(candidate.get("full_text_verified")),
                     "source_role": source_role,
                     "discovery_channel": discovery_channel,
                     "provenance": candidate.get("provenance") or {

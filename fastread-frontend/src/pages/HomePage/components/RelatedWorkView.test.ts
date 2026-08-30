@@ -65,4 +65,25 @@ describe('related work product boundary', () => {
     expect(source).not.toContain('置信度')
     expect(source).not.toContain('信源等级')
   })
+
+  it('adds an explicit model-ranked layer without hiding the complete keyword pool', () => {
+    expect(source).toContain('data-testid="smart-neighbor-section"')
+    expect(source).toContain('AI 智能精选')
+    expect(source).toContain('封闭候选池')
+    expect(source).toContain('全部关键词近邻')
+    expect(source).toContain('AI 精选不会删除或遮蔽这些论文')
+    expect(source).toContain('candidate_count')
+    expect(source).toContain('failure_reason')
+    expect(source).toContain('候选全文导入前仍属于发现判断')
+    expect(source).toContain('不要求模型凑满名额')
+    expect(source).toContain('代码门槛 ≥')
+  })
+
+  it('polls an asynchronous cached selection job and exposes model control', () => {
+    expect(source).toContain('getSmartNeighborSelection')
+    expect(source).toContain('startSmartNeighborSelection')
+    expect(source).toContain('aria-label="智能精选模型"')
+    expect(source).toContain('后台正在比较')
+    expect(source).toContain('重新精选')
+  })
 })

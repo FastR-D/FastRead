@@ -44,6 +44,29 @@ class RelatedWorkSnapshotRecord(Base):
     generated_at = Column(DateTime, server_default=func.now(), nullable=False)
 
 
+class RelatedWorkSelectionRecord(Base):
+    __tablename__ = "related_work_selections"
+
+    id = Column(String, primary_key=True)
+    task_id = Column(String, nullable=False, index=True)
+    snapshot_id = Column(String, nullable=False, index=True)
+    cache_key = Column(String, unique=True, nullable=False, index=True)
+    status = Column(String, nullable=False, default="pending", index=True)
+    provider_id = Column(String, nullable=False, default="")
+    model_name = Column(String, nullable=False, default="")
+    prompt_version = Column(String, nullable=False)
+    strategy_version = Column(String, nullable=False)
+    candidate_count = Column(Integer, nullable=False, default=0)
+    selected_count = Column(Integer, nullable=False, default=0)
+    metadata_json = Column(Text, nullable=False, default="{}")
+    selections_json = Column(Text, nullable=False, default="[]")
+    failure_reason = Column(Text, nullable=False, default="")
+    error = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+
+
 class PaperIndexJob(Base):
     __tablename__ = "paper_index_jobs"
 
