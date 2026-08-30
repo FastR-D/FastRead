@@ -1,5 +1,7 @@
 import pathlib
+import re
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlparse
 
 from app.services.academic_evidence import (
     ai_venue_ids,
@@ -584,6 +586,41 @@ class FailingElasticsearch:
         raise AssertionError("search must not run after indexing failure")
 
 
+class EmptyHealthyElasticsearch:
+    def health(self):
+        return {"configured": True, "available": True, "status": "green"}
+
+    def index_many(self, papers):
+        return len(papers)
+
+    def search(self, query, *, limit):
+        return []
+
+
+def test_active_elasticsearch_keeps_request_local_bibliography_candidates(tmp_path):
+    result = make_service(tmp_path, elasticsearch=EmptyHealthyElasticsearch()).search(
+        query="efficient model evaluation",
+        refresh=False,
+        include_arxiv=False,
+        include_scholar=False,
+        local_candidates=[
+            {
+                "id": "bibliography-efficient-evaluation",
+                "title": "Efficient model evaluation",
+                "abstract": "A source-grounded bibliography lead.",
+                "authors": ["Ada Lovelace"],
+                "year": 2024,
+                "source": "paper_bibliography",
+                "provenance": {"provider": "paper_bibliography", "source_page": 8},
+            }
+        ],
+    )
+
+    assert result["search_backend"] == "elasticsearch"
+    assert [paper["title"] for paper in result["results"]] == ["Efficient model evaluation"]
+    assert result["results"][0]["scope_tier"] == "local"
+
+
 def test_elasticsearch_failure_falls_back_to_local_index(tmp_path):
     result = make_service(tmp_path, elasticsearch=FailingElasticsearch()).search(
         query="prompt injection",
@@ -605,10 +642,15 @@ def test_keyword_fallback_is_deterministic():
     assert "the" not in keywords
 
 
-def test_arxiv_query_uses_broad_discovery_terms_instead_of_all_terms_required():
+def test_arxiv_query_requires_primary_term_and_uses_remaining_terms_for_recall():
     url = _arxiv_query("value alignment ground truth", ("ai",), 20)
-    assert "all%3Avalue+OR+all%3Aalignment+OR+all%3Aground+OR+all%3Atruth" in url
-    assert "all%3Avalue+AND+all%3Aalignment" not in url
+    search_query = parse_qs(urlparse(url).query)["search_query"][0]
+
+    assert "all:value" in search_query
+    assert {"all:alignment", "all:ground", "all:truth"}.issubset(
+        set(re.findall(r"all:[\w-]+", search_query))
+    )
+    assert "all:value AND all:alignment" not in search_query
 
 
 def test_local_bibliography_candidates_are_searchable_without_external_refresh(tmp_path):

@@ -11,10 +11,6 @@ from pathlib import Path
 from typing import Any
 
 
-PAPER_TASK_ID = "aa8c4d5e-c9bb-4c62-9308-a5522b7b0131"
-DATABASE_NAMES = ("reel_mind.db", "bili_note.db")
-
-
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -137,12 +133,18 @@ def git_output(repo_root: Path, *args: str) -> str:
     return completed.stdout
 
 
-def build_snapshot(repo_root: Path, snapshot_root: Path) -> Path:
+def build_snapshot(
+    repo_root: Path,
+    snapshot_root: Path,
+    *,
+    database_names: tuple[str, ...] = (),
+) -> Path:
     backend_root = repo_root / "backend"
     snapshot_root.mkdir(parents=True, exist_ok=False)
 
     databases: list[dict[str, Any]] = []
-    for name in DATABASE_NAMES:
+    discovered_names = database_names or tuple(path.name for path in sorted(backend_root.glob("*.db")))
+    for name in discovered_names:
         source = backend_root / name
         if not source.exists():
             continue
@@ -160,6 +162,7 @@ def build_snapshot(repo_root: Path, snapshot_root: Path) -> Path:
         if not path.name.endswith((".status.json", "_audio.json", "_transcript.json"))
     ]
     note_files = copy_runtime_tree(note_results_dir, snapshot_root / "note_results")
+    paper_files = copy_runtime_tree(backend_root / "paper_results", snapshot_root / "paper_results")
     upload_files = copy_runtime_tree(backend_root / "uploads", snapshot_root / "uploads")
     vector_files = copy_runtime_tree(backend_root / "vector_db", snapshot_root / "vector_db")
 
@@ -182,6 +185,7 @@ def build_snapshot(repo_root: Path, snapshot_root: Path) -> Path:
         "task_results": task_results,
         "runtime_artifacts": {
             "note_results": note_files,
+            "paper_results": paper_files,
             "uploads": upload_files,
             "vector_db": vector_files,
             "verification_cache_owner": "legacy verification pipeline; do not migrate",
@@ -194,7 +198,6 @@ def build_snapshot(repo_root: Path, snapshot_root: Path) -> Path:
             "preserve_task_ids": [
                 result["task_id"] for result in task_results if result["type"] == "paper"
             ],
-            "required_eigenbench_task_id": PAPER_TASK_ID,
             "discard_types": ["video_or_legacy", "verification"],
             "preserve_relational_tables": [
                 "models",
@@ -218,8 +221,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Create the one-time FastRead migration snapshot.")
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[2])
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--database", action="append", default=[], help="database filename to include; defaults to all backend/*.db")
     args = parser.parse_args()
-    manifest_path = build_snapshot(args.repo_root.resolve(), args.output.resolve())
+    manifest_path = build_snapshot(
+        args.repo_root.resolve(),
+        args.output.resolve(),
+        database_names=tuple(args.database),
+    )
     print(manifest_path)
 
 

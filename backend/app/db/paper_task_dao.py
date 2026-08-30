@@ -20,6 +20,14 @@ def _loads_list(value: str | None) -> list:
     return loaded if isinstance(loaded, list) else []
 
 
+def _loads_dict(value: str | None) -> dict:
+    try:
+        loaded = json.loads(value or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def _to_dict(task: PaperTask) -> dict[str, Any]:
     return {
         "id": task.id,
@@ -41,6 +49,14 @@ def _to_dict(task: PaperTask) -> dict[str, Any]:
         "upload_filename": task.upload_filename,
         "content_hash": task.content_hash,
         "report_version": task.report_version,
+        "raw_metadata": _loads_dict(task.raw_metadata_json),
+        "normalized_metadata": _loads_dict(task.normalized_metadata_json),
+        "verified_identity": _loads_dict(task.verified_identity_json),
+        "metadata_schema_version": task.metadata_schema_version,
+        "metadata_parser_version": task.metadata_parser_version,
+        "metadata_strategy_version": task.metadata_strategy_version,
+        "metadata_execution_status": task.metadata_execution_status,
+        "metadata_fallback_reasons": _loads_list(task.metadata_fallback_reasons_json),
         "collection_folder": task.collection_folder,
         "collection_tags": _loads_list(task.collection_tags_json),
         "collection_note": task.collection_note,
@@ -74,6 +90,14 @@ def upsert_paper_task(payload: dict[str, Any]) -> dict[str, Any]:
         task.upload_filename = str(payload.get("upload_filename") or payload.get("filename") or "")
         task.content_hash = str(payload.get("content_hash") or "")
         task.report_version = str(payload.get("report_version") or "")
+        task.raw_metadata_json = json.dumps(payload.get("raw_metadata") or {}, ensure_ascii=False)
+        task.normalized_metadata_json = json.dumps(payload.get("normalized_metadata") or {}, ensure_ascii=False)
+        task.verified_identity_json = json.dumps(payload.get("verified_identity") or {}, ensure_ascii=False)
+        task.metadata_schema_version = str(payload.get("metadata_schema_version") or "")
+        task.metadata_parser_version = str(payload.get("metadata_parser_version") or "")
+        task.metadata_strategy_version = str(payload.get("metadata_strategy_version") or "")
+        task.metadata_execution_status = str(payload.get("metadata_execution_status") or "not_run")
+        task.metadata_fallback_reasons_json = json.dumps(payload.get("metadata_fallback_reasons") or [], ensure_ascii=False)
         task.collection_folder = (
             require_collection_folder(payload.get("collection_folder"))
             if payload.get("collection_folder")

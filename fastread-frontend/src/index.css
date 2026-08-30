@@ -7,6 +7,23 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* Standalone pages such as the paper library should use the browser's document
+   scrollbar. The reading workspace keeps the fixed-viewport rule above and
+   owns its panel scroll areas instead. */
+html.document-scroll {
+  height: auto;
+  min-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+html.document-scroll body,
+html.document-scroll #root {
+  height: auto;
+  min-height: 100%;
+  overflow: visible;
+}
+
 /* Radix ScrollArea 给视口内容层注入 min-width:100%; display:table，
    内容会按 max-content 撑破固定宽度的栏（工作台右侧审计栏因此被裁切）。
    本项目只需要纵向滚动，改回块级布局让 truncate/换行正常生效。 */

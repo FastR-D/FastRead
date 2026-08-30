@@ -11,6 +11,7 @@ from app.db.paper_task_dao import upsert_paper_task
 from app.services.academic_identity_service import AcademicIdentityService
 from app.services.academic_identity_resolver import resolve_document_claim_record
 from app.services.paper_fetching import fetch_source_snapshot, parse_pdf_bytes
+from app.services.metadata_normalization import normalize_paper_metadata
 from app.utils.logger import get_logger
 
 
@@ -77,19 +78,25 @@ class PaperIngestService:
             "canonical_url": snapshot.get("canonical_url") or snapshot.get("url") or source_url or "",
             "unverified_supplement": unverified_supplement,
         }
-        title = str(
-            metadata.get("title")
-            or unverified_supplement.get("title")
-            or self._title_from_text(text)
-        ).strip()
-        authors = (
-            metadata.get("authors")
-            or ([metadata.get("author")] if metadata.get("author") else [])
-            or unverified_supplement.get("authors")
-            or ([unverified_supplement.get("author")] if unverified_supplement.get("author") else [])
-        )
         pages = self._pages_from_snapshot(snapshot)
-        academic_gate = self._identity.assess(metadata)
+        metadata_contract = normalize_paper_metadata(
+            metadata,
+            first_page_text=str((pages[0] if pages else {}).get("text") or ""),
+            unverified_supplement=unverified_supplement,
+            resolved_identity={
+                key: metadata.get(key)
+                for key in (
+                    "official_record_verified", "registry_record_verified", "registry_name",
+                    "registry_record_url", "registry_retrieved_at", "verified_academic_metadata",
+                )
+                if metadata.get(key) not in (None, "", {}, [])
+            },
+        )
+        normalized = metadata_contract["normalized_metadata"]
+        verified_identity = metadata_contract["verified_identity"]
+        title = str(normalized.get("title") or self._title_from_text(text)).strip()
+        authors = normalized.get("authors") or []
+        academic_gate = verified_identity["academic_gate"]
         task_id = str(uuid.uuid4())
         created_at = datetime.now(timezone.utc).isoformat()
         paper_document = {
@@ -97,8 +104,8 @@ class PaperIngestService:
             "title": title,
             "authors": authors,
             "venue": academic_gate.get("venue") or {},
-            "year": academic_gate.get("year"),
-            "doi": academic_gate.get("doi") or "",
+            "year": normalized.get("year"),
+            "doi": normalized.get("doi") or "",
             "source_url": source_url or snapshot.get("url") or "",
             "resolved_source_url": snapshot.get("url") or source_url or "",
             "pdf_url": metadata.get("pdf_url") or (source_url if snapshot.get("source_type") == "pdf" else ""),
@@ -118,6 +125,16 @@ class PaperIngestService:
             "page_count": len(pages),
             "text_chars": len(text),
             "academic_gate": academic_gate,
+            "raw_metadata": metadata_contract["raw_metadata"],
+            "normalized_metadata": normalized,
+            "verified_identity": verified_identity,
+            "metadata_contract": {
+                key: metadata_contract[key]
+                for key in (
+                    "schema_version", "parser_version", "strategy_version", "execution_status",
+                    "fallback_reasons", "normalized_at", "candidate_boundaries",
+                )
+            },
             "retrieved_at": snapshot.get("retrieved_at") or created_at,
         }
         result = {
@@ -151,6 +168,14 @@ class PaperIngestService:
                 "pdf_url": paper_document["pdf_url"],
                 "filename": filename,
                 "content_hash": paper_document["content_hash"],
+                "raw_metadata": metadata_contract["raw_metadata"],
+                "normalized_metadata": normalized,
+                "verified_identity": verified_identity,
+                "metadata_schema_version": metadata_contract["schema_version"],
+                "metadata_parser_version": metadata_contract["parser_version"],
+                "metadata_strategy_version": metadata_contract["strategy_version"],
+                "metadata_execution_status": metadata_contract["execution_status"],
+                "metadata_fallback_reasons": metadata_contract["fallback_reasons"],
             }
         )
         return {"task_id": task_id, "result": result}
@@ -171,7 +196,22 @@ class PaperIngestService:
         document_claim = snapshot.get("document_claimed_metadata") or {}
         if document_claim:
             try:
-                resolved = self._academic_resolver(document_claim) or {}
+                spans = snapshot.get("page_spans") or []
+                first_page = ""
+                if spans:
+                    first = spans[0]
+                    first_page = str(snapshot.get("text") or "")[
+                        int(first.get("start") or 0) : int(first.get("end") or 0)
+                    ]
+                preliminary = normalize_paper_metadata(snapshot, first_page_text=first_page)
+                normalized = preliminary["normalized_metadata"]
+                resolver_claim = {
+                    **document_claim,
+                    "title": normalized.get("title") or document_claim.get("title"),
+                    "authors": normalized.get("authors") or document_claim.get("authors") or [],
+                    "year": normalized.get("year") or document_claim.get("year"),
+                }
+                resolved = self._academic_resolver(resolver_claim) or {}
                 if resolved:
                     snapshot = {**snapshot, **resolved}
             except Exception as exc:

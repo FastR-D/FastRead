@@ -52,6 +52,7 @@ def save_related_work(snapshot: dict) -> dict:
         record.search_backend = snapshot["search_backend"]
         record.anchors_json = json.dumps(snapshot["anchors"], ensure_ascii=False)
         record.neighbors_json = json.dumps(snapshot["neighbors"], ensure_ascii=False)
+        record.rejected_neighbors_json = json.dumps(snapshot.get("rejected_neighbors") or [], ensure_ascii=False)
         record.provider_status_json = json.dumps(snapshot["provider_status"], ensure_ascii=False)
         generated_at = snapshot.get("generated_at")
         record.generated_at = (
@@ -78,6 +79,7 @@ def _to_dict(record: RelatedWorkSnapshotRecord) -> dict:
         "cache_key": record.cache_key,
         "anchors": json.loads(record.anchors_json or "[]"),
         "neighbors": json.loads(record.neighbors_json or "[]"),
+        "rejected_neighbors": json.loads(record.rejected_neighbors_json or "[]"),
         "provider_status": json.loads(record.provider_status_json or "{}"),
         "search_backend": record.search_backend,
         "generated_at": record.generated_at.replace(tzinfo=timezone.utc).isoformat()
@@ -190,6 +192,25 @@ def finish_selection_job(
         db.commit()
         db.refresh(record)
         return _selection_to_dict(record)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def invalidate_related_work(task_id: str) -> dict:
+    """Delete only derived snapshots/selections; source PDF and user data are untouched."""
+    db = next(get_db())
+    try:
+        selections = db.query(RelatedWorkSelectionRecord).filter_by(task_id=task_id).delete(
+            synchronize_session=False
+        )
+        snapshots = db.query(RelatedWorkSnapshotRecord).filter_by(task_id=task_id).delete(
+            synchronize_session=False
+        )
+        db.commit()
+        return {"related_work_snapshots": snapshots, "smart_selections": selections}
     except Exception:
         db.rollback()
         raise

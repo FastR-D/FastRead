@@ -153,6 +153,9 @@ export function describeProviderStatus(
   if (diagnostic === 'disabled' || diagnostic === 'refresh_disabled') {
     return { label, detail: '本次未启用', className: 'bg-slate-100 text-slate-600' }
   }
+  if (name === 'paper_bibliography' && diagnostic === 'no_related_work_citations') {
+    return { label, detail: '已检查正文 · 未抽取到参考文献题录', className: 'bg-sky-50 text-sky-700' }
+  }
   if (diagnostic === 'deadline_exceeded') {
     return { label, detail: status.via_proxy ? '经代理请求超时 · 可重试' : '连接超时 · 可重试', className: 'bg-amber-50 text-amber-700' }
   }

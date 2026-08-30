@@ -22,6 +22,14 @@ class PaperTask(Base):
     upload_filename = Column(Text, nullable=False, default="")
     content_hash = Column(String, nullable=False, index=True)
     report_version = Column(String, nullable=False, default="")
+    raw_metadata_json = Column(Text, nullable=False, default="{}")
+    normalized_metadata_json = Column(Text, nullable=False, default="{}")
+    verified_identity_json = Column(Text, nullable=False, default="{}")
+    metadata_schema_version = Column(String, nullable=False, default="")
+    metadata_parser_version = Column(String, nullable=False, default="")
+    metadata_strategy_version = Column(String, nullable=False, default="")
+    metadata_execution_status = Column(String, nullable=False, default="not_run", index=True)
+    metadata_fallback_reasons_json = Column(Text, nullable=False, default="[]")
     collection_folder = Column(String, nullable=False, default="默认收藏夹")
     collection_tags_json = Column(Text, nullable=False, default="[]")
     collection_note = Column(Text, nullable=False, default="")
@@ -40,6 +48,7 @@ class RelatedWorkSnapshotRecord(Base):
     search_backend = Column(String, nullable=False)
     anchors_json = Column(Text, nullable=False, default="[]")
     neighbors_json = Column(Text, nullable=False, default="[]")
+    rejected_neighbors_json = Column(Text, nullable=False, default="[]")
     provider_status_json = Column(Text, nullable=False, default="{}")
     generated_at = Column(DateTime, server_default=func.now(), nullable=False)
 
@@ -104,4 +113,32 @@ class PaperKeywordRecord(Base):
     model_name = Column(String, nullable=False, default="")
     prompt_version = Column(String, nullable=False)
     strategy_version = Column(String, nullable=False)
+    created_at = Column(DateTime, server_default=func.now(), nullable=False)
+
+
+class MetadataMigrationRun(Base):
+    __tablename__ = "metadata_migration_runs"
+
+    id = Column(String, primary_key=True)
+    target_schema_version = Column(String, nullable=False)
+    dry_run = Column(Integer, nullable=False, default=1)
+    status = Column(String, nullable=False, index=True)
+    scanned_count = Column(Integer, nullable=False, default=0)
+    eligible_count = Column(Integer, nullable=False, default=0)
+    migrated_count = Column(Integer, nullable=False, default=0)
+    failed_count = Column(Integer, nullable=False, default=0)
+    report_json = Column(Text, nullable=False, default="{}")
+    started_at = Column(DateTime, server_default=func.now(), nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+
+
+class InteractionReceipt(Base):
+    __tablename__ = "interaction_receipts"
+
+    id = Column(String, primary_key=True)
+    account_id = Column(String, nullable=False, index=True)
+    operation = Column(String, nullable=False, index=True)
+    idempotency_key = Column(String, nullable=False, unique=True, index=True)
+    request_hash = Column(String, nullable=False)
+    response_json = Column(Text, nullable=False, default="{}")
     created_at = Column(DateTime, server_default=func.now(), nullable=False)

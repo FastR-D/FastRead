@@ -396,7 +396,14 @@ def _pdf_text_with_spans(page_texts: list[str]) -> tuple[str, list[dict]]:
     spans = []
     cursor = 0
     for index, raw_text in enumerate(page_texts, start=1):
-        page_text = re.sub(r"\s+", " ", raw_text or "").strip()
+        # Preserve line boundaries on PDF pages. First-page metadata parsing needs
+        # layout signals to keep author, affiliation, address and email blocks out
+        # of the title. Consumers that need prose can still collapse whitespace.
+        page_text = "\n".join(
+            re.sub(r"[ \t]+", " ", line).strip()
+            for line in str(raw_text or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+            if line.strip()
+        ).strip()
         if not page_text:
             continue
         if chunks:

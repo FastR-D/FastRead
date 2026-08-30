@@ -30,6 +30,7 @@ import httpx
 
 from app.core.settings import get_settings
 from app.services.academic_evidence import allowed_venue_catalog, match_allowed_venue, normalize_doi
+from app.services.metadata_normalization import canonical_identity_keys
 from app.services.search_connection_config import get_search_connection_config
 from app.utils.logger import get_logger
 
@@ -875,11 +876,12 @@ def _arxiv_query(query: str, tracks: tuple[str, ...], limit: int) -> str:
     if not categories:
         categories = tuple(category for values in TRACK_CATEGORIES.values() for category in values)
     cleaned = re.sub(r"[^\w\s+.#-]", " ", str(query or "")).strip()
-    # Requiring every keyword made multi-anchor queries pathologically strict:
-    # one generic or compound term was enough to turn a relevant paper into a
-    # zero-result response.  Provider relevance ranking and the deterministic
-    # anchor scorer downstream perform the precision step.
-    terms = " OR ".join(f"all:{term}" for term in cleaned.split()[:8]) if cleaned else ""
+    # Require the first two code-ranked terms and treat the remainder as recall
+    # expansion. Pure OR retrieval lets one generic token fill all 100 slots.
+    values = cleaned.split()[:8]
+    required = " AND ".join(f"all:{term}" for term in values[:1])
+    optional = " OR ".join(f"all:{term}" for term in values[1:])
+    terms = required + (f" AND ({optional})" if optional else "") if required else ""
     category_clause = " OR ".join(f"cat:{category}" for category in categories)
     search_query = f"({category_clause})" + (f" AND ({terms})" if terms else "")
     return f"{ARXIV_API}?" + urlencode(
@@ -1103,12 +1105,14 @@ class PaperSearchService:
     @staticmethod
     def _dedupe(papers: list[dict]) -> list[dict]:
         merged: dict[str, dict] = {}
+        aliases: dict[str, str] = {}
         for paper in papers:
-            doi = normalize_doi(paper.get("doi"))
-            arxiv_id = str(paper.get("id") or "") if paper.get("source") == "arxiv" else ""
-            key = doi or arxiv_id or re.sub(r"\W+", "", str(paper.get("title") or "").lower())
-            if not key:
+            identity_keys = canonical_identity_keys(paper)
+            if paper.get("source") == "arxiv" and paper.get("id"):
+                identity_keys.add(f"arxiv-provider:{str(paper['id']).casefold()}")
+            if not identity_keys:
                 continue
+            key = next((aliases[item] for item in sorted(identity_keys) if item in aliases), sorted(identity_keys)[0])
             paper = dict(paper)
             provider = str((paper.get("provenance") or {}).get("provider") or paper.get("source") or "unknown")
             links = [
@@ -1125,6 +1129,8 @@ class PaperSearchService:
             current = merged.get(key)
             if not current:
                 merged[key] = paper
+                for identity in identity_keys:
+                    aliases[identity] = key
                 continue
             prefer_new = bool(paper.get("venue_confirmed")) and not bool(current.get("venue_confirmed"))
             primary, secondary = (paper, current) if prefer_new else (current, paper)
@@ -1156,6 +1162,8 @@ class PaperSearchService:
                 ),
                 "source_links": all_links,
             }
+            for identity in identity_keys | canonical_identity_keys(merged[key]):
+                aliases[identity] = key
         return list(merged.values())
 
     @staticmethod
@@ -1227,6 +1235,7 @@ class PaperSearchService:
             "available": bool(local_enriched),
             "result_count": len(local_enriched),
             "reason": "source_related_work" if local_enriched else "no_related_work_citations",
+            "status": "extracted" if local_enriched else "no_matches",
         }
         fetched: list[dict] = []
         if not include_arxiv:
@@ -1331,22 +1340,46 @@ class PaperSearchService:
         active_backend = "local_inverted_index"
         backend_error = ""
         ranked: list[tuple[dict, float]] = []
+        elasticsearch_query_succeeded = False
         if es_health.get("available"):
             try:
                 if enriched:
                     self.elasticsearch.index_many(enriched)
                 ranked = self.elasticsearch.search(query, limit=max(limit * 8, 80))
                 active_backend = "elasticsearch"
+                elasticsearch_query_succeeded = True
             except Exception as exc:
                 backend_error = str(exc)
                 logger.warning(f"Elasticsearch 检索失败，回退本地倒排索引: {exc}")
-        if not ranked:
+        if not ranked and not elasticsearch_query_succeeded:
             ranked = [
                 (self.index.documents[paper_id], score)
                 for paper_id, score in self.index.search(query, limit=max(limit * 8, 80))
                 if paper_id in self.index.documents
             ]
             active_backend = "local_inverted_index"
+
+        # Page-grounded bibliography leads belong to this request and may not be
+        # present in the persistent Elasticsearch corpus.  Merge them into the
+        # common ranking explicitly so the active backend cannot make local
+        # provenance disappear.  The caller's normal relevance filters still
+        # decide whether a lead is useful.
+        ranked_identity_keys = set().union(
+            *(canonical_identity_keys(paper) for paper, _score in ranked)
+        ) if ranked else set()
+        query_terms = set(_tokenize(query))
+        for paper in local_enriched:
+            identity_keys = canonical_identity_keys(paper)
+            if identity_keys and ranked_identity_keys.intersection(identity_keys):
+                continue
+            metadata_terms = set(
+                _tokenize(
+                    f"{paper.get('title', '')} {paper.get('abstract', '')} "
+                    f"{' '.join(str(value) for value in paper.get('keywords') or [])}"
+                )
+            )
+            ranked.append((paper, float(len(query_terms.intersection(metadata_terms)))))
+            ranked_identity_keys.update(identity_keys)
 
         allowed_tracks = set(tracks)
         allowed_venues = set(venue_ids)

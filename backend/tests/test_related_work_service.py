@@ -131,7 +131,9 @@ def test_related_work_is_metadata_only_ranked_and_bounded(monkeypatch, tmp_path)
         "search_policy",
         "source_counts",
         "result_limit",
-        "neighbors",
+            "neighbors",
+            "rejected_neighbors",
+            "rejected_candidate_count",
         "provider_status",
         "search_backend",
         "generated_at",
@@ -205,7 +207,66 @@ def test_related_work_uses_source_grounded_bibliography_as_local_candidates(monk
     RelatedWorkService(artifacts, search).generate("paper-a", force=True)
 
     assert search.calls[0]["local_candidates"] == candidates
-    assert search.calls[0]["query"].startswith("adaptive prompt injection")
+    assert {"adaptive", "prompt", "injection"}.issubset(search.calls[0]["query"].split())
+
+
+def test_bibliography_skips_running_headers_and_stops_at_appendix():
+    document = {
+        "content_hash": "paper-hash",
+        "pages": [
+            {
+                "page": 8,
+                "text": (
+                    "REFERENCES\n"
+                    "Ada Lovelace and Grace Hopper. Reliable benchmark selection. In ACL, 2024.\n"
+                    "8"
+                ),
+            },
+            {
+                "page": 9,
+                "text": (
+                    "Published as a conference paper at ICLR 2026\n"
+                    "Alan Turing and Claude Shannon. Efficient model evaluation. In NeurIPS, 2023.\n"
+                    "9"
+                ),
+            },
+            {
+                "page": 10,
+                "text": (
+                    "Published as a conference paper at ICLR 2026\n"
+                    "A\n"
+                    "ADDITIONAL EXPERIMENTS\n"
+                    "Computing infrastructure. We ran 50 trials in 2024."
+                ),
+            },
+        ],
+    }
+
+    candidates = _bibliography_candidates(document)
+
+    assert {candidate["title"] for candidate in candidates} == {
+        "Reliable benchmark selection",
+        "Efficient model evaluation",
+    }
+    assert all("Published as" not in " ".join(candidate["authors"]) for candidate in candidates)
+
+
+def test_bibliography_rejects_prose_shaped_author_fields():
+    document = {
+        "content_hash": "paper-hash",
+        "pages": [
+            {
+                "page": 4,
+                "text": (
+                    "REFERENCES\n"
+                    "The largest model included in our evaluations is capable. "
+                    "Computing infrastructure. Workshop, 2026."
+                ),
+            }
+        ],
+    }
+
+    assert _bibliography_candidates(document) == []
 
 
 def test_external_neighbor_requires_a_topic_term_in_title_or_keywords():

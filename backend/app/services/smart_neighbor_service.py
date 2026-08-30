@@ -212,7 +212,13 @@ def _score_value(value) -> int:
     return number
 
 
-def _normalize_selections(payload: dict, candidates: list[dict], selection_limit: int) -> list[dict]:
+def _normalize_selections(
+    payload: dict,
+    candidates: list[dict],
+    selection_limit: int,
+    *,
+    include_rejections: bool = False,
+):
     if not isinstance(payload, dict) or not isinstance(payload.get("selections"), list):
         raise SmartSelectionError("invalid_schema", "智能精选响应缺少 selections 数组")
     candidates_by_id = {
@@ -270,23 +276,33 @@ def _normalize_selections(payload: dict, candidates: list[dict], selection_limit
         raise SmartSelectionError("no_valid_selection", "模型没有返回任何可校验的近邻论文")
     normalized.sort(key=lambda item: (-item["combined_score"], item["candidate_id"]))
     filtered: list[dict] = []
+    rejected: list[dict] = []
     background_count = 0
     for item in normalized:
         if item["combined_score"] < SMART_MIN_COMBINED_SCORE:
+            rejected.append({**item, "reason": "below_quality_threshold"})
             continue
         if item["role"] == "background":
             if background_count >= SMART_BACKGROUND_MAX:
+                rejected.append({**item, "reason": "background_limit_exceeded"})
                 continue
             background_count += 1
         filtered.append(item)
         if len(filtered) == selection_limit:
             break
-    if not filtered:
-        raise SmartSelectionError(
-            "no_candidate_above_quality_threshold",
-            f"模型没有返回综合分达到 {SMART_MIN_COMBINED_SCORE:g} 的候选",
-        )
-    return filtered
+    model_selected_ids = {item["candidate_id"] for item in normalized}
+    rejected.extend(
+        {
+            "candidate_id": str(candidate.get("canonical_paper_id") or ""),
+            "title": str(candidate.get("title") or ""),
+            "combined_score": None,
+            "semantic_score": None,
+            "reason": "model_did_not_select",
+        }
+        for candidate in candidates
+        if str(candidate.get("canonical_paper_id") or "") not in model_selected_ids
+    )
+    return (filtered, rejected) if include_rejections else filtered
 
 
 class SmartNeighborService:
@@ -418,13 +434,20 @@ class SmartNeighborService:
                 payload = json.loads(_strip_code_fence(raw))
             except json.JSONDecodeError as exc:
                 raise SmartSelectionError("invalid_json", f"智能精选不是有效 JSON: {exc}") from exc
-            selections = _normalize_selections(payload, candidates, selection_limit)
+            selections, rejected = _normalize_selections(
+                payload, candidates, selection_limit, include_rejections=True
+            )
             metadata = {
                 **(job.get("metadata") or {}),
                 "context_policy": context_metadata,
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "returned_selection_count": len(selections),
                 "validation": "candidate_ids_roles_scores_server_verified",
+                "quality_threshold": SMART_MIN_COMBINED_SCORE,
+                "rejected_candidates": rejected,
+                "selection_outcome": (
+                    "selected" if selections else "no_candidate_above_quality_threshold"
+                ),
             }
             return finish_selection_job(
                 selection_id,

@@ -4,6 +4,9 @@ import hashlib
 import json
 import re
 import uuid
+from collections import Counter
+from pathlib import Path
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 
 from app.db.related_work_dao import (
@@ -13,12 +16,16 @@ from app.db.related_work_dao import (
 )
 from app.repositories.paper_artifacts import PaperArtifactRepository
 from app.services.paper_search_service import PaperSearchService, extract_keywords
+from app.services.metadata_normalization import canonical_identity_keys
+from app.services.paper_fetching import parse_pdf_bytes
+from app.core.settings import get_settings
 
 
 RELATED_WORK_CONFIG_VERSION = "related-work-v5-smart-ready"
 DEFAULT_RELATED_WORK_LIMIT = 120
 MAX_RELATED_WORK_LIMIT = 200
 TOKEN_RE = re.compile(r"[a-z][a-z0-9+.#-]{2,}", re.IGNORECASE)
+LEXICAL_NOISE_TERMS = {"point", "points", "agreement", "agreements"}
 GENERIC_TITLE_TERMS = {
     "comparative",
     "behavioral",
@@ -29,11 +36,44 @@ GENERIC_TITLE_TERMS = {
     "method",
     "analysis",
     "study",
+    "point",
+    "points",
+    "agreement",
+    "data",
+    "model",
+    "models",
+    "performance",
+    "evaluation",
 }
 CITATION_RE = re.compile(
     r"(?P<title>[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*"
     r"(?:\s+[A-Z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*){0,3})"
     r"\s*\((?P<authors>[^()]{2,100}?),\s*(?P<year>(?:19|20)\d{2})\)"
+)
+NUMBERED_REFERENCE_RE = re.compile(
+    r"^\s*(?:\[\d+\]|\d+[.)])\s+(?P<authors>.{3,180}?)\.\s+"
+    r"(?P<title>[A-Z][^.]{7,240}?)\.\s+.*?\b(?P<year>(?:19|20)\d{2})\b"
+)
+AUTHOR_YEAR_REFERENCE_RE = re.compile(
+    r"^\s*(?P<authors>.{3,180}?)\s+\((?P<year>(?:19|20)\d{2})\)\.\s*"
+    r"(?P<title>[A-Z][^.]{7,240}?)\."
+)
+UNNUMBERED_REFERENCE_RE = re.compile(
+    r"^\s*(?P<authors>[^.]{3,500}?)\.\s+(?P<title>[^.]{8,500}?)\.\s+.*?"
+    r"\b(?P<year>(?:19|20)\d{2})[a-z]?\b",
+    re.IGNORECASE,
+)
+REFERENCE_HEADING_RE = re.compile(r"(?:\d+\s+)?REFERENCES?", re.IGNORECASE)
+RUNNING_HEADER_RE = re.compile(
+    r"(?:published|accepted)\s+as\s+(?:an?\s+)?(?:conference|journal|workshop)\s+paper\b.*",
+    re.IGNORECASE,
+)
+REFERENCE_END_HEADING_RE = re.compile(
+    r"(?:APPENDI(?:X|CES)|SUPPLEMENTARY(?:\s+MATERIAL)?|"
+    r"OVERVIEW\s+OF\s+(?:THE\s+)?APPENDI(?:X|CES)|"
+    r"APPENDI(?:X|CES)\s+(?:TABLE\s+OF\s+CONTENTS|OVERVIEW)|"
+    r"ACKNOWLEDGMENTS?)(?:\s+.*)?",
+    re.IGNORECASE,
 )
 
 
@@ -68,14 +108,72 @@ def _terms(text: str) -> set[str]:
     camel_split = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", str(text or ""))
     for token in TOKEN_RE.findall(camel_split.lower()):
         token = token.strip(".")
-        if token in {"al", "et", "etc"}:
+        if token in {"al", "et", "etc", *LEXICAL_NOISE_TERMS}:
             continue
-        terms.add(token)
-        if token.endswith("s") and len(token) > 4 and not token.endswith("ss"):
-            terms.add(token[:-1])
+        variants = {token, token.replace("-", "")}
+        for value in tuple(variants):
+            if value.endswith("ing") and len(value) > 7:
+                variants.add(value[:-3])
+            if value.endswith("s") and len(value) > 4 and not value.endswith("ss"):
+                variants.add(value[:-1])
+        terms.update(variants)
         if "-" in token:
             terms.update(part for part in token.split("-") if len(part) > 2)
     return terms
+
+
+def _is_reference_boundary(lines: list[str], index: int) -> bool:
+    """Return whether a line structurally starts material after references."""
+    line = lines[index].strip()
+    if REFERENCE_END_HEADING_RE.fullmatch(line):
+        return True
+    if not re.fullmatch(r"(?:APPENDIX\s+)?[A-Z](?:\.\d+)*", line, re.IGNORECASE):
+        return False
+    following = lines[index + 1].strip() if index + 1 < len(lines) else ""
+    letters = [char for char in following if char.isalpha()]
+    return bool(
+        3 <= len(following) <= 160
+        and letters
+        and sum(char.isupper() for char in letters) / len(letters) >= 0.8
+    )
+
+
+def _looks_like_author_list(author_text: str) -> bool:
+    """Reject prose and extraction debris without maintaining paper-specific names."""
+    normalized = re.sub(r"\s+", " ", author_text).strip(" ,.;:")
+    if not normalized or RUNNING_HEADER_RE.search(normalized) or any(char.isdigit() for char in normalized):
+        return False
+    if re.fullmatch(r"[^\W\d_]+(?:[-'][^\W\d_]+)?\s+et\s+al", normalized, re.IGNORECASE):
+        return normalized[:1].isupper()
+    parts = [
+        part.strip()
+        for part in re.split(r",|;|\band\b", normalized)
+        if part.strip() and part.strip().lower() != "et al"
+    ]
+    if not parts:
+        return False
+    valid_parts = 0
+    for part in parts:
+        words = re.findall(r"[^\W\d_]+(?:[-'][^\W\d_]+)?", part, re.UNICODE)
+        if not 1 <= len(words) <= 8:
+            continue
+        name_like = sum(word[:1].isupper() or len(word) == 1 for word in words)
+        if name_like >= max(1, len(words) - 1):
+            valid_parts += 1
+    if valid_parts != len(parts):
+        return False
+    return len(parts) > 1 or len(re.findall(r"[^\W\d_]+", parts[0], re.UNICODE)) >= 2
+
+
+def _looks_like_reference_title(title: str) -> bool:
+    normalized = re.sub(r"\s+", " ", title).strip(" ,.;:")
+    words = re.findall(r"[^\W_]+", normalized, re.UNICODE)
+    if not 2 <= len(words) <= 80 or RUNNING_HEADER_RE.search(normalized):
+        return False
+    # A comma-separated continuation of author names is not a paper title.
+    if "," in normalized and _looks_like_author_list(normalized):
+        return False
+    return True
 
 
 def _bibliography_candidates(document: dict) -> list[dict]:
@@ -87,11 +185,75 @@ def _bibliography_candidates(document: dict) -> list[dict]:
     """
     candidates: dict[str, dict] = {}
     in_related_work = False
+    in_references = False
+
+    def add_candidate(match, *, page_number, context, citation):
+        title = re.sub(r"\s+", " ", match.group("title")).strip(" ,.;:")
+        raw_author_text = str(match.group("authors") or "")
+        if not _looks_like_reference_title(title) or not _looks_like_author_list(raw_author_text):
+            return
+        author_text = re.sub(r"\s+et\s+al\.?", "", raw_author_text, flags=re.IGNORECASE)
+        authors = [
+            author.strip()
+            for author in re.split(r",|;|\band\b", author_text)
+            if author.strip()
+        ][:20]
+        canonical_title = re.sub(r"\W+", "", title.lower())
+        year = int(match.group("year"))
+        candidate_id = hashlib.sha1(
+            f"{document.get('content_hash', '')}|{canonical_title}|{year}".encode("utf-8")
+        ).hexdigest()[:20]
+        candidates.setdefault(
+            f"{canonical_title}|{year}",
+            {
+                "id": f"bibliography-{candidate_id}",
+                "title": title,
+                "abstract": context,
+                "authors": authors,
+                "categories": [],
+                "comment": citation,
+                "journal_ref": "",
+                "doi": "",
+                "year": year,
+                "published_at": "",
+                "source_url": "",
+                "pdf_url": "",
+                "source": "paper_bibliography",
+                "provenance": {
+                    "provider": "paper_bibliography",
+                    "retrieved_at": "",
+                    "metadata_only": True,
+                    "source_page": page_number,
+                    "exact_quote": citation,
+                    "note": "由当前论文正文或参考文献中的题录确定性提取，链接仍需外部来源闭合。",
+                },
+            },
+        )
+
     for page in document.get("pages") or []:
         page_number = page.get("page")
-        text = re.sub(r"\s+", " ", str(page.get("text") or "")).strip()
+        raw_page = str(page.get("text") or "")
+        lines = [re.sub(r"\s+", " ", line).strip() for line in raw_page.splitlines() if line.strip()]
+        text = re.sub(r"\s+", " ", raw_page).strip()
         if not text:
             continue
+        reference_heading = next(
+            (index for index, line in enumerate(lines) if REFERENCE_HEADING_RE.fullmatch(line)),
+            None,
+        )
+        if reference_heading is not None:
+            in_references = True
+            lines = lines[reference_heading + 1 :]
+        if in_references:
+            for index, line in enumerate(lines):
+                if _is_reference_boundary(lines, index):
+                    in_references = False
+                    break
+                if RUNNING_HEADER_RE.fullmatch(line) or re.fullmatch(r"\d+", line):
+                    continue
+                match = NUMBERED_REFERENCE_RE.match(line) or AUTHOR_YEAR_REFERENCE_RE.match(line)
+                if match:
+                    add_candidate(match, page_number=page_number, context=line, citation=line)
         if not in_related_work:
             heading = re.search(
                 r"\b(?:\d+(?:\.\d+)*\.?\s+)?RELATED WORKS?\b", text, re.IGNORECASE
@@ -108,52 +270,72 @@ def _bibliography_candidates(document: dict) -> list[dict]:
         )
         section_text = text[: next_section.start()] if next_section else text
         for match in CITATION_RE.finditer(section_text):
-            title = re.sub(r"\s+", " ", match.group("title")).strip(" ,.;:")
-            if title.lower() in {"eigenbench", "ours"}:
-                continue
             citation = match.group(0)
             context_start = max(0, match.start() - 100)
             context_end = min(len(section_text), match.end() + 220)
             context = section_text[context_start:context_end].strip(" ,.;:")
-            author_text = match.group("authors").replace(" et al.", "")
-            authors = [
-                author.strip()
-                for author in re.split(r",|;|\band\b", author_text)
-                if author.strip()
-            ][:20]
-            canonical_title = re.sub(r"\W+", "", title.lower())
-            candidate_id = hashlib.sha1(
-                f"{document.get('content_hash', '')}|{canonical_title}|{match.group('year')}".encode("utf-8")
-            ).hexdigest()[:20]
-            candidates.setdefault(
-                f"{canonical_title}|{match.group('year')}",
-                {
-                    "id": f"bibliography-{candidate_id}",
-                    "title": title,
-                    "abstract": context,
-                    "authors": authors,
-                    "categories": [],
-                    "comment": citation,
-                    "journal_ref": "",
-                    "doi": "",
-                    "year": int(match.group("year")),
-                    "published_at": "",
-                    "source_url": "",
-                    "pdf_url": "",
-                    "source": "paper_bibliography",
-                    "provenance": {
-                        "provider": "paper_bibliography",
-                        "retrieved_at": "",
-                        "metadata_only": True,
-                        "source_page": page_number,
-                        "exact_quote": citation,
-                        "note": "由当前论文 Related Work 章节中的引文确定性提取，题录与链接仍需外部来源闭合。",
-                    },
-                },
-            )
+            add_candidate(match, page_number=page_number, context=context, citation=citation)
         if next_section:
             break
+    reference_lines: list[tuple[int, str]] = []
+    collecting = False
+    for page in document.get("pages") or []:
+        page_number = int(page.get("page") or 0)
+        lines = [
+            re.sub(r"\s+", " ", raw_line).strip()
+            for raw_line in str(page.get("text") or "").splitlines()
+            if raw_line.strip()
+        ]
+        for index, line in enumerate(lines):
+            if REFERENCE_HEADING_RE.fullmatch(line):
+                collecting = True
+                continue
+            if collecting and _is_reference_boundary(lines, index):
+                collecting = False
+                break
+            if collecting and (RUNNING_HEADER_RE.fullmatch(line) or re.fullmatch(r"\d+", line)):
+                continue
+            if collecting:
+                reference_lines.append((page_number, line))
+
+    entry_lines: list[str] = []
+    entry_page = 0
+    for page_number, line in reference_lines:
+        if not entry_lines:
+            entry_page = page_number
+        entry_lines.append(line)
+        joined = " ".join(entry_lines)
+        if len(re.findall(r"\.\s", joined)) < 2 or not re.search(r"\b(?:19|20)\d{2}[a-z]?\b", joined):
+            continue
+        match = UNNUMBERED_REFERENCE_RE.match(joined)
+        if match:
+            add_candidate(match, page_number=entry_page, context=joined, citation=joined)
+        entry_lines = []
     return list(candidates.values())
+
+
+def _bibliography_document(document: dict) -> dict:
+    """Reparse an owned PDF only when legacy pages lost line boundaries."""
+    if any("\n" in str(page.get("text") or "") for page in document.get("pages") or []):
+        return document
+    settings = get_settings()
+    prefix = settings.uploads_path.rstrip("/") + "/"
+    parsed = urlparse(str(document.get("pdf_url") or document.get("source_url") or "")).path
+    if not parsed.startswith(prefix):
+        return document
+    source = (settings.uploads_dir / Path(parsed).name).resolve()
+    if source.parent != settings.uploads_dir.resolve() or not source.is_file():
+        return document
+    snapshot = parse_pdf_bytes(source.read_bytes(), str(document.get("source_url") or ""))
+    text = str(snapshot.get("text") or "")
+    pages = [
+        {
+            "page": int(span.get("page") or index),
+            "text": text[int(span.get("start") or 0) : int(span.get("end") or 0)],
+        }
+        for index, span in enumerate(snapshot.get("page_spans") or [], start=1)
+    ]
+    return {**document, "pages": pages or document.get("pages") or []}
 
 
 class RelatedWorkService:
@@ -236,22 +418,32 @@ class RelatedWorkService:
             re.IGNORECASE | re.DOTALL,
         )
         abstract = abstract_match.group(1) if abstract_match else ""
-        document_terms = dict.fromkeys(
-            term for keyword in extract_keywords(title, abstract, limit=8) for term in keyword.split()
-        )
-        document_query = " ".join(list(document_terms)[:6])
+        ordered_title_terms = [
+            token.casefold()
+            for token in TOKEN_RE.findall(title)
+            if token.casefold() not in GENERIC_TITLE_TERMS
+            and token.casefold() not in LEXICAL_NOISE_TERMS
+            and token.casefold() not in {"how", "are", "the", "for", "with", "from", "into", "and", "language"}
+        ]
+        ordered_title_terms = list(dict.fromkeys(ordered_title_terms))
+        ordered_title_terms.sort(key=lambda term: (0 if "-" in term else 1, -len(term)))
+        document_query = " ".join(ordered_title_terms[:5])
         if document_query:
             queries.append(document_query)
+        anchor_counts = Counter(
+            term
+            for anchor in anchors
+            for term in _terms(anchor["text"])
+            if term not in GENERIC_TITLE_TERMS and term not in LEXICAL_NOISE_TERMS and len(term) >= 4
+        )
+        anchor_terms = [
+            term
+            for term, _count in sorted(anchor_counts.items(), key=lambda item: (-item[1], -len(item[0]), item[0]))
+            if term not in set(ordered_title_terms)
+        ]
         anchor_queries: list[str] = []
-        for anchor in anchors:
-            keywords = dict.fromkeys(
-                term
-                for keyword in extract_keywords(anchor["text"], "", limit=8)
-                for term in keyword.split()
-            )
-            query = " ".join(list(keywords)[:6])
-            if query and query not in queries and query not in anchor_queries:
-                anchor_queries.append(query)
+        if anchor_terms:
+            anchor_queries.append(" ".join(anchor_terms[:6]))
 
         candidates = bibliography_candidates or []
         anchor_vocabulary = set().union(*(_terms(anchor["text"]) for anchor in anchors)) if anchors else set()
@@ -365,6 +557,7 @@ class RelatedWorkService:
             "queries": queries,
             "search_keywords": keywords,
             "result_limit": result_limit,
+            "rejected_candidate_count": len(decorated.get("rejected_neighbors") or []),
             "source_counts": source_counts,
             "search_policy": {
                 "mode": "keyword_first",
@@ -392,8 +585,9 @@ class RelatedWorkService:
             raise ValueError("论文任务不存在")
         document = result.get("paper_document") or {}
         anchors, report_version = self._anchors(result)
-        local_candidates = _bibliography_candidates(document)
-        queries = self._queries(anchors, document, local_candidates)
+        bibliography_document = _bibliography_document(document)
+        local_candidates = _bibliography_candidates(bibliography_document)
+        queries = self._queries(anchors, bibliography_document, local_candidates)
         cache_material = {
             "paper_content_hash": document.get("content_hash") or "",
             "report_version": report_version,
@@ -422,7 +616,13 @@ class RelatedWorkService:
             prioritize_arxiv=True,
             local_candidates=local_candidates,
         )
-        own_title = re.sub(r"\W+", "", str(document.get("title") or "").lower())
+        own_identity = canonical_identity_keys(
+            {
+                **document,
+                "official_record_url": (document.get("verified_identity") or {}).get("official_record_url")
+                or document.get("formal_record_url"),
+            }
+        )
         topic_terms = _terms(combined_query) - GENERIC_TITLE_TERMS
         citation_query_indexes = {
             index
@@ -435,12 +635,37 @@ class RelatedWorkService:
         }
         source_grounded_query_indexes = {0, *citation_query_indexes}
         neighbors = []
+        rejected_neighbors = []
         for candidate in search_result.get("results") or []:
-            normalized_title = re.sub(r"\W+", "", str(candidate.get("title") or "").lower())
-            if own_title and normalized_title == own_title:
+            candidate_identity = canonical_identity_keys(
+                {
+                    **candidate,
+                    "official_record_url": candidate.get("official_url") or candidate.get("source_url"),
+                    "canonical_url": candidate.get("metadata_url") or "",
+                }
+            )
+            shared_identity = sorted(own_identity & candidate_identity)
+            if shared_identity:
+                rejected_neighbors.append(
+                    {
+                        "candidate_id": str(candidate.get("id") or ""),
+                        "title": str(candidate.get("title") or ""),
+                        "reason": "source_identity_match",
+                        "identity_keys": shared_identity,
+                    }
+                )
                 continue
             score, matched_ids, overlap = self._score_neighbor(candidate, anchors, topic_terms)
             if not matched_ids:
+                rejected_neighbors.append(
+                    {
+                        "candidate_id": str(candidate.get("id") or ""),
+                        "title": str(candidate.get("title") or ""),
+                        "reason": "no_meaningful_anchor_overlap",
+                        "score": score,
+                        "overlapping_terms": overlap,
+                    }
+                )
                 continue
             if candidate.get("source") in {"openalex", "semantic_scholar"}:
                 query_indexes = candidate.get("provider_query_indexes") or []
@@ -453,6 +678,15 @@ class RelatedWorkService:
                     not source_grounded_query_indexes.intersection(query_indexes)
                     and int(candidate.get("provider_query_hits") or 0) < 2
                 ):
+                    rejected_neighbors.append(
+                        {
+                            "candidate_id": str(candidate.get("id") or ""),
+                            "title": str(candidate.get("title") or ""),
+                            "reason": "weak_provider_query_support",
+                            "score": score,
+                            "provider_query_hits": candidate.get("provider_query_hits") or 0,
+                        }
+                    )
                     continue
             venue = candidate.get("venue") or {}
             source_url = str(candidate.get("source_url") or "")
@@ -508,6 +742,7 @@ class RelatedWorkService:
             "anchors": anchors,
             "queries": queries,
             "neighbors": neighbors[:limit],
+            "rejected_neighbors": rejected_neighbors,
             "provider_status": search_result.get("provider_status") or {},
             "search_backend": search_result.get("search_backend") or "local_inverted_index",
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -524,5 +759,6 @@ class RelatedWorkService:
         result = self.artifacts.read_result(task_id) or {}
         document = result.get("paper_document") or {}
         anchors = snapshot.get("anchors") or []
-        queries = self._queries(anchors, document, _bibliography_candidates(document))
+        bibliography_document = _bibliography_document(document)
+        queries = self._queries(anchors, bibliography_document, _bibliography_candidates(bibliography_document))
         return self._decorate_snapshot(snapshot, queries, len(snapshot.get("neighbors") or []))

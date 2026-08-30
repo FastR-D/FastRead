@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   AlertCircle,
@@ -306,6 +306,11 @@ export default function LibraryPage() {
   const [folderToDelete, setFolderToDelete] = useState<string | null>(null)
   const [deletingFolder, setDeletingFolder] = useState(false)
 
+  useLayoutEffect(() => {
+    document.documentElement.classList.add('document-scroll')
+    return () => document.documentElement.classList.remove('document-scroll')
+  }, [])
+
   const collectionTask = tasks.find(task => task.id === collectionTaskId) || null
   const collectionState = collectionTask ? collectionSync[collectionTask.id] : undefined
 
@@ -464,7 +469,7 @@ export default function LibraryPage() {
   ]
 
   return (
-    <div className="h-screen overflow-y-auto bg-white text-neutral-950">
+    <div className="min-h-screen bg-white text-neutral-950">
       <header className="sticky top-0 z-20 flex h-16 items-center justify-between bg-white/95 px-7 backdrop-blur">
         <Link to="/" className="flex items-center gap-3">
           <img src={logo} alt="FastRead" className="h-9 w-9 rounded-md" />
