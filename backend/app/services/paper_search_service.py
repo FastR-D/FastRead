@@ -595,7 +595,16 @@ class CrossrefAdapter:
             parts = value.get("date-parts") or []
             if not parts or not parts[0]:
                 continue
-            values = [int(value) for value in parts[0][:3]]
+            values: list[int] = []
+            for raw_value in parts[0][:3]:
+                if raw_value is None:
+                    break
+                try:
+                    values.append(int(raw_value))
+                except (TypeError, ValueError):
+                    break
+            if not values:
+                continue
             year = values[0]
             published = "-".join(
                 [str(year), *[f"{value:02d}" for value in values[1:]]]

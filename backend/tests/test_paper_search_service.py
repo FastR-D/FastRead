@@ -389,6 +389,20 @@ def test_crossref_is_primary_no_key_metadata_adapter():
     assert papers[0]["abstract"] == "A grounded benchmark for language model value alignment."
 
 
+def test_crossref_accepts_partial_date_parts_with_null_month_and_day():
+    paper = CrossrefAdapter._normalize(
+        {
+            "DOI": "10.5555/partial.date",
+            "title": ["A Paper with a Year-Only Date"],
+            "published": {"date-parts": [[2026, None, None]]},
+        }
+    )
+
+    assert paper is not None
+    assert paper["year"] == 2026
+    assert paper["published_at"] == "2026"
+
+
 def test_semantic_scholar_no_key_adapter_returns_citable_metadata():
     adapter = SemanticScholarAdapter(client_factory=FakeOpenMetadataClient, require_proxy=False)
 
