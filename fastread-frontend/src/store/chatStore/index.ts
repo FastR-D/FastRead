@@ -8,6 +8,10 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   sources?: ChatSource[]
+  groundingStatus?: string
+  groundingDetail?: string
+  retrievalStrategy?: string
+  retrievedPages?: number[]
 }
 
 interface ChatState {

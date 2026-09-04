@@ -88,10 +88,49 @@ function SourceBadges({
   )
 }
 
+const groundingLabels: Record<string, string> = {
+  source_grounded: '原文引用已校验',
+  source_context_supplied: '已提供原文上下文',
+  retrieval_miss: '未检索到匹配段落',
+  requested_page_missing: '指定页码不可用',
+  response_format_invalid: '回答格式校验失败',
+  citation_missing: '回答缺少原文引用',
+  citation_rejected: '引用校验未通过',
+  insufficient_source: '已检索，但证据不足',
+}
+
+function GroundingNotice({
+  status,
+  detail,
+  strategy,
+  pages,
+}: {
+  status?: string
+  detail?: string
+  strategy?: string
+  pages?: number[]
+}) {
+  if (!status) return null
+  const verified = status === 'source_grounded'
+  const pageText = pages?.length ? ` · 检索页 ${pages.join('、')}` : ''
+  const title = [detail, strategy ? `检索策略：${strategy}` : ''].filter(Boolean).join('；') || undefined
+  return (
+    <div
+      className={`mt-1.5 rounded border px-2 py-1 text-[11px] ${verified ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-800'}`}
+      title={title}
+    >
+      <span className="font-medium">{groundingLabels[status] || status}</span>
+      {pageText}
+    </div>
+  )
+}
+
 export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null)
+  const [indexDetail, setIndexDetail] = useState('')
+  const [indexPollNonce, setIndexPollNonce] = useState(0)
   const [scope, setScope] = useState<'task' | 'library'>('task')
   const chatKey = scope === 'library' ? 'library' : taskId
 
@@ -139,6 +178,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
   useEffect(() => {
     if (scope === 'library') {
       setIndexStatus('indexed')
+      setIndexDetail('')
       return
     }
     if (!taskId) return
@@ -150,12 +190,24 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
         const res = await getChatStatus(taskId)
         if (cancelled) return
         setIndexStatus(res.status)
+        setIndexDetail(res.detail || '')
 
+        if (res.status === 'idle') {
+          const started = await indexTask(taskId)
+          if (cancelled) return
+          setIndexStatus(started.status)
+          setIndexDetail(started.detail || '')
+          if (started.status === 'indexing') timer = setTimeout(poll, 2000)
+          return
+        }
         if (res.status === 'indexing') {
           timer = setTimeout(poll, 2000)
         }
-      } catch {
-        if (!cancelled) setIndexStatus('idle')
+      } catch (error) {
+        if (!cancelled) {
+          setIndexStatus('failed')
+          setIndexDetail(error instanceof Error ? error.message : '索引状态检查失败')
+        }
       }
     }
 
@@ -164,7 +216,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
       cancelled = true
       if (timer) clearTimeout(timer)
     }
-  }, [taskId, scope])
+  }, [taskId, scope, indexPollNonce])
 
   const handleSend = useCallback(
     async (value: string) => {
@@ -196,6 +248,10 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
           role: 'assistant',
           content: res.answer,
           sources: res.sources,
+          groundingStatus: res.grounding_status,
+          groundingDetail: res.grounding_detail,
+          retrievalStrategy: res.retrieval_strategy,
+          retrievedPages: res.retrieved_pages,
         })
       } catch {
         toast.error('问答请求失败')
@@ -212,10 +268,17 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
       key: `msg-${i}`,
       role: msg.role === 'user' ? ('user' as const) : ('ai' as const),
       content: msg.content,
-      footer:
-        msg.role === 'assistant' && msg.sources ? (
-          <SourceBadges sources={msg.sources} onOpenSource={openSource} />
-        ) : undefined,
+      footer: msg.role === 'assistant' ? (
+        <div>
+          <GroundingNotice
+            status={msg.groundingStatus}
+            detail={msg.groundingDetail}
+            strategy={msg.retrievalStrategy}
+            pages={msg.retrievedPages}
+          />
+          {msg.sources?.length ? <SourceBadges sources={msg.sources} onOpenSource={openSource} /> : null}
+        </div>
+      ) : undefined,
     }))
 
     if (loading) {
@@ -318,26 +381,34 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
           <div className="mx-3 mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
             <div className="flex items-center justify-between gap-3">
               <span>
-                {indexStatus === 'indexing'
-                  ? '向量索引正在后台构建，当前仍会检索论文分页原文。'
-                  : '当前使用逐页关键词检索；需要更准召回时可建立向量索引。'}
+                {indexStatus === 'disabled'
+                  ? `当前部署未启用向量索引；基础检索和带页码问答仍可使用。${indexDetail ? ` ${indexDetail}` : ''}`
+                  : indexStatus === 'indexing'
+                    ? '多语言向量索引正在后台准备；首次会下载约 0.22 GB 模型，当前仍可立即提问。'
+                    : indexStatus === 'failed'
+                      ? `向量索引建立失败，可重试；基础检索仍可使用。${indexDetail ? ` 原因：${indexDetail}` : ''}`
+                      : '当前使用逐页关键词检索；向量索引会在后台自动建立。'}
               </span>
               <Button
                 size="sm"
                 variant="outline"
                 className="h-7 shrink-0 border-amber-300 bg-white px-2 text-xs hover:bg-amber-100"
-                disabled={indexStatus === 'indexing'}
+                disabled={indexStatus === 'indexing' || indexStatus === 'disabled'}
                 onClick={async () => {
                   setIndexStatus('indexing')
+                  setIndexDetail('')
                   try {
-                    await indexTask(taskId)
+                    const result = await indexTask(taskId)
+                    setIndexStatus(result.status)
+                    setIndexDetail(result.detail || '')
+                    if (result.status === 'indexing') setIndexPollNonce(value => value + 1)
                   } catch {
                     toast.error('索引请求失败')
                     setIndexStatus('failed')
                   }
                 }}
               >
-                {indexStatus === 'indexing' ? '索引中' : '建立索引'}
+                {indexStatus === 'disabled' ? '部署未启用' : indexStatus === 'indexing' ? '索引中' : indexStatus === 'failed' ? '重试索引' : '建立索引'}
               </Button>
             </div>
           </div>
@@ -347,7 +418,9 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
             <div>
               <p>针对论文与阅读报告持续追问</p>
               <p className="mt-1 text-xs">
-                {scope === 'task' ? '回答会优先引用论文原文页码。' : '可跨论文比较共同结论与差异。'}
+                {scope === 'task'
+                  ? '可以问原文或阅读报告，也可以接着问“它在哪几页、为什么”；回答会优先引用论文原文页码。'
+                  : '可跨论文比较共同结论与差异，也可以结合上一轮继续追问。'}
               </p>
               {scope === 'task' && suggestedQuestions.length > 0 && (
                 <div className="mx-auto mt-4 flex max-w-md flex-wrap justify-center gap-2 px-4">
@@ -381,7 +454,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
           onChange={setInput}
           onSubmit={handleSend}
           loading={loading}
-          placeholder="输入你的问题..."
+          placeholder="可连续追问，例如：这个结论依据哪几页？"
         />
       </div>
     </div>

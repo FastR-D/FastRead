@@ -39,6 +39,7 @@ echo Building the isolated backend bundle...
   --hidden-import uvicorn ^
   --hidden-import fastapi ^
   --hidden-import starlette ^
+  --collect-all fastembed ^
   --add-data "%cd%\backend\app\db\builtin_providers.json;." ^
   backend\main.py
 if errorlevel 1 goto :fail

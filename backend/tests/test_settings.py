@@ -16,6 +16,7 @@ def test_settings_resolves_paper_runtime_paths_to_backend_root(monkeypatch):
     assert settings.uploads_dir == settings.backend_root / "uploads"
     assert settings.data_dir == settings.backend_root / "data"
     assert settings.vector_db_dir == settings.backend_root / "vector_db"
+    assert settings.embedding_model_cache_dir == settings.backend_root / "models" / "embedding"
     assert settings.integration_data_dir == settings.backend_root / "data" / "integrations"
 
 
@@ -45,6 +46,7 @@ def test_settings_uses_explicit_product_data_root(monkeypatch, tmp_path):
     assert settings.paper_output_dir == tmp_path / "paper_results"
     assert settings.uploads_dir == tmp_path / "uploads"
     assert settings.integration_data_dir == tmp_path / "data" / "integrations"
+    assert settings.embedding_model_cache_dir == tmp_path / "models" / "embedding"
 
 
 def test_runtime_directory_creation_is_paper_only(monkeypatch, tmp_path):
@@ -58,3 +60,4 @@ def test_runtime_directory_creation_is_paper_only(monkeypatch, tmp_path):
 
     assert settings.paper_output_dir.is_dir()
     assert settings.uploads_dir.is_dir()
+    assert settings.embedding_model_cache_dir.is_dir()

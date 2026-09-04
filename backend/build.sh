@@ -30,6 +30,7 @@ pyinstaller \
   --hidden-import uvicorn \
   --hidden-import fastapi \
   --hidden-import starlette \
+  --collect-all fastembed \
   --add-data "backend/app/db/builtin_providers.json:." \
   backend/main.py
 

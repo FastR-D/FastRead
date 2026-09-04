@@ -77,6 +77,9 @@ class AppSettings:
         self.paper_output_dir = runtime_path(os.getenv("PAPER_OUTPUT_DIR", "paper_results"))
         self.data_dir = runtime_path(os.getenv("DATA_DIR", "data"))
         self.vector_db_dir = runtime_path(os.getenv("VECTOR_DB_DIR", "vector_db"))
+        self.embedding_model_cache_dir = runtime_path(
+            os.getenv("CHAT_EMBEDDING_CACHE_DIR", "models/embedding")
+        )
 
         self.max_upload_bytes = _get_int("MAX_UPLOAD_BYTES", 64 * 1024 * 1024)
         self.fastnews_enabled = os.getenv("FASTNEWS_ENABLED", "true").lower() == "true"
@@ -103,6 +106,7 @@ class AppSettings:
             self.paper_output_dir,
             self.data_dir,
             self.vector_db_dir,
+            self.embedding_model_cache_dir,
             self.integration_data_dir,
             self.fastnews_cache_path.parent,
         ):

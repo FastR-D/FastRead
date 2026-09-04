@@ -21,6 +21,10 @@ export interface ChatSource {
 export interface AskResponse {
   answer: string
   sources: ChatSource[]
+  grounding_status?: 'source_grounded' | 'retrieval_miss' | 'requested_page_missing' | 'response_format_invalid' | 'citation_missing' | 'citation_rejected' | 'insufficient_source' | string
+  grounding_detail?: string
+  retrieval_strategy?: string
+  retrieved_pages?: number[]
 }
 
 export type IndexStatus = 'disabled' | 'idle' | 'indexing' | 'indexed' | 'failed'
@@ -28,9 +32,10 @@ export type IndexStatus = 'disabled' | 'idle' | 'indexing' | 'indexed' | 'failed
 export interface ChatStatusResponse {
   indexed: boolean
   status: IndexStatus
+  detail?: string
 }
 
-export const indexTask = async (taskId: string): Promise<void> => {
+export const indexTask = async (taskId: string): Promise<ChatStatusResponse> => {
   return await request.post('/chat/index', { task_id: taskId })
 }
 
