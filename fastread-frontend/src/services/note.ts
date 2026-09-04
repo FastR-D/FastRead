@@ -272,7 +272,7 @@ export const generate_reading_report = async (data: {
   model_name: string
   force?: boolean
 }): Promise<{ task_id: string; reading_report: ReadingReport }> =>
-  request.post('/reading_reports', data, { timeout: 180000 }) as any
+  request.post('/reading_reports', data, { timeout: 600000 }) as any
 
 export const save_personal_summary = async (taskId: string, summary: string): Promise<{
   task_id: string

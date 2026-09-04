@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const source = readFileSync(new URL('./ReadingReportView.tsx', import.meta.url), 'utf8')
+const noteService = readFileSync(new URL('../../../services/note.ts', import.meta.url), 'utf8')
 
 describe('academic identity gate disclosure', () => {
   it('treats security, systems, and AI conferences as the shared core gate', () => {
@@ -24,5 +25,11 @@ describe('academic identity gate disclosure', () => {
     expect(source).toContain('通读更长的分页正文')
     expect(source).toContain("item.evidence?.length ? <EvidenceQuotes")
     expect(source).toContain("item.page_start || 'page'")
+  })
+
+  it('allows long grounded reports to finish and reports failures explicitly', () => {
+    expect(noteService).toContain("timeout: 600000")
+    expect(source).toContain('正在通读全文并校验页码，请耐心等待…')
+    expect(source).toContain("console.error('关键问题阅读报告生成失败'")
   })
 })

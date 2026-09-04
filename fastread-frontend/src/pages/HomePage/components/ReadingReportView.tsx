@@ -176,6 +176,10 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
       })
       toast.success('关键问题阅读报告已生成')
     }
+    catch (error) {
+      console.error('关键问题阅读报告生成失败', error)
+      toast.error('报告生成未完成；长论文可能需要数分钟，请稍后重试')
+    }
     finally {
       setGenerating(false)
     }
@@ -213,7 +217,7 @@ export default function ReadingReportView({ task }: { task: Task | null }) {
             onClick={() => handleGenerate(false)}
           >
             {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <BookOpenCheck className="mr-2 h-4 w-4" />}
-            {generating ? '正在生成学术阅读报告…' : '一键生成阅读报告'}
+            {generating ? '正在通读全文并校验页码，请耐心等待…' : '一键生成阅读报告'}
           </Button>
           {!model && <p className="mt-2 text-center text-xs text-amber-700">请先在设置中启用模型</p>}
         </div>

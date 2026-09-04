@@ -110,6 +110,73 @@ def test_paper_chat_returns_only_exact_page_citations(monkeypatch):
     assert result["sources"][0]["source_type"] == "paper_page"
 
 
+def test_paper_chat_uses_grounded_report_evidence_for_cross_language_query(monkeypatch):
+    target_quote = "The framework evaluates detection, clarification, and interaction use."
+    payload = {
+        "paper_task": True,
+        "paper_document": {
+            "id": "paper-task",
+            "title": "English Paper",
+            "source_url": "https://publisher.example/paper",
+            "pages": [
+                {"page": 1, "text": "A general introduction without the requested method." * 20},
+                {"page": 2, "text": f"Context before. {target_quote} Context after." * 12},
+            ],
+        },
+        "insights": {
+            "reading_report": {
+                "key_questions": [
+                    {
+                        "question": "论文把欠规格处理拆成哪三个核心能力？",
+                        "answer": "检测、澄清和利用交互信息。",
+                        "why_it_matters": "这决定智能体能否处理信息不足。",
+                        "evidence": [{"page_start": 2, "page_end": 2, "exact_quote": target_quote}],
+                    }
+                ]
+            }
+        },
+    }
+    calls = []
+
+    class Completions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            content = (
+                '{"answer":"论文评估检测、澄清和利用交互信息三项能力 [第 2 页]",'
+                f'"citations":[{{"page":2,"exact_quote":"{target_quote}"}}]}}'
+            )
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+
+    fake_gpt = SimpleNamespace(
+        model="test-model",
+        client=SimpleNamespace(chat=SimpleNamespace(completions=Completions())),
+    )
+    monkeypatch.setattr(chat_service.ARTIFACTS, "read_result", lambda _task_id: payload)
+    monkeypatch.setattr(chat_service, "_get_gpt", lambda _provider, _model: fake_gpt)
+
+    result = chat_service.chat(
+        "paper-task",
+        "论文把欠规格处理拆成哪三个核心能力？",
+        [],
+        "provider",
+        "model",
+    )
+
+    assert result["grounding_status"] == "source_grounded"
+    assert result["sources"][0]["page_start"] == 2
+    assert target_quote in calls[0]["messages"][0]["content"]
+
+
+def test_paper_chat_uses_balanced_pages_when_cross_language_report_hints_are_absent(monkeypatch):
+    payload = _paper_result()
+    monkeypatch.setattr(chat_service.ARTIFACTS, "read_result", lambda _task_id: payload)
+
+    _, chunks = chat_service._task_chunks("paper-task", "请解释完全不同语言中的问题")
+
+    assert chunks
+    assert all(chunk["metadata"]["source_type"] == "paper_page" for chunk in chunks)
+
+
 def test_paper_chat_rejects_unmatched_or_uncited_answers(monkeypatch):
     class Completions:
         def create(self, **_kwargs):

@@ -108,6 +108,101 @@ def _rank(chunks: list[dict], question: str, limit: int) -> list[dict]:
     return [chunk for _, chunk in ranked[:limit]]
 
 
+def _report_hint_chunks(
+    payload: dict,
+    chunks: list[dict],
+    question: str,
+    limit: int,
+) -> list[dict]:
+    """Bridge cross-language questions through already grounded report evidence."""
+    report = (payload.get("insights") or {}).get("reading_report") or {}
+    query_counts = Counter(_tokens(question))
+    if not query_counts or not report:
+        return []
+
+    entries: list[tuple[int, list[dict]]] = []
+
+    def add_entry(text: str, evidence) -> None:
+        if not isinstance(evidence, list):
+            return
+        text_counts = Counter(_tokens(text))
+        score = sum(min(text_counts[token], count) for token, count in query_counts.items())
+        grounded = [item for item in evidence if isinstance(item, dict) and item.get("page_start")]
+        if score and grounded:
+            entries.append((score, grounded))
+
+    for item in report.get("key_questions") or []:
+        if isinstance(item, dict):
+            add_entry(
+                " ".join(
+                    str(item.get(field) or "")
+                    for field in ("question", "answer", "why_it_matters")
+                ),
+                item.get("evidence"),
+            )
+    for item in report.get("process") or []:
+        if isinstance(item, dict):
+            add_entry(
+                f"{item.get('step') or ''} {item.get('description') or ''}",
+                item.get("evidence"),
+            )
+    for item in report.get("contributions") or []:
+        if isinstance(item, dict):
+            add_entry(
+                f"{item.get('title') or ''} {item.get('description') or ''}",
+                item.get("evidence"),
+            )
+
+    selected: list[dict] = []
+    seen: set[tuple[int, int]] = set()
+    for _, evidence_items in sorted(entries, key=lambda item: -item[0]):
+        for evidence in evidence_items:
+            page_number = int(evidence.get("page_start") or 0)
+            quote_counts = Counter(_tokens(evidence.get("exact_quote") or ""))
+            page_chunks = [
+                chunk
+                for chunk in chunks
+                if int((chunk.get("metadata") or {}).get("page_start") or 0) == page_number
+            ]
+            page_chunks.sort(
+                key=lambda chunk: -sum(
+                    min(Counter(_tokens(chunk.get("text") or ""))[token], count)
+                    for token, count in quote_counts.items()
+                )
+            )
+            for chunk in page_chunks[:1]:
+                metadata = chunk.get("metadata") or {}
+                identity = (
+                    int(metadata.get("page_start") or 0),
+                    int(metadata.get("chunk_index") or 0),
+                )
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                selected.append(chunk)
+                if len(selected) >= limit:
+                    return selected
+    return selected
+
+
+def _balanced_chunks(chunks: list[dict], limit: int) -> list[dict]:
+    """Keep basic Q&A usable when lexical retrieval has no shared language."""
+    if not chunks or limit <= 0:
+        return []
+    by_page: dict[int, dict] = {}
+    for chunk in chunks:
+        page_number = int((chunk.get("metadata") or {}).get("page_start") or 0)
+        by_page.setdefault(page_number, chunk)
+    pages = [by_page[page] for page in sorted(by_page)]
+    if len(pages) <= limit:
+        return pages
+    indexes = {
+        round(index * (len(pages) - 1) / (limit - 1))
+        for index in range(limit)
+    } if limit > 1 else {0}
+    return [pages[index] for index in sorted(indexes)][:limit]
+
+
 def _load_task(task_id: str) -> dict:
     payload = ARTIFACTS.read_result(task_id)
     if not payload or payload.get("paper_task") is not True:
@@ -128,7 +223,12 @@ def _task_chunks(task_id: str, question: str, limit: int = 6) -> tuple[dict, lis
         except Exception as exc:
             logger.warning(f"向量检索不可用，使用本地分页检索: {exc}")
     if not chunks:
-        chunks = _rank(_paper_chunks(task_id, payload), question, limit)
+        paper_chunks = _paper_chunks(task_id, payload)
+        chunks = _rank(paper_chunks, question, limit)
+        if not chunks:
+            chunks = _report_hint_chunks(payload, paper_chunks, question, limit)
+        if not chunks:
+            chunks = _balanced_chunks(paper_chunks, limit)
     return payload, chunks
 
 

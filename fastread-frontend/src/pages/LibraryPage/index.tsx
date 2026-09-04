@@ -298,6 +298,7 @@ export default function LibraryPage() {
   const [tagFilter, setTagFilter] = useState('all')
   const [collectionTaskId, setCollectionTaskId] = useState<string | null>(null)
   const [collectionDraft, setCollectionDraft] = useState<CollectionMeta | null>(null)
+  const [collectionFolderMode, setCollectionFolderMode] = useState<'existing' | 'custom'>('existing')
   const [collectionTagsDraft, setCollectionTagsDraft] = useState('')
   const [collectionError, setCollectionError] = useState('')
   const [newFolderOpen, setNewFolderOpen] = useState(false)
@@ -393,6 +394,7 @@ export default function LibraryPage() {
 
   const openCollectionEditor = (task: Task) => {
     setCollectionTaskId(task.id)
+    setCollectionFolderMode('existing')
     setCollectionDraft({
       folder: task.collection?.folder || DEFAULT_COLLECTION_FOLDER,
       tags: [...(task.collection?.tags || [])],
@@ -404,6 +406,7 @@ export default function LibraryPage() {
 
   const closeCollectionEditor = () => {
     setCollectionTaskId(null)
+    setCollectionFolderMode('existing')
     setCollectionDraft(null)
     setCollectionTagsDraft('')
     setCollectionError('')
@@ -737,20 +740,39 @@ export default function LibraryPage() {
             <div className="space-y-4 py-2">
               <label className="block text-sm font-medium text-neutral-800">
                 收藏夹
-                <input
-                  value={collectionDraft.folder}
+                <select
+                  aria-label="选择已有收藏夹"
+                  value={collectionFolderMode === 'custom' ? '' : collectionDraft.folder}
                   onChange={event => {
-                    setCollectionDraft({ ...collectionDraft, folder: event.target.value })
+                    if (!event.target.value) {
+                      setCollectionFolderMode('custom')
+                      setCollectionDraft({ ...collectionDraft, folder: '' })
+                    }
+                    else {
+                      setCollectionFolderMode('existing')
+                      setCollectionDraft({ ...collectionDraft, folder: event.target.value })
+                    }
                     setCollectionError('')
                   }}
-                  list="collection-folder-options"
-                  className="mt-1.5 h-10 w-full rounded-md border border-neutral-200 px-3 text-sm outline-none focus:border-blue-500"
-                  placeholder="例如：大模型安全"
-                />
-                <datalist id="collection-folder-options">
-                  {folders.map(folder => <option key={folder} value={folder} />)}
-                </datalist>
-                <span className="mt-1 block text-xs font-normal text-neutral-500">可选现有收藏夹，也可直接输入新名称。</span>
+                  className="mt-1.5 h-10 w-full rounded-md border border-neutral-200 bg-white px-3 text-sm outline-none focus:border-blue-500"
+                >
+                  {folders.map(folder => <option key={folder} value={folder}>{folder}</option>)}
+                  <option value="">＋ 输入新收藏夹名称…</option>
+                </select>
+                {collectionFolderMode === 'custom' && (
+                  <input
+                    autoFocus
+                    aria-label="新收藏夹名称"
+                    value={collectionDraft.folder}
+                    onChange={event => {
+                      setCollectionDraft({ ...collectionDraft, folder: event.target.value })
+                      setCollectionError('')
+                    }}
+                    className="mt-2 h-10 w-full rounded-md border border-neutral-200 px-3 text-sm outline-none focus:border-blue-500"
+                    placeholder="例如：大模型安全"
+                  />
+                )}
+                <span className="mt-1 block text-xs font-normal text-neutral-500">下拉框会显示全部已有收藏夹，也可以输入一个新名称。</span>
               </label>
               <label className="block text-sm font-medium text-neutral-800">
                 标签
@@ -775,6 +797,7 @@ export default function LibraryPage() {
                   type="button"
                   variant="outline"
                   onClick={() => {
+                    setCollectionFolderMode('existing')
                     setCollectionDraft({ ...collectionDraft, folder: DEFAULT_COLLECTION_FOLDER })
                     setCollectionError('')
                   }}

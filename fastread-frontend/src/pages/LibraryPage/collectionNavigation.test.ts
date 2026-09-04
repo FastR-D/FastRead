@@ -22,6 +22,14 @@ describe('library collection navigation', () => {
     expect(source).not.toContain("value={collectionTask.collection?.folder || '默认收藏夹'}")
   })
 
+  it('lists every existing folder before offering a custom folder name', () => {
+    expect(source).toContain('aria-label="选择已有收藏夹"')
+    expect(source).toContain('{folders.map(folder => <option key={folder} value={folder}>{folder}</option>)}')
+    expect(source).toContain('＋ 输入新收藏夹名称…')
+    expect(source).toContain('aria-label="新收藏夹名称"')
+    expect(source).not.toContain('<datalist')
+  })
+
   it('exposes create, switch, move-out, and safe folder deletion actions', () => {
     for (const copy of ['新建收藏夹', '移出当前收藏夹', '删除当前收藏夹', '论文本身不会删除']) {
       expect(source).toContain(copy)

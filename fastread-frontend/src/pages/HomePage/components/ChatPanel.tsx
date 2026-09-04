@@ -251,7 +251,7 @@ export default function ChatPanel({ taskId, mode, onModeChange }: ChatPanelProps
           </div>
         ),
         variant: 'outlined' as const,
-        contentRender: (content: any) => (
+        messageRender: (content: any) => (
           <div className="markdown-body prose prose-sm max-w-none prose-p:my-1 prose-li:my-0.5 prose-headings:my-2">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {typeof content === 'string' ? content : String(content)}
