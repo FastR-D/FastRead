@@ -64,11 +64,11 @@ export default function SearchConnectionsPage() {
       <form className="mx-auto max-w-3xl" onSubmit={save}>
         <div>
           <h1 className="text-2xl font-semibold text-slate-950">学术检索连接</h1>
-          <p className="mt-2 text-sm leading-6 text-slate-600">代理地址属于当前用户，不能写死为开发者电脑的端口。这里填写你的代理软件实际监听地址；留空表示未配置。</p>
+          <p className="mt-2 text-sm leading-6 text-slate-600">Crossref 与 OpenAlex 默认境内直连。只有启用直接 arXiv 或 Google Scholar 备用源时，才可能需要填写代理。</p>
         </div>
 
         <section className="mt-7 rounded-xl border border-amber-200 bg-amber-50 p-5 text-sm leading-6 text-amber-950">
-          <div className="flex items-start gap-3"><Network className="mt-0.5 h-5 w-5 shrink-0" /><div><h2 className="font-semibold">境内网络提醒</h2><p className="mt-1">arXiv、Google Scholar、OpenAlex、Semantic Scholar 等外部学术来源默认启用，但在中国大陆网络环境下请通过代理访问，不要直连。FastRead 只使用下方由你配置的代理，不猜测端口，也不会接管系统代理。</p></div></div>
+          <div className="flex items-start gap-3"><Network className="mt-0.5 h-5 w-5 shrink-0" /><div><h2 className="font-semibold">境内检索策略</h2><p className="mt-1">Crossref 负责正式出版物，OpenAlex 负责 arXiv 补充；这两个免费源默认直连。下方代理只在显式启用其他备用来源时使用，不会接管系统代理。</p></div></div>
         </section>
 
         <fieldset disabled={loading || saving} className="mt-6 space-y-5">

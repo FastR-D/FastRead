@@ -11,6 +11,7 @@ from app.services.academic_evidence import (
     systems_venue_ids,
 )
 from app.services.paper_search_service import (
+    CrossrefAdapter,
     GoogleScholarAdapter,
     ElasticsearchIndex,
     InvertedIndex,
@@ -109,7 +110,10 @@ def test_layered_search_returns_core_before_arxiv_and_discloses_freshness(tmp_pa
     result = make_service(tmp_path).search(
         query="prompt injection agents",
         tracks=("security", "ai"),
+        include_arxiv=True,
         include_scholar=True,
+        include_crossref=False,
+        include_openalex=False,
         limit=10,
     )
 
@@ -132,13 +136,26 @@ def test_index_persists_and_supports_refresh_false(tmp_path):
         client_factory=FakeArxivClient,
         require_proxy=False,
     )
-    first.search(query="prompt injection", include_scholar=False)
+    first.search(
+        query="prompt injection",
+        include_arxiv=True,
+        include_scholar=False,
+        include_crossref=False,
+        include_openalex=False,
+    )
     second = PaperSearchService(
         index=InvertedIndex(cache_path=cache),
         client_factory=FakeArxivClient,
         require_proxy=False,
     )
-    result = second.search(query="prompt injection", refresh=False, include_scholar=False)
+    result = second.search(
+        query="prompt injection",
+        refresh=False,
+        include_arxiv=True,
+        include_scholar=False,
+        include_crossref=False,
+        include_openalex=False,
+    )
     assert result["fetched_this_run"] == 0
     assert result["result_count"] == 2
     assert result["index_stats"]["documents"] == 2
@@ -148,7 +165,10 @@ def test_single_term_query_can_return_title_keyword_matches(tmp_path):
     result = make_service(tmp_path).search(
         query="LLM",
         tracks=("security", "ai"),
+        include_arxiv=True,
         include_scholar=False,
+        include_crossref=False,
+        include_openalex=False,
     )
 
     assert result["result_count"] == 1
@@ -161,7 +181,10 @@ def test_venue_filter_keeps_unconfirmed_external_results_when_requested(tmp_path
         tracks=("security", "ai"),
         venue_ids=("iclr",),
         include_unconfirmed=True,
+        include_arxiv=True,
         include_scholar=False,
+        include_crossref=False,
+        include_openalex=False,
     )
 
     assert [paper["title"] for paper in result["results"]] == ["Prompt Injection Benchmarks for Agents"]
@@ -210,6 +233,7 @@ def test_google_scholar_adapter_reports_configured_metadata_results():
 
 class FakeOpenMetadataClient:
     seen_queries = []
+    seen_requests = []
 
     def __init__(self, **kwargs):
         self.kwargs = kwargs
@@ -221,7 +245,36 @@ class FakeOpenMetadataClient:
         return False
 
     def get(self, url, **kwargs):
-        self.__class__.seen_queries.append((url, (kwargs.get("params") or {}).get("search") or (kwargs.get("params") or {}).get("query")))
+        params = kwargs.get("params") or {}
+        self.__class__.seen_requests.append((url, params))
+        self.__class__.seen_queries.append(
+            (url, params.get("search") or params.get("query") or params.get("query.bibliographic"))
+        )
+        if "crossref.org" in url:
+            return FakeResponse(
+                text="",
+                payload={
+                    "message": {
+                        "items": [
+                            {
+                                "DOI": "10.5555/crossref.values",
+                                "title": ["Value Alignment Benchmarks Need Grounded Evaluation"],
+                                "abstract": "<jats:p>A grounded benchmark for language model value alignment.</jats:p>",
+                                "author": [
+                                    {"given": "Casey", "family": "Researcher"},
+                                    {"given": "Lin", "family": "Example"},
+                                ],
+                                "container-title": ["Journal of AI Evaluation"],
+                                "published-online": {"date-parts": [[2025, 4, 3]]},
+                                "URL": "https://doi.org/10.5555/crossref.values",
+                                "type": "journal-article",
+                                "is-referenced-by-count": 23,
+                                "subject": ["Artificial Intelligence"],
+                            }
+                        ]
+                    }
+                },
+            )
         if "openalex.org" in url:
             return FakeResponse(
                 text="",
@@ -307,6 +360,35 @@ def test_openalex_no_key_adapter_keeps_complete_bibliography_and_real_links():
     assert papers[0]["abstract"] == "Value alignment benchmarks need grounded leaderboards"
 
 
+def test_openalex_arxiv_mode_limits_requests_to_arxiv_source():
+    FakeOpenMetadataClient.seen_requests = []
+    adapter = OpenAlexAdapter(
+        client_factory=FakeOpenMetadataClient,
+        require_proxy=False,
+        arxiv_only=True,
+    )
+
+    _, status = adapter.search(["multilingual retrieval"], 5)
+
+    assert status["available"] is True
+    request_params = FakeOpenMetadataClient.seen_requests[-1][1]
+    assert request_params["filter"] == "locations.source.id:S4306400194"
+
+
+def test_crossref_is_primary_no_key_metadata_adapter():
+    adapter = CrossrefAdapter(client_factory=FakeOpenMetadataClient, require_proxy=False)
+
+    papers, status = adapter.search(["value alignment grounded benchmark"], 5)
+
+    assert status["provider"] == "crossref_rest_api"
+    assert status["available"] is True
+    assert papers[0]["source"] == "crossref"
+    assert papers[0]["doi"] == "10.5555/crossref.values"
+    assert papers[0]["authors"] == ["Casey Researcher", "Lin Example"]
+    assert papers[0]["published_at"] == "2025-04-03"
+    assert papers[0]["abstract"] == "A grounded benchmark for language model value alignment."
+
+
 def test_semantic_scholar_no_key_adapter_returns_citable_metadata():
     adapter = SemanticScholarAdapter(client_factory=FakeOpenMetadataClient, require_proxy=False)
 
@@ -348,6 +430,7 @@ def test_layered_search_runs_open_metadata_in_parallel_and_preserves_source_link
         ),
         include_arxiv=False,
         include_scholar=False,
+        include_semantic_scholar=True,
         limit=10,
     )
 
@@ -357,9 +440,11 @@ def test_layered_search_runs_open_metadata_in_parallel_and_preserves_source_link
         "pluralistic evaluation",
     ]
     assert result["provider_status"]["openalex"]["available"] is True
+    assert result["provider_status"]["crossref"]["available"] is True
     assert result["provider_status"]["semantic_scholar"]["available"] is True
     assert {paper["source"] for paper in result["results"]} == {
         "openalex",
+        "crossref",
         "semantic_scholar",
     }
     assert all(paper["source_url"].startswith("https://") for paper in result["results"])
@@ -404,6 +489,7 @@ def test_page_citation_alias_is_resolved_to_public_metadata_without_duplicate(tm
         semantic_queries=("eigenbench value alignment", "ground truth alignment", "LitmusValues"),
         include_arxiv=False,
         include_scholar=False,
+        include_crossref=False,
         include_semantic_scholar=False,
         local_candidates=[
             {
@@ -451,7 +537,10 @@ def test_public_academic_provider_fails_closed_when_proxy_is_required(tmp_path):
 
     result = service.search(
         query="prompt injection",
+        include_arxiv=True,
         include_scholar=False,
+        include_crossref=False,
+        include_openalex=False,
     )
 
     assert result["provider_status"]["arxiv"] == {
@@ -480,7 +569,13 @@ def test_arxiv_client_receives_only_configured_academic_proxy(tmp_path):
         require_proxy=True,
     )
 
-    result = service.search(query="prompt injection", include_scholar=False)
+    result = service.search(
+        query="prompt injection",
+        include_arxiv=True,
+        include_scholar=False,
+        include_crossref=False,
+        include_openalex=False,
+    )
 
     assert result["provider_status"]["arxiv"]["available"] is True
     assert result["provider_status"]["arxiv"]["via_proxy"] is True
@@ -624,7 +719,10 @@ def test_active_elasticsearch_keeps_request_local_bibliography_candidates(tmp_pa
 def test_elasticsearch_failure_falls_back_to_local_index(tmp_path):
     result = make_service(tmp_path, elasticsearch=FailingElasticsearch()).search(
         query="prompt injection",
+        include_arxiv=True,
         include_scholar=False,
+        include_crossref=False,
+        include_openalex=False,
     )
     assert result["search_backend"] == "local_inverted_index"
     assert result["elasticsearch_available"] is True

@@ -7,14 +7,14 @@ import BackendInitDialog from '@/components/BackendInitDialog'
 import StartupBanner from '@/components/SystemDiagnostic/StartupBanner'
 import BackendHealthIndicator from '@/components/BackendHealth/BackendHealthIndicator'
 import Index from '@/pages/Index.tsx'
-import { HomePage } from './pages/HomePage/Home.tsx'
 import { useTaskStore } from '@/store/taskStore'
-import LibraryPage from '@/pages/LibraryPage'
 import { buildWorkspaceSearch, parseWorkspaceLocation } from '@/utils/workspaceNavigation'
 
 // 非首屏页面使用 React.lazy 按需加载
 const Onboarding = lazy(() => import('@/pages/Onboarding'))
 const SearchPage = lazy(() => import('@/pages/SearchPage'))
+const LibraryPage = lazy(() => import('@/pages/LibraryPage'))
+const HomePage = lazy(() => import('./pages/HomePage/Home.tsx').then(module => ({ default: module.HomePage })))
 const SettingPage = lazy(() => import('./pages/SettingPage/index.tsx'))
 const ResearchPage = lazy(() => import('./pages/ResearchPage.tsx'))
 const ONBOARD_KEY = 'fastread-onboarded'

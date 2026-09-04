@@ -14,6 +14,7 @@ working when Elasticsearch is absent or temporarily unavailable.
 from __future__ import annotations
 
 import hashlib
+from html import unescape
 import json
 import math
 import os
@@ -39,6 +40,8 @@ logger = get_logger(__name__)
 ARXIV_API = "https://export.arxiv.org/api/query"
 ARXIV_NS = {"a": "http://www.w3.org/2005/Atom", "arxiv": "http://arxiv.org/schemas/atom"}
 OPENALEX_API = "https://api.openalex.org/works"
+CROSSREF_API = "https://api.crossref.org/works"
+OPENALEX_ARXIV_SOURCE_ID = "S4306400194"
 SEMANTIC_SCHOLAR_API = "https://api.semanticscholar.org/graph/v1/paper/search"
 
 TRACK_CATEGORIES = {
@@ -73,7 +76,7 @@ class AcademicProxyRequiredError(RuntimeError):
 def _academic_proxy_required(value: bool | None = None) -> bool:
     if value is not None:
         return value
-    return os.getenv("PAPER_SEARCH_REQUIRE_PROXY", "true").strip().lower() in {
+    return os.getenv("PAPER_SEARCH_REQUIRE_PROXY", "false").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -560,6 +563,186 @@ def _abstract_from_inverted_index(value: object) -> str:
     return " ".join(word for _, word in sorted(positioned))
 
 
+class CrossrefAdapter:
+    """No-key Crossref REST adapter used as the primary metadata source."""
+
+    def __init__(
+        self,
+        client_factory=None,
+        proxy_url: str | None = None,
+        require_proxy: bool | None = None,
+        endpoint: str | None = None,
+    ):
+        self._client_factory = client_factory or httpx.Client
+        self.proxy_url = (
+            str(proxy_url).strip()
+            if proxy_url is not None
+            else os.getenv("PAPER_SEARCH_PROXY_URL", "").strip()
+        )
+        self.require_proxy = _academic_proxy_required(require_proxy)
+        self.endpoint = (
+            endpoint or os.getenv("CROSSREF_API_URL", CROSSREF_API)
+        ).strip().rstrip("/")
+
+    @property
+    def configured(self) -> bool:
+        return bool(self.endpoint)
+
+    @staticmethod
+    def _date_parts(item: dict) -> tuple[int | None, str]:
+        for field in ("published-print", "published-online", "published", "issued", "created"):
+            value = item.get(field) or {}
+            parts = value.get("date-parts") or []
+            if not parts or not parts[0]:
+                continue
+            values = [int(value) for value in parts[0][:3]]
+            year = values[0]
+            published = "-".join(
+                [str(year), *[f"{value:02d}" for value in values[1:]]]
+            )
+            return year, published
+        return None, ""
+
+    @staticmethod
+    def _normalize(item: dict) -> dict | None:
+        raw_title = item.get("title") or []
+        title = str(raw_title[0] if isinstance(raw_title, list) and raw_title else raw_title).strip()
+        doi = normalize_doi(item.get("DOI"), item.get("URL"))
+        if not title or not doi:
+            return None
+        authors = []
+        for author in item.get("author") or []:
+            name = " ".join(
+                value for value in (
+                    str(author.get("given") or "").strip(),
+                    str(author.get("family") or "").strip(),
+                ) if value
+            )
+            if name:
+                authors.append(name)
+        containers = item.get("container-title") or []
+        journal_ref = str(
+            containers[0] if isinstance(containers, list) and containers else containers
+        ).strip()
+        abstract = unescape(
+            re.sub(r"<[^>]+>", " ", str(item.get("abstract") or ""))
+        )
+        abstract = re.sub(r"\s+", " ", abstract).strip()
+        year, published_at = CrossrefAdapter._date_parts(item)
+        pdf_url = ""
+        for link in item.get("link") or []:
+            if str(link.get("content-type") or "").lower() == "application/pdf":
+                pdf_url = str(link.get("URL") or "").strip()
+                break
+        return {
+            "id": f"crossref-{_stable_paper_id(doi)}",
+            "title": title,
+            "abstract": abstract,
+            "authors": authors[:50],
+            "categories": [str(value).strip() for value in item.get("subject") or [] if str(value).strip()][:10],
+            "comment": str(item.get("type") or "").strip(),
+            "journal_ref": journal_ref,
+            "doi": doi,
+            "year": year,
+            "published_at": published_at,
+            "source_url": f"https://doi.org/{doi}",
+            "pdf_url": pdf_url,
+            "metadata_url": str(item.get("URL") or f"https://api.crossref.org/works/{doi}").strip(),
+            "source": "crossref",
+            "cited_by": item.get("is-referenced-by-count"),
+        }
+
+    def search(self, queries: list[str], limit: int) -> tuple[list[dict], dict]:
+        normalized_queries = list(
+            dict.fromkeys(str(query or "").strip() for query in queries if str(query or "").strip())
+        )[:3]
+        if not normalized_queries:
+            return [], {"configured": True, "available": True, "result_count": 0, "query_count": 0}
+        papers_by_id: dict[str, dict] = {}
+        try:
+            per_query = max(1, min(20, math.ceil(limit / len(normalized_queries))))
+            with self._client_factory(
+                **public_academic_client_kwargs(
+                    self.proxy_url,
+                    require_proxy=self.require_proxy,
+                )
+            ) as client:
+                for query_index, query in enumerate(normalized_queries):
+                    params = {
+                        "query.bibliographic": query,
+                        "rows": per_query,
+                        "select": (
+                            "DOI,title,author,abstract,published-print,published-online,published,"
+                            "issued,created,container-title,URL,type,is-referenced-by-count,resource,link,subject"
+                        ),
+                    }
+                    mailto = os.getenv("CROSSREF_MAILTO", "").strip()
+                    if mailto:
+                        params["mailto"] = mailto
+                    response = client.get(
+                        self.endpoint,
+                        params=params,
+                        headers={"User-Agent": "FastRead/1.0 (mailto: metadata-discovery)"},
+                    )
+                    response.raise_for_status()
+                    payload = response.json()
+                    raw_items = ((payload.get("message") or {}).get("items") or [])
+                    for rank, item in enumerate(raw_items, start=1):
+                        paper = self._normalize(item)
+                        if not paper:
+                            continue
+                        existing = papers_by_id.get(paper["id"])
+                        rank_score = 1.0 / (60.0 + rank)
+                        if existing:
+                            existing["provider_relevance"] = round(
+                                float(existing.get("provider_relevance") or 0) + rank_score,
+                                8,
+                            )
+                            existing["provider_query_indexes"] = list(
+                                dict.fromkeys([*(existing.get("provider_query_indexes") or []), query_index])
+                            )
+                            existing["provider_query_hits"] = len(existing["provider_query_indexes"])
+                            existing.setdefault("provider_query_ranks", {})[str(query_index)] = rank
+                        else:
+                            paper["provider_relevance"] = round(rank_score, 8)
+                            paper["provider_query_indexes"] = [query_index]
+                            paper["provider_query_hits"] = 1
+                            paper["provider_query_ranks"] = {str(query_index): rank}
+                            papers_by_id[paper["id"]] = paper
+            papers = list(papers_by_id.values())
+            return papers, {
+                "configured": True,
+                "available": True,
+                "provider": "crossref_rest_api",
+                "result_count": len(papers),
+                "query_count": len(normalized_queries),
+            }
+        except AcademicProxyRequiredError:
+            return [], {
+                "configured": True,
+                "available": False,
+                "reason": "proxy_required",
+                "query_count": len(normalized_queries),
+            }
+        except httpx.HTTPStatusError as exc:
+            status_code = exc.response.status_code
+            return [], {
+                "configured": True,
+                "available": False,
+                "reason": "rate_limited" if status_code == 429 else "http_error",
+                "http_status": status_code,
+                "query_count": len(normalized_queries),
+            }
+        except Exception as exc:
+            logger.warning(f"Crossref 检索失败: {exc}")
+            return [], {
+                "configured": True,
+                "available": False,
+                "error": str(exc),
+                "query_count": len(normalized_queries),
+            }
+
+
 class OpenAlexAdapter:
     """No-key public scholarly metadata adapter.
 
@@ -573,6 +756,8 @@ class OpenAlexAdapter:
         client_factory=None,
         proxy_url: str | None = None,
         require_proxy: bool | None = None,
+        endpoint: str | None = None,
+        arxiv_only: bool = False,
     ):
         self._client_factory = client_factory or httpx.Client
         self.proxy_url = (
@@ -581,6 +766,10 @@ class OpenAlexAdapter:
             else os.getenv("PAPER_SEARCH_PROXY_URL", "").strip()
         )
         self.require_proxy = _academic_proxy_required(require_proxy)
+        self.endpoint = (
+            endpoint or os.getenv("OPENALEX_API_URL", OPENALEX_API)
+        ).strip().rstrip("/")
+        self.arxiv_only = arxiv_only
 
     @property
     def configured(self) -> bool:
@@ -606,6 +795,12 @@ class OpenAlexAdapter:
             or primary_location.get("pdf_url")
             or ""
         ).strip().replace("http://", "https://")
+        arxiv_match = re.search(
+            r"(?:arxiv(?:\.org/(?:abs|pdf)/|[.:]))([\w./-]+)",
+            " ".join([doi, landing_page_url, pdf_url]),
+            re.IGNORECASE,
+        )
+        arxiv_id = arxiv_match.group(1).removesuffix(".pdf") if arxiv_match else ""
         source_url = (
             f"https://doi.org/{doi}"
             if doi
@@ -638,6 +833,7 @@ class OpenAlexAdapter:
             "source_url": source_url,
             "pdf_url": pdf_url,
             "metadata_url": openalex_url,
+            "arxiv_id": arxiv_id,
             "source": "openalex",
             "cited_by": item.get("cited_by_count"),
         }
@@ -656,9 +852,7 @@ class OpenAlexAdapter:
                 )
             ) as client:
                 for query_index, query in enumerate(normalized_queries):
-                    response = client.get(
-                        OPENALEX_API,
-                        params={
+                    params = {
                             "search": query,
                             "per-page": per_query,
                             "select": (
@@ -666,7 +860,12 @@ class OpenAlexAdapter:
                                 "authorships,primary_location,best_oa_location,abstract_inverted_index,"
                                 "cited_by_count,type,type_crossref,topics"
                             ),
-                        },
+                        }
+                    if self.arxiv_only:
+                        params["filter"] = f"locations.source.id:{OPENALEX_ARXIV_SOURCE_ID}"
+                    response = client.get(
+                        self.endpoint,
+                        params=params,
                         headers={"User-Agent": "FastRead/1.0 (metadata discovery)"},
                     )
                     response.raise_for_status()
@@ -955,6 +1154,7 @@ class PaperSearchService:
         index: InvertedIndex | None = None,
         client_factory=None,
         scholar: GoogleScholarAdapter | None = None,
+        crossref: CrossrefAdapter | None = None,
         openalex: OpenAlexAdapter | None = None,
         semantic_scholar: SemanticScholarAdapter | None = None,
         elasticsearch: ElasticsearchIndex | None = None,
@@ -976,10 +1176,16 @@ class PaperSearchService:
             proxy_url=self.proxy_url,
             require_proxy=self.require_proxy,
         )
+        self.crossref = crossref or CrossrefAdapter(
+            client_factory=self._client_factory,
+            proxy_url=self.proxy_url,
+            require_proxy=self.require_proxy,
+        )
         self.openalex = openalex or OpenAlexAdapter(
             client_factory=self._client_factory,
             proxy_url=self.proxy_url,
             require_proxy=self.require_proxy,
+            arxiv_only=True,
         )
         self.semantic_scholar = semantic_scholar or SemanticScholarAdapter(
             client_factory=self._client_factory,
@@ -1004,7 +1210,7 @@ class PaperSearchService:
             return
         config = self._connection_config_factory()
         self.proxy_url = str(config.paper_search_proxy_url or "").strip()
-        for adapter in (self.scholar, self.openalex, self.semantic_scholar):
+        for adapter in (self.scholar, self.crossref, self.openalex, self.semantic_scholar):
             adapter.proxy_url = self.proxy_url
             adapter.require_proxy = self.require_proxy
         self.scholar.endpoint = str(config.google_scholar_api_url or "").strip()
@@ -1066,7 +1272,7 @@ class PaperSearchService:
             "core"
             if venue.get("id")
             else "arxiv"
-            if paper.get("source") == "arxiv"
+            if paper.get("source") == "arxiv" or paper.get("arxiv_id")
             else "local"
             if paper.get("source") == "paper_bibliography"
             else "scholar"
@@ -1084,6 +1290,7 @@ class PaperSearchService:
                     "local": "当前论文引文",
                 }.get(scope_tier) or {
                     "openalex": "OpenAlex 开放元数据",
+                    "crossref": "Crossref DOI 元数据",
                     "semantic_scholar": "Semantic Scholar 开放元数据",
                     "google_scholar": "Google Scholar 补充",
                 }.get(source, "开放学术元数据")),
@@ -1187,10 +1394,11 @@ class PaperSearchService:
         limit: int = 20,
         include_unconfirmed: bool = True,
         refresh: bool = True,
-        include_arxiv: bool = True,
-        include_scholar: bool = True,
+        include_arxiv: bool = False,
+        include_scholar: bool = False,
+        include_crossref: bool = True,
         include_openalex: bool = True,
-        include_semantic_scholar: bool = True,
+        include_semantic_scholar: bool = False,
         prioritize_arxiv: bool = False,
         local_candidates: list[dict] | None = None,
     ) -> dict:
@@ -1207,6 +1415,11 @@ class PaperSearchService:
             public_queries = [str(query).strip()]
         provider_status: dict[str, dict] = {
             "arxiv": {"configured": True, "available": False, "reason": "refresh_disabled"},
+            "crossref": {
+                "configured": self.crossref.configured,
+                "available": False,
+                "reason": "disabled" if not include_crossref else "refresh_disabled",
+            },
             "openalex": {
                 "configured": True,
                 "available": False,
@@ -1242,10 +1455,16 @@ class PaperSearchService:
             provider_status["arxiv"] = {"configured": True, "available": False, "reason": "disabled"}
         if refresh:
             jobs: dict[str, object] = {}
-            executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="paper-search")
+            executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="paper-search")
             try:
                 if include_arxiv:
                     jobs["arxiv"] = executor.submit(self._fetch_arxiv, query, tracks, FETCH_LIMIT)
+                if include_crossref:
+                    jobs["crossref"] = executor.submit(
+                        self.crossref.search,
+                        public_queries,
+                        FETCH_LIMIT,
+                    )
                 if include_openalex:
                     jobs["openalex"] = executor.submit(
                         self.openalex.search,
@@ -1399,6 +1618,14 @@ class PaperSearchService:
             if prioritize_arxiv
             else {"core": 0, "local": 1, "arxiv": 2, "scholar": 3}
         )
+        source_rank = {
+            "crossref": 0,
+            "openalex": 1,
+            "paper_bibliography": 2,
+            "arxiv": 3,
+            "semantic_scholar": 4,
+            "google_scholar": 5,
+        }
         results: list[dict] = []
         excluded: list[dict] = []
         for paper, score in ranked:
@@ -1422,6 +1649,8 @@ class PaperSearchService:
             if paper.get("scope_tier") == "scholar":
                 source = paper.get("source")
                 if source == "google_scholar" and not include_scholar:
+                    continue
+                if source == "crossref" and not include_crossref:
                     continue
                 if source == "openalex" and not include_openalex:
                     continue
@@ -1453,6 +1682,7 @@ class PaperSearchService:
         results.sort(
             key=lambda paper: (
                 tier_rank.get(paper.get("scope_tier"), 9),
+                source_rank.get(str(paper.get("source") or ""), 9),
                 -paper["relevance"],
                 -int(paper.get("cited_by") or 0),
                 paper.get("title", ""),
@@ -1464,7 +1694,7 @@ class PaperSearchService:
             for tier in ("core", "arxiv", "scholar")
         }
         index_stats = self.index.stats()
-        for provider_name in ("arxiv", "openalex", "semantic_scholar", "google_scholar"):
+        for provider_name in ("arxiv", "crossref", "openalex", "semantic_scholar", "google_scholar"):
             provider_status.setdefault(provider_name, {})["via_proxy"] = bool(self.proxy_url)
         venue_catalog = allowed_venue_catalog()
         venue_allowlist = [
@@ -1515,6 +1745,7 @@ class PaperSearchService:
                 "sources": [
                     "core_venue_records",
                     "arxiv",
+                    "crossref",
                     "openalex",
                     "semantic_scholar",
                     "google_scholar",
@@ -1524,7 +1755,8 @@ class PaperSearchService:
             },
             "coverage_note": (
                 "核心层覆盖安全四大、系统顶会及 ICLR、ICML、AAAI、NeurIPS/NIPS、ACL；"
-                "arXiv、OpenAlex 与 Semantic Scholar 用于扩展发现，Google Scholar 在配置 API 后补充引用链和出版版本。"
+                "Crossref 是 DOI 与期刊论文的主检索源，OpenAlex 专门补充 arXiv 预印本；"
+                "直连 arXiv、Semantic Scholar 与 Google Scholar 默认关闭，可按需显式启用。"
                 "所有检索卡片均为发现元数据，只有导入并成功解析的全文才能进入证据引用。"
             ),
         }

@@ -68,8 +68,11 @@ class PaperSearchRequest(BaseModel):
     limit: int = 20
     include_unconfirmed: bool = True
     refresh: bool = True
-    include_arxiv: bool = True
-    include_scholar: bool = True
+    include_arxiv: bool = False
+    include_scholar: bool = False
+    include_crossref: bool = True
+    include_openalex: bool = True
+    include_semantic_scholar: bool = False
 
     @field_validator("query")
     @classmethod
@@ -214,6 +217,9 @@ def search_papers(data: PaperSearchRequest):
                 refresh=data.refresh,
                 include_arxiv=data.include_arxiv,
                 include_scholar=data.include_scholar,
+                include_crossref=data.include_crossref,
+                include_openalex=data.include_openalex,
+                include_semantic_scholar=data.include_semantic_scholar,
             )
         )
     except Exception as exc:

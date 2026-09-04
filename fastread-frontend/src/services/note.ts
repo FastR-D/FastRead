@@ -233,6 +233,9 @@ export const search_papers = async (data: {
   refresh?: boolean
   include_arxiv?: boolean
   include_scholar?: boolean
+  include_crossref?: boolean
+  include_openalex?: boolean
+  include_semantic_scholar?: boolean
 }): Promise<PaperSearchResponse> => request.post('/papers/search', data, { timeout: 12000 }) as any
 
 export const list_search_venues = async (): Promise<{ venues: SearchVenue[] }> =>

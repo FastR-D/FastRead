@@ -46,6 +46,7 @@ const TIER_STYLE: Record<string, string> = {
 
 const PROVIDER_LABEL: Record<string, string> = {
   arxiv: 'arXiv',
+  crossref: 'Crossref',
   openalex: 'OpenAlex',
   semantic_scholar: 'Semantic Scholar',
   google_scholar: 'Google Scholar',
@@ -157,8 +158,8 @@ export default function SearchPage() {
   const [tracks, setTracks] = useState<SearchTrack[]>(['security', 'systems', 'ai'])
   const [venues, setVenues] = useState<SearchVenue[]>([])
   const [selectedVenues, setSelectedVenues] = useState<string[]>([])
-  const [includeArxiv, setIncludeArxiv] = useState(true)
-  const [includeScholar, setIncludeScholar] = useState(true)
+  const [includeArxiv, setIncludeArxiv] = useState(false)
+  const [includeScholar, setIncludeScholar] = useState(false)
   const [response, setResponse] = useState<PaperSearchResponse | null>(null)
   const [searching, setSearching] = useState(false)
   const [importingId, setImportingId] = useState('')
@@ -217,6 +218,9 @@ export default function SearchPage() {
         include_unconfirmed: true,
         include_arxiv: includeArxiv,
         include_scholar: includeScholar,
+        include_crossref: true,
+        include_openalex: true,
+        include_semantic_scholar: false,
       })
       setResponse(data)
       setCurrentPage(1)
@@ -305,7 +309,7 @@ export default function SearchPage() {
             <img src={logo} alt="FastRead" className="h-8 w-8" />
             <div>
               <div className="text-sm font-semibold text-slate-900">学术论文检索</div>
-              <div className="text-[11px] text-slate-500">核心顶会 + arXiv + OpenAlex + Semantic Scholar + Google Scholar</div>
+              <div className="text-[11px] text-slate-500">Crossref 主检索 + OpenAlex arXiv 补充</div>
             </div>
           </Link>
           <Button variant="outline" size="sm" onClick={() => navigate('/')}>
@@ -346,16 +350,16 @@ export default function SearchPage() {
             <button type="button" onClick={() => setIncludeArxiv(value => !value)} className={cn(
               'rounded-sm border px-2 py-1 text-xs transition',
               includeArxiv ? 'border-violet-300 bg-violet-50 text-violet-800' : 'border-slate-200 text-slate-400',
-            )}>arXiv 扩展</button>
+            )}>直连 arXiv 备用</button>
             <button type="button" onClick={() => setIncludeScholar(value => !value)} className={cn(
               'rounded-sm border px-2 py-1 text-xs transition',
               includeScholar ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 text-slate-400',
-            )}>Google Scholar 补充</button>
+            )}>Google Scholar（需配置）</button>
           </div>
           <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-            arXiv、OpenAlex、Semantic Scholar 与 Google Scholar 默认启用；境内网络请先在
-            <Link to="/settings/search-connections" className="mx-1 font-semibold underline underline-offset-2">学术检索连接</Link>
-            填写你自己的代理地址。FastRead 不猜测端口，代理未配置时不会静默直连。
+            默认由 Crossref 主查 DOI/期刊论文，OpenAlex 只补 arXiv；两者可在境内直接访问。
+            直接 arXiv 和 Google Scholar 仅作为可选备用，必要时可在
+            <Link to="/settings/search-connections" className="mx-1 font-semibold underline underline-offset-2">学术检索连接</Link>配置代理。
           </div>
 
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700">
@@ -448,7 +452,7 @@ export default function SearchPage() {
                   <span>本次检索 {formatTime(response.retrieved_at)}</span>
                   <span>{response.index_stale ? '索引可能过期' : '索引时效正常'}</span>
                   <span>核心 {response.scope_counts.core} · arXiv {response.scope_counts.arxiv} · Scholar {response.scope_counts.scholar}</span>
-                  <span>外部代理：{response.network_policy?.academic_proxy_configured ? '已配置，禁止直连' : '未配置，外部请求停止'}</span>
+                  <span>学术网络：{response.network_policy?.academic_proxy_configured ? '经专用代理' : response.network_policy?.public_direct_allowed ? '境内直连' : '等待配置代理'}</span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
                   {Object.entries(response.provider_status)
@@ -487,7 +491,7 @@ export default function SearchPage() {
             <h2 className="mt-3 text-base font-semibold text-slate-900">从一个研究问题开始</h2>
             <p className="mx-auto mt-1.5 max-w-2xl text-sm leading-6 text-slate-500">
               核心层覆盖安全四大、系统顶会以及 ICLR、ICML、AAAI、NeurIPS（含旧名 NIPS）和 ACL；
-              arXiv、OpenAlex 与 Semantic Scholar 扩展公开元数据，Google Scholar 在配置 API 后补充引用链与出版社版本。检索结果导入全文后才进入证据层。
+              Crossref 主查 DOI 与正式出版元数据，OpenAlex 专门补充 arXiv 预印本；直接 arXiv 与 Google Scholar 默认关闭。检索结果导入全文后才进入证据层。
             </p>
           </section>
         )}

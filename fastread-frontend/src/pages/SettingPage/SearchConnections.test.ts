@@ -10,7 +10,7 @@ describe('academic search connection settings', () => {
   })
 
   it('explains proxy boundaries and keeps the secret unreadable', () => {
-    for (const copy of ['PAPER_SEARCH_PROXY_URL', 'GOOGLE_SCHOLAR_API_URL', 'SERPAPI_API_KEY', 'ELASTICSEARCH_URL', '不要直连', '绝不回显']) {
+    for (const copy of ['PAPER_SEARCH_PROXY_URL', 'GOOGLE_SCHOLAR_API_URL', 'SERPAPI_API_KEY', 'ELASTICSEARCH_URL', 'Crossref', 'OpenAlex', '默认直连', '不会接管系统代理', '绝不回显']) {
       expect(source).toContain(copy)
     }
     expect(source).toContain('type="password"')

@@ -5,13 +5,13 @@ const source = readFileSync(new URL('./index.tsx', import.meta.url), 'utf8')
 
 describe('paper search disclosure', () => {
   it('shows the expanded core corpus and supplemental sources', () => {
-    for (const copy of ['安全四大', '系统顶会', 'AI 顶会', 'ICLR', 'ICML', 'AAAI', 'NeurIPS', 'ACL', 'arXiv', 'OpenAlex', 'Semantic Scholar', 'Google Scholar']) {
+    for (const copy of ['安全四大', '系统顶会', 'AI 顶会', 'ICLR', 'ICML', 'AAAI', 'NeurIPS', 'ACL', 'Crossref', 'arXiv', 'OpenAlex', 'Semantic Scholar', 'Google Scholar']) {
       expect(source).toContain(copy)
     }
   })
 
-  it('requires a user-configured proxy and exposes each provider state', () => {
-    for (const copy of ['学术检索连接', 'FastRead 不猜测端口', '不会静默直连', '代理已连接 · 来源限流', '本机服务未启动 · 已使用内置索引', '本次检索式']) {
+  it('uses the domestic direct pair by default and exposes each provider state', () => {
+    for (const copy of ['学术检索连接', 'include_crossref: true', 'include_openalex: true', 'include_semantic_scholar: false', '境内直连', '代理已连接 · 来源限流', '本机服务未启动 · 已使用内置索引', '本次检索式']) {
       expect(source).toContain(copy)
     }
   })

@@ -1,10 +1,11 @@
-import { FC } from 'react'
+import { lazy, Suspense, type FC, type ReactNode } from 'react'
 import type { Task } from '@/store/taskStore'
-import ChatPanel from '@/pages/HomePage/components/ChatPanel'
-import PaperSourceView from '@/pages/HomePage/components/PaperSourceView'
-import PersonalSummaryView from '@/pages/HomePage/components/PersonalSummaryView'
-import ReadingReportView from '@/pages/HomePage/components/ReadingReportView'
-import RelatedWorkView from '@/pages/HomePage/components/RelatedWorkView'
+
+const ChatPanel = lazy(() => import('@/pages/HomePage/components/ChatPanel'))
+const PaperSourceView = lazy(() => import('@/pages/HomePage/components/PaperSourceView'))
+const PersonalSummaryView = lazy(() => import('@/pages/HomePage/components/PersonalSummaryView'))
+const ReadingReportView = lazy(() => import('@/pages/HomePage/components/ReadingReportView'))
+const RelatedWorkView = lazy(() => import('@/pages/HomePage/components/RelatedWorkView'))
 
 export type ReadingViewMode = 'source' | 'report' | 'related' | 'summary' | 'chat'
 
@@ -25,8 +26,9 @@ const WorkspacePanels: FC<WorkspacePanelsProps> = ({
   sourceQuote,
   onSourceLocationChange,
 }) => {
+  let panel: ReactNode
   if (viewMode === 'source') {
-    return (
+    panel = (
       <PaperSourceView
         task={currentTask}
         page={sourcePage}
@@ -35,17 +37,17 @@ const WorkspacePanels: FC<WorkspacePanelsProps> = ({
       />
     )
   }
-  if (viewMode === 'report') {
-    return <ReadingReportView task={currentTask} />
+  else if (viewMode === 'report') {
+    panel = <ReadingReportView task={currentTask} />
   }
-  if (viewMode === 'summary') {
-    return <PersonalSummaryView task={currentTask} />
+  else if (viewMode === 'summary') {
+    panel = <PersonalSummaryView task={currentTask} />
   }
-  if (viewMode === 'related') {
-    return <RelatedWorkView task={currentTask} />
+  else if (viewMode === 'related') {
+    panel = <RelatedWorkView task={currentTask} />
   }
-  if (viewMode === 'chat') {
-    return currentTask ? (
+  else if (viewMode === 'chat') {
+    panel = currentTask ? (
       <ChatPanel
         taskId={currentTask.id}
         mode="full"
@@ -57,7 +59,14 @@ const WorkspacePanels: FC<WorkspacePanelsProps> = ({
       <div className="flex h-full items-center justify-center text-sm text-slate-500">请先导入论文。</div>
     )
   }
-  return <PaperSourceView task={currentTask} page={sourcePage} quote={sourceQuote} onLocationChange={onSourceLocationChange} />
+  else {
+    panel = <PaperSourceView task={currentTask} page={sourcePage} quote={sourceQuote} onLocationChange={onSourceLocationChange} />
+  }
+  return (
+    <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-slate-500">面板加载中…</div>}>
+      {panel}
+    </Suspense>
+  )
 }
 
 export default WorkspacePanels
