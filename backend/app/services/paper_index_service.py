@@ -16,7 +16,7 @@ from app.db.paper_index_dao import (
 from app.db.paper_task_dao import list_paper_tasks
 from app.repositories.paper_artifacts import PaperArtifactRepository
 from app.services.gpt_provider import GPTProvider
-from app.services.llm_compat import create_chat_completion
+from app.services.llm_compat import create_chat_completion, create_structured_chat_completion
 from app.services.paper_search_service import PaperSearchService, extract_keywords, utc_now_iso
 from app.utils.logger import get_logger
 
@@ -148,8 +148,9 @@ class PaperIndexService:
             model_name=model_name,
             required=True,
         )
-        response = self._completion_factory(
+        structured = create_structured_chat_completion(
             model.client,
+            completion_factory=self._completion_factory,
             model=model.model,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -159,9 +160,8 @@ class PaperIndexService:
                 },
             ],
             temperature=0,
-            response_format={"type": "json_object"},
         )
-        payload = json.loads(_strip_code_fence(response.choices[0].message.content or ""))
+        payload = structured.payload
         return _clean_keywords(payload.get("keywords") if isinstance(payload, dict) else None)
 
     def rebuild(self, *, provider_id: str = "", model_name: str = "", use_ai: bool = True) -> dict:

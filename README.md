@@ -4,6 +4,12 @@
 
 <h1 align="center">FastRead</h1>
 
+## 当前主线：FastRead Web
+
+当前入口是带账户和工作区权限的 Web 应用：服务端保存论文、版本化证据、报告、聊天与总结，独立 worker 执行可恢复的后台任务。部署、离线开户、只读源迁移、备份和回滚见 [Web 部署指南](deploy/web/README.md)。API 使用 `backend/main.py`，worker 使用 `python -m app.web.worker`，两者必须指向同一 Web 数据根。生产环境使用 HTTPS 与 Secure cookie。
+
+后文保留早期桌面、容器和模型说明作为历史参考；正式 Web 部署以以上指南为准。
+
 <p align="center">
   <strong>从论文原文出发，把“读过”变成可回到页码核对的理解。</strong>
 </p>
@@ -190,6 +196,8 @@ Compose 默认只监听 `127.0.0.1:3015`，不直接暴露后端端口；运行�
 | `FASTWRITE_ALLOWED_ORIGINS` | 显式允许的远程 FastWrite origin，逗号分隔 | 空（仅 loopback） |
 | `INTEGRATION_DATA_DIR` | FastNews 缓存、专题综合和交接包目录 | `data/integrations` |
 | `PAPER_SEARCH_DEADLINE` | 近邻论文冷检索总时限（秒） | `8` |
+| `ARXIV_GATEWAY_URL` | 可选的 arXiv 专用 HTTPS 网关；仅镜像查询、摘要页和 PDF 路径 | 空 |
+| `ARXIV_GATEWAY_API_KEY` | arXiv 网关共享访问密钥（只放本地环境，不入库） | 空 |
 
 ## 验证
 

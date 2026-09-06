@@ -15,6 +15,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from app.services.academic_evidence import OFFICIAL_ACADEMIC_HOSTS, extract_document_academic_claim
+from app.services.arxiv_gateway import route_arxiv_request
 
 
 SEARCH_TIMEOUT = float(os.getenv("PAPER_FETCH_TIMEOUT", "8"))
@@ -532,6 +533,7 @@ def fetch_source_snapshot(
     *,
     max_bytes: int | None = None,
     max_redirects: int | None = None,
+    pdf_sink=None,
 ) -> dict:
     result = result or {}
     supplement = {
@@ -565,10 +567,22 @@ def fetch_source_snapshot(
                 final_url = current_url
                 for redirect_count in range(redirect_limit + 1):
                     current_url = _validate_public_url(current_url)
+                    request_route = route_arxiv_request(current_url)
+                    request_url = _validate_public_url(request_route.request_url)
                     if not redirect_chain or redirect_chain[-1] != current_url:
                         redirect_chain.append(current_url)
-                    with client.stream("GET", current_url) as response:
-                        response_url = str(getattr(response, "url", current_url) or current_url)
+                    if request_route.headers:
+                        response_context = client.stream(
+                            "GET", request_url, headers=request_route.headers
+                        )
+                    else:
+                        response_context = client.stream("GET", request_url)
+                    with response_context as response:
+                        response_url = (
+                            current_url
+                            if request_route.via_gateway
+                            else str(getattr(response, "url", current_url) or current_url)
+                        )
                         response_url = _validate_public_url(response_url)
                         status_code = int(getattr(response, "status_code", 200) or 200)
                         location = _header(response, "location")
@@ -593,10 +607,20 @@ def fetch_source_snapshot(
                 # Compatibility path for injected legacy clients. Production uses the
                 # streaming/manual-redirect branch above.
                 _validate_public_url(url)
-                response = client.get(url)
+                request_route = route_arxiv_request(url)
+                request_url = _validate_public_url(request_route.request_url)
+                response = (
+                    client.get(request_url, headers=request_route.headers)
+                    if request_route.headers
+                    else client.get(request_url)
+                )
                 response.raise_for_status()
-                final_url = str(getattr(response, "url", url) or url)
-                redirect_chain = [
+                final_url = (
+                    url
+                    if request_route.via_gateway
+                    else str(getattr(response, "url", url) or url)
+                )
+                redirect_chain = [] if request_route.via_gateway else [
                     str(getattr(item, "url", "") or "")
                     for item in getattr(response, "history", []) or []
                     if str(getattr(item, "url", "") or "")
@@ -613,8 +637,10 @@ def fetch_source_snapshot(
                 content_type = _header(response, "content-type").lower()
                 encoding = getattr(response, "encoding", None) or "utf-8"
 
-            if "application/pdf" in content_type or final_url.lower().endswith(".pdf"):
+            if "application/pdf" in content_type or final_url.lower().endswith(".pdf") or body.startswith(b"%PDF-"):
                 snapshot = _pdf_snapshot(final_url, body)
+                if pdf_sink is not None and snapshot.get("fetch_status") == "pdf_ok":
+                    pdf_sink(body)
             else:
                 html = body.decode(encoding, errors="ignore") if isinstance(body, bytes) else str(body)
                 snapshot = _html_snapshot(final_url, html, source_bytes=body)
@@ -630,6 +656,7 @@ def fetch_source_snapshot(
                         client_factory=factory,
                         max_bytes=byte_limit,
                         max_redirects=redirect_limit,
+                        pdf_sink=pdf_sink,
                     )
                     if pdf_snapshot.get("fetch_status") == "pdf_ok":
                         pdf_snapshot.update(

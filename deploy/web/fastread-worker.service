@@ -1,0 +1,17 @@
+[Unit]
+Description=FastRead durable worker
+After=network.target
+[Service]
+Type=simple
+User=dev
+WorkingDirectory=/home/dev/fastread-web-current/backend
+EnvironmentFile=/home/dev/fastread-web-shared/web.env
+ExecStart=/home/dev/fastread-web-venv/bin/python -m app.web.worker --concurrency 2
+Restart=on-failure
+KillMode=control-group
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+[Install]
+WantedBy=multi-user.target

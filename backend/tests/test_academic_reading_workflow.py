@@ -1,3 +1,4 @@
+from copy import deepcopy
 import json
 from types import SimpleNamespace
 
@@ -381,6 +382,93 @@ def test_reading_report_requires_and_persists_verified_page_quotes(monkeypatch, 
     assert "> “The paper studies phishing detection.”" in markdown
     assert "> — 第 1 页" in markdown
     assert "## 局限与证据边界" in markdown
+
+
+def test_reading_report_retries_once_without_weakening_quote_validation(monkeypatch, tmp_path):
+    repo = PaperArtifactRepository(tmp_path)
+    created = PaperIngestService(repo).ingest_pdf(
+        content=_pdf_bytes(
+            "The paper studies phishing detection. The method uses a two-stage classifier.",
+            "The main contribution is a reproducible benchmark. Evaluation uses three baselines.",
+        ),
+        filename="repair.pdf",
+    )
+    valid_payload = {
+        "title": "Grounded report",
+        "executive_summary": "A grounded summary.",
+        "key_questions": [
+            {
+                "question": "What problem is studied?",
+                "answer": "Phishing detection.",
+                "evidence": [{"exact_quote": "The paper studies phishing detection.", "page": 1}],
+            },
+            {
+                "question": "What method is used?",
+                "answer": "A classifier.",
+                "evidence": [{"exact_quote": "The method uses a two-stage classifier.", "page": 1}],
+            },
+            {
+                "question": "What is contributed?",
+                "answer": "A benchmark.",
+                "evidence": [{"exact_quote": "The main contribution is a reproducible benchmark.", "page": 2}],
+            },
+            {
+                "question": "How is it evaluated?",
+                "answer": "With baselines.",
+                "evidence": [{"exact_quote": "Evaluation uses three baselines.", "page": 2}],
+            },
+        ],
+        "process": [
+            {
+                "step": "Classification",
+                "description": "Use the method.",
+                "evidence": [{"exact_quote": "The method uses a two-stage classifier.", "page": 1}],
+            }
+        ],
+        "contributions": [
+            {
+                "title": "Benchmark",
+                "description": "A reproducible benchmark.",
+                "evidence": [{"exact_quote": "The main contribution is a reproducible benchmark.", "page": 2}],
+            }
+        ],
+        "limitations": ["Single-paper evidence."],
+        "suggested_questions": ["What are the baselines?"],
+    }
+    invalid_payload = deepcopy(valid_payload)
+    invalid_payload["process"][0]["evidence"][0]["exact_quote"] = "A paraphrased method quote."
+    payloads = [invalid_payload, valid_payload]
+    calls = []
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="stop",
+                        message=SimpleNamespace(content=json.dumps(payloads.pop(0))),
+                    )
+                ]
+            )
+
+    fake_gpt = SimpleNamespace(
+        model="fake-model",
+        client=SimpleNamespace(chat=SimpleNamespace(completions=FakeCompletions())),
+    )
+    monkeypatch.setattr(
+        "app.services.reading_report_service.GPTProvider.create",
+        lambda **_kwargs: fake_gpt,
+    )
+
+    report = ReadingReportService(repo).generate(
+        task_id=created["task_id"], provider_id="p1", model_name="m1"
+    )
+
+    assert len(calls) == 2
+    assert report["source_grounded"] is True
+    assert report["generation_provenance"]["grounding_repair_attempted"] is True
+    assert "逐字引文复核失败" in calls[1]["messages"][-1]["content"]
 
 
 def test_reading_report_context_balances_pages_with_a_hard_total_budget():

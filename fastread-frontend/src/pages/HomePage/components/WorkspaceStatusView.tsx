@@ -15,9 +15,9 @@ interface WorkspaceStatusViewProps {
 }
 
 const FLOW_STEPS = [
-  { n: '01', title: '解析输入 · 提取主张', desc: '识别可核实的事实性陈述与数值型证据' },
-  { n: '02', title: '联网检索 · 抓取信源', desc: '检索权威来源并抓取正文，分级 A/B/C/D 信源' },
-  { n: '03', title: '交叉判定 · 生成报告', desc: '比对正文证据，给出支持/反证/不足的可审计结论' },
+  { n: '01', title: '导入论文 · 检查原文', desc: '上传 PDF 或粘贴论文 URL，查看分页原文与来源信息' },
+  { n: '02', title: '生成报告 · 理解研究', desc: '围绕关键问题阅读方法、过程与贡献，核对原文页码' },
+  { n: '03', title: '整理总结 · 持续追问', desc: '记录自己的理解，结合带页码的原文证据继续提问' },
 ]
 
 const WorkspaceStatusView: FC<WorkspaceStatusViewProps> = ({
@@ -32,7 +32,7 @@ const WorkspaceStatusView: FC<WorkspaceStatusViewProps> = ({
           <div className="mb-4 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <SearchCheck className="h-4 w-4 text-slate-700" />
-              <span className="text-sm font-semibold text-slate-900">正在执行联网核实</span>
+              <span className="text-sm font-semibold text-slate-900">正在处理论文</span>
             </div>
             <span className="font-mono text-[11px] uppercase tracking-wide text-slate-400">
               {currentStep || 'RUNNING'}
@@ -43,7 +43,7 @@ const WorkspaceStatusView: FC<WorkspaceStatusViewProps> = ({
 
         <div className="mt-6 flex items-center gap-2 text-xs text-slate-500">
           <Loading className="h-4 w-4" />
-          <span>深度核验会检索、抓取原文并交叉判定，可能需要更长时间。</span>
+          <span>论文解析和报告生成可能需要一些时间，请留意上方进度。</span>
         </div>
       </div>
     )
@@ -56,9 +56,9 @@ const WorkspaceStatusView: FC<WorkspaceStatusViewProps> = ({
           <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-sm border border-slate-200 bg-white text-slate-400">
             <Link2 className="h-4 w-4" />
           </div>
-          <p className="text-sm font-semibold text-slate-800">等待核实输入</p>
+          <p className="text-sm font-semibold text-slate-800">等待导入论文</p>
           <p className="mt-1.5 text-xs leading-5 text-slate-500">
-            在左侧粘贴网页 URL 或待核实文本，点击"开始联网核实"。
+            在左侧选择 PDF 文件，或粘贴论文链接并点击“导入论文 URL”。
           </p>
         </div>
       </div>
@@ -74,9 +74,9 @@ const WorkspaceStatusView: FC<WorkspaceStatusViewProps> = ({
             <SearchCheck className="h-4 w-4" />
           </div>
           <div className="min-w-0">
-            <div className="text-sm font-semibold text-slate-900">核实工作台已就绪</div>
+            <div className="text-sm font-semibold text-slate-900">论文阅读工作台已就绪</div>
             <div className="font-mono text-[11px] uppercase tracking-[0.14em] text-slate-400">
-              Awaiting Verification Input
+              Ready to Read
             </div>
           </div>
         </div>
@@ -84,7 +84,7 @@ const WorkspaceStatusView: FC<WorkspaceStatusViewProps> = ({
         {/* 说明 */}
         <div className="px-5 py-4">
           <p className="text-xs leading-5 text-slate-600">
-            在左侧粘贴网页 URL 或待核实文本并点击"开始联网核实"，系统会提取主张、联网检索、抓取正文并生成可审计的证据报告。
+            在左侧选择 PDF 文件，或粘贴论文链接并点击“导入论文 URL”。导入后先检查分页原文，再生成阅读报告、整理总结并持续追问。
           </p>
         </div>
 

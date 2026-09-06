@@ -23,10 +23,14 @@ class PaperIngestService:
         self,
         artifacts: PaperArtifactRepository | None = None,
         academic_resolver=None,
+        persist_legacy_registry: bool = True,
+        pdf_sink=None,
     ):
         self.artifacts = artifacts or PaperArtifactRepository()
         self._academic_resolver = academic_resolver or resolve_document_claim_record
         self._identity = AcademicIdentityService()
+        self.persist_legacy_registry = persist_legacy_registry
+        self.pdf_sink = pdf_sink
 
     @staticmethod
     def _pages_from_snapshot(snapshot: dict) -> list[dict]:
@@ -154,6 +158,12 @@ class PaperIngestService:
         }
         self.artifacts.write_result(task_id, result)
         self.artifacts.write_status(task_id, TaskStatus.SUCCESS, "论文正文与分页信息已导入")
+        if self.persist_legacy_registry:
+            self._upsert_legacy(task_id, title, authors, paper_document, academic_gate, metadata_contract, normalized, verified_identity, filename)
+        return {"task_id": task_id, "result": result}
+
+    @staticmethod
+    def _upsert_legacy(task_id, title, authors, paper_document, academic_gate, metadata_contract, normalized, verified_identity, filename):
         upsert_paper_task(
             {
                 "task_id": task_id,
@@ -178,7 +188,6 @@ class PaperIngestService:
                 "metadata_fallback_reasons": metadata_contract["fallback_reasons"],
             }
         )
-        return {"task_id": task_id, "result": result}
 
     def ingest_pdf(
         self,
@@ -233,7 +242,7 @@ class PaperIngestService:
         model_name: str = "",
         overrides: dict | None = None,
     ) -> dict:
-        landing_snapshot = fetch_source_snapshot(url, overrides or {})
+        landing_snapshot = fetch_source_snapshot(url, overrides or {}, **({"pdf_sink": self.pdf_sink} if self.pdf_sink else {}))
         snapshot = landing_snapshot
         linked_pdf_url = urljoin(
             str(landing_snapshot.get("url") or url),
@@ -244,7 +253,7 @@ class PaperIngestService:
             and linked_pdf_url
             and linked_pdf_url != landing_snapshot.get("url")
         ):
-            pdf_snapshot = fetch_source_snapshot(linked_pdf_url, overrides or {})
+            pdf_snapshot = fetch_source_snapshot(linked_pdf_url, overrides or {}, **({"pdf_sink": self.pdf_sink} if self.pdf_sink else {}))
             if pdf_snapshot.get("fetch_status") == "pdf_ok" and pdf_snapshot.get("text"):
                 snapshot = {
                     **pdf_snapshot,

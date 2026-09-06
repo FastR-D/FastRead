@@ -314,8 +314,11 @@ def _task_retrieval(
     question: str,
     history: list[dict] | None = None,
     limit: int = 8,
+    payload: dict | None = None,
+    use_vectors: bool = True,
+    vector_query=None,
 ) -> tuple[dict, list[dict], dict]:
-    payload = _load_task(task_id)
+    payload = payload if payload is not None else _load_task(task_id)
     paper_chunks = _paper_chunks(task_id, payload)
     retrieval_query = _retrieval_query(question, history)
     diagnostics = {
@@ -346,11 +349,11 @@ def _task_retrieval(
         return payload, chunks, diagnostics
 
     vector_chunks: list[dict] = []
-    if vector_index_capability()[0]:
+    if use_vectors and vector_index_capability()[0]:
         try:
             vector_chunks = [
                 chunk
-                for chunk in VectorStoreManager().query(task_id, retrieval_query, n_results=limit)
+                for chunk in (vector_query(retrieval_query, limit) if vector_query else VectorStoreManager().query(task_id, retrieval_query, n_results=limit))
                 if (chunk.get("metadata") or {}).get("source_type") == "paper_page"
                 and (chunk.get("distance") is None or float(chunk.get("distance")) <= 0.9)
             ]
@@ -545,6 +548,8 @@ def chat(
     provider_id: str,
     model_name: str,
     scope: str = "task",
+    artifacts=None,
+    model_client=None,
 ) -> dict:
     if scope == "library":
         chunks = _library_chunks(question, history)
@@ -567,7 +572,12 @@ def chat(
 
     if not task_id:
         raise ValueError("当前论文问答需要 task_id")
-    payload, chunks, retrieval = _task_retrieval(task_id, question, history)
+    payload, chunks, retrieval = _task_retrieval(
+        task_id, question, history,
+        payload=artifacts.read_result(task_id) if artifacts is not None else None,
+        use_vectors=artifacts is None or hasattr(artifacts, "vector_query"),
+        vector_query=artifacts.vector_query if artifacts is not None and hasattr(artifacts, "vector_query") else None,
+    )
     if not chunks:
         status = "requested_page_missing" if retrieval.get("strategy") == "requested_page_missing" else "retrieval_miss"
         return _grounding_failure(status, retrieval=retrieval)
@@ -575,7 +585,7 @@ def chat(
     messages = [{"role": "system", "content": PAPER_SYSTEM_PROMPT.format(context=context)}]
     messages.extend(history[-20:])
     messages.append({"role": "user", "content": question})
-    gpt = _get_gpt(provider_id, model_name)
+    gpt = model_client or _get_gpt(provider_id, model_name)
     response = create_chat_completion(
         gpt.client,
         model=gpt.model,
