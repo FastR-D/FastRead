@@ -805,6 +805,12 @@ class OpenAlexAdapter:
             or primary_location.get("pdf_url")
             or ""
         ).strip().replace("http://", "https://")
+        oa_doi = normalize_doi(best_oa_location.get("landing_page_url"))
+        location_conflict = bool(doi and oa_doi and doi != oa_doi)
+        if location_conflict:
+            # Aggregators sometimes attach another posting's download to a work.
+            # Do not silently import that file under the primary DOI's identity.
+            pdf_url = str(primary_location.get("pdf_url") or "").strip().replace("http://", "https://")
         arxiv_match = re.search(
             r"(?:arxiv(?:\.org/(?:abs|pdf)/|[.:]))([\w./-]+)",
             " ".join([doi, landing_page_url, pdf_url]),
@@ -846,6 +852,7 @@ class OpenAlexAdapter:
             "arxiv_id": arxiv_id,
             "source": "openalex",
             "cited_by": item.get("cited_by_count"),
+            "identity_warning": "开放获取位置的 DOI 与主记录不同，请核对来源。" if location_conflict else "",
         }
 
     def search(self, queries: list[str], limit: int) -> tuple[list[dict], dict]:
@@ -1331,14 +1338,21 @@ class PaperSearchService:
     @staticmethod
     def _dedupe(papers: list[dict]) -> list[dict]:
         merged: dict[str, dict] = {}
-        aliases: dict[str, str] = {}
+        aliases: dict[str, list[str]] = {}
         for paper in papers:
-            identity_keys = canonical_identity_keys(paper)
+            # A title is a discovery hint, never proof of bibliographic identity.
+            # In particular a repost DOI must not acquire an original's PDF/year.
+            identity_keys = {key for key in canonical_identity_keys(paper) if not key.startswith('title:')}
             if paper.get("source") == "arxiv" and paper.get("id"):
                 identity_keys.add(f"arxiv-provider:{str(paper['id']).casefold()}")
             if not identity_keys:
-                continue
-            key = next((aliases[item] for item in sorted(identity_keys) if item in aliases), sorted(identity_keys)[0])
+                identity_keys = {f"unresolved:{len(merged)}"}
+            candidates = dict.fromkeys(key for identity in sorted(identity_keys) for key in aliases.get(identity, []))
+            doi = normalize_doi(paper.get('doi'))
+            key = next((key for key in candidates if not (
+                doi and normalize_doi(merged[key].get('doi'))
+                and doi != normalize_doi(merged[key].get('doi'))
+            )), f"record:{len(merged)}")
             paper = dict(paper)
             provider = str((paper.get("provenance") or {}).get("provider") or paper.get("source") or "unknown")
             links = [
@@ -1356,7 +1370,7 @@ class PaperSearchService:
             if not current:
                 merged[key] = paper
                 for identity in identity_keys:
-                    aliases[identity] = key
+                    aliases.setdefault(identity, []).append(key)
                 continue
             prefer_new = bool(paper.get("venue_confirmed")) and not bool(current.get("venue_confirmed"))
             primary, secondary = (paper, current) if prefer_new else (current, paper)
@@ -1388,8 +1402,9 @@ class PaperSearchService:
                 ),
                 "source_links": all_links,
             }
-            for identity in identity_keys | canonical_identity_keys(merged[key]):
-                aliases[identity] = key
+            for identity in identity_keys:
+                if key not in aliases.setdefault(identity, []):
+                    aliases[identity].append(key)
         return list(merged.values())
 
     @staticmethod

@@ -10,8 +10,8 @@ from app.services.academic_evidence import assess_academic_identity, normalize_d
 
 
 METADATA_SCHEMA_VERSION = "paper-metadata-v2"
-METADATA_PARSER_VERSION = "first-page-layout-v5"
-METADATA_STRATEGY_VERSION = "verified-overlay-v2"
+METADATA_PARSER_VERSION = "source-located-layout-v6"
+METADATA_STRATEGY_VERSION = "identifier-bound-overlay-v3"
 
 _EMAIL_RE = re.compile(r"(?:mailto:)?[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
 _ADDRESS_RE = re.compile(
@@ -152,6 +152,7 @@ def _metadata_view(raw: dict | None) -> dict:
             "url", "canonical_url", "pdf_url", "source_type", "source_status", "content_hash",
             "parser", "parser_version", "document_claimed_metadata", "official_record_verified",
             "registry_record_verified", "verified_academic_metadata", "registry_name", "registry_record_url",
+            "extracted_metadata", "metadata_resolution",
         )
         if raw.get(key) not in (None, "", [])
     }
@@ -167,7 +168,10 @@ def normalize_paper_metadata(
     raw = _metadata_view(raw_metadata)
     supplement = {k: v for k, v in (unverified_supplement or {}).items() if v not in (None, "", [])}
     resolved = {k: v for k, v in (resolved_identity or {}).items() if v not in (None, "", [], {})}
-    candidates = first_page_candidates(first_page_text)
+    source_extraction = "extracted_metadata" in raw
+    extracted = raw.get("extracted_metadata") or {}
+    candidates = ({"title_candidates": [], "author_candidates": [],
+                   "boundary_reason": "source_located_layout"} if source_extraction else first_page_candidates(first_page_text))
     claimed = raw.get("document_claimed_metadata") or {}
     verified = resolved.get("verified_academic_metadata") or raw.get("verified_academic_metadata") or {}
     verified_record = bool(
@@ -180,6 +184,9 @@ def normalize_paper_metadata(
     fallback_reasons: list[str] = []
     title = str(verified.get("title") if verified_record else "").strip()
     title_source = "verified_identity" if title else ""
+    if not title and source_extraction:
+        title = str(extracted.get("title") or "未命名论文")
+        title_source = "source_extraction"
     if not title:
         candidate_title = candidates["title_candidates"][-1] if candidates["title_candidates"] else ""
         claimed_title = str(claimed.get("title") or "").strip()
@@ -220,23 +227,38 @@ def normalize_paper_metadata(
 
     authors = verified.get("authors") if verified_record else []
     authors_source = "verified_identity" if authors else ""
-    if not authors:
+    if not authors and source_extraction:
+        authors = extracted.get("authors") or []
+        authors_source = "source_extraction"
+    if not authors and not source_extraction:
         authors = candidates["author_candidates"] or claimed.get("authors") or []
         authors_source = "code_candidates_or_document_claim" if authors else ""
-    if not authors:
+    if not authors and not source_extraction:
         authors = raw.get("authors") or ([raw.get("author")] if raw.get("author") else []) or supplement.get("authors") or []
         authors_source = "raw_or_unverified_fallback"
         fallback_reasons.append("author_candidates_missing")
-    authors = [str(author).strip() for author in authors if str(author).strip() and not _is_noise_line(str(author))]
+    authors = [str(author).strip() for author in authors if str(author).strip() and (source_extraction or not _is_noise_line(str(author)))]
 
     published = verified.get("published_at") if verified_record else claimed.get("published_at") or raw.get("published_at")
     year_match = re.search(r"\b(?:19|20)\d{2}\b", str(verified.get("year") or published or claimed.get("year") or raw.get("year") or supplement.get("year") or ""))
     year = int(year_match.group(0)) if year_match else None
+    if source_extraction:
+        verified_year = re.search(r"\b(?:19|20)\d{2}\b", str(verified.get("year") or verified.get("published_at") or ""))
+        year = (int(verified_year.group(0)) if verified_year else None) if verified_record else extracted.get("year")
+    if source_extraction:
+        if not extracted.get("title") and not verified_record:
+            fallback_reasons.append("title_candidate_missing")
+        if not authors:
+            fallback_reasons.append("authors_unresolved")
+        if not year:
+            fallback_reasons.append("publication_year_unresolved")
     venue_value = verified.get("venue") if verified_record else claimed.get("venue") or raw.get("venue") or supplement.get("venue")
     if isinstance(venue_value, dict):
         venue_value = venue_value.get("short_name") or venue_value.get("name") or venue_value.get("raw") or ""
     venue = normalize_venue(str(venue_value or ""))
     doi = normalize_doi(verified.get("doi") if verified_record else raw.get("doi"), raw.get("identifier"), supplement.get("doi"))
+    if source_extraction:
+        doi = normalize_doi(verified.get("doi")) if verified_record else ""
     official_url = str(
         resolved.get("registry_record_url")
         or verified.get("source_url")

@@ -45,6 +45,77 @@ def test_web_auth_is_not_loopback_trust(setup):
     assert ca.post("/api/imports/url", json={"url": "https://arxiv.org/pdf/1234.56789"}, headers={"Origin": "https://attacker.example", "Idempotency-Key": "one"}).status_code == 403
 
 
+def test_metadata_model_import_checks_ownership_quota_and_idempotency(setup):
+    store, a, b, ca, cb = setup
+    old = store.enqueue(a["workspace_id"], a["user_id"], "import_url", {"url": "https://example.org/legacy.pdf"}, "legacy-url")
+    replay = ca.post("/api/imports/url", json={"url": "https://example.org/legacy.pdf"}, headers={"Idempotency-Key": "legacy-url"})
+    assert replay.status_code == 202 and replay.json()["id"] == old["id"]
+    with store.connect(write=True) as db:
+        db.execute("INSERT INTO providers VALUES(?,?,?,?,?,?,?)", ("metadata-provider", a["workspace_id"], "Fixture", "https://example.org/v1", "unused", json.dumps(["qwen-fixture-27b"]), time.time()))
+    payload = {"url": "https://arxiv.org/pdf/1234.56789", "provider_id": "metadata-provider", "model": "qwen-fixture-27b"}
+    headers = {"Idempotency-Key": "metadata-import"}
+    assert cb.post("/api/imports/url", json=payload, headers=headers).status_code == 400
+    first = ca.post("/api/imports/url", json=payload, headers=headers)
+    assert first.status_code == 202
+    assert ca.post("/api/imports/url", json=payload, headers=headers).json()["id"] == first.json()["id"]
+    assert store.one("SELECT billable FROM jobs WHERE id=?", (first.json()["id"],))["billable"] == 1
+    file = {"file": ("fixture.pdf", b"%PDF-fixture", "application/pdf")}
+    data = {"provider_id": "metadata-provider", "model": "qwen-fixture-27b"}
+    assert cb.post("/api/imports/pdf", files=file, data=data, headers={"Idempotency-Key": "pdf-model"}).status_code == 400
+    assert ca.post("/api/imports/pdf", files=file, data={"provider_id": "metadata-provider"}, headers={"Idempotency-Key": "incomplete"}).status_code == 400
+    uploaded = ca.post("/api/imports/pdf", files=file, data=data, headers={"Idempotency-Key": "pdf-model"})
+    assert uploaded.status_code == 202
+    assert ca.post("/api/imports/pdf", files=file, headers={"Idempotency-Key": "pdf-model"}).status_code == 409
+    with store.connect(write=True) as db:
+        db.execute("UPDATE workspaces SET daily_limit=2 WHERE id=?", (a["workspace_id"],))
+    assert ca.post("/api/imports/url", json=payload, headers={"Idempotency-Key": "over-quota"}).status_code == 429
+
+
+def test_same_pdf_metadata_upgrade_is_versioned_and_cannot_downgrade(setup):
+    store, a, _, _, _ = setup
+    raw = document() | {"metadata_resolution": {"status": "layout_only"}}
+    first = store.ingest(a["workspace_id"], raw)
+    verified = raw | {"year": 2020, "metadata_resolution": {"status": "registry_verified", "retrieved_at": "first"}}
+    second = store.ingest(a["workspace_id"], verified)
+    assert second["paper_id"] == first["paper_id"] and second["version_id"] != first["version_id"]
+    assert store.ingest(a["workspace_id"], raw)["version_id"] == second["version_id"]
+    verified["metadata_resolution"]["retrieved_at"] = "later"
+    assert store.ingest(a["workspace_id"], verified)["deduplicated"] is True
+    assert store.document(a["workspace_id"], first["paper_id"])[2]["year"] == 2020
+
+
+@pytest.mark.parametrize("model_fails", [False, True])
+def test_worker_import_dispatches_metadata_model_and_persists_fallback(setup, monkeypatch, model_fails):
+    from types import SimpleNamespace
+    store, a, _, _, _ = setup
+    raw = {"fetch_status": "pdf_ok", "source_type": "pdf", "text": "A complete scientific title\nAlice Smith",
+           "first_page_layout": {"title_candidates": [{"text": "A complete scientific title", "blocks": ["p1:l0"]}],
+            "blocks": [{"id": "p1:l0", "text": "A complete scientific title"}, {"id": "p1:l1", "text": "Alice Smith"}]}}
+    monkeypatch.setattr("app.services.paper_ingest_service.fetch_source_snapshot", lambda *a, **kw: raw)
+    with store.connect(write=True) as db:
+        db.execute("INSERT INTO providers VALUES(?,?,?,?,?,?,?)", ("fixture", a["workspace_id"], "Fixture", "https://example.org/v1", "unused", '["qwen-fixture-27b"]', time.time()))
+    monkeypatch.setattr("app.services.secret_store.unprotect_secret", lambda _: "disposable-fixture-value")
+    closed = []
+    monkeypatch.setattr("openai.OpenAI", lambda **kw: SimpleNamespace(close=lambda: closed.append(True)))
+    def respond(*args, **kwargs):
+        if model_fails:
+            raise TimeoutError()
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps({
+            "title": {"text": "A complete scientific title", "blocks": ["p1:l0"]},
+            "authors": [{"text": "Alice Smith", "blocks": ["p1:l1"]}], "year": None})))])
+    monkeypatch.setattr("app.services.llm_compat.create_chat_completion", respond)
+    job = store.enqueue(a["workspace_id"], a["user_id"], "import_url",
+        {"url": "https://example.org/paper.pdf", "provider_id": "fixture", "model": "qwen-fixture-27b"}, "worker-import", billable=True)
+    claimed = store.claim("metadata-worker")
+    execute(store, claimed, "metadata-worker")
+    saved = store.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
+    assert saved["state"] == "succeeded" and saved["dispatch_started"] == 1 and closed
+    result = json.loads(saved["result"])
+    paper = store.document(a["workspace_id"], result["paper_id"])[2]
+    assert paper["metadata_resolution"]["model_status"] == ("failed_or_rejected" if model_fails else "source_located")
+    assert paper["authors"] == ([] if model_fails else ["Alice Smith"])
+
+
 def test_workspace_ownership_every_resource(setup):
     store, a, b, ca, cb = setup
     imported = store.ingest(a["workspace_id"], document())

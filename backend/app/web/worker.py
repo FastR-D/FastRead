@@ -51,7 +51,8 @@ def execute(store, job, owner):
             temporary = store.root / (file_path + ".tmp")
             temporary.write_bytes(content)
             os.replace(temporary, store.root / file_path)
-        service = PaperIngestService(artifacts, persist_legacy_registry=False, pdf_sink=save_pdf)
+        service = PaperIngestService(artifacts, persist_legacy_registry=False, pdf_sink=save_pdf,
+            metadata_client_factory=(lambda: model_client(store, job, payload, owner)) if payload.get("provider_id") else None)
         if kind == "import_pdf":
             path = (store.root / payload["path"]).resolve()
             path.relative_to((store.root / "files").resolve())

@@ -169,9 +169,11 @@ def test_pdf_ingest_exposes_core_venue_document_claim_without_promoting_it(tmp_p
     paper = repo.read_result(created["task_id"])["paper_document"]
     gate = paper["academic_gate"]
 
-    assert paper["title"].startswith("EIGENBENCH")
-    assert paper["authors"] == ["Alice Smith", "Bob Jones"]
-    assert paper["year"] == 2026
+    # This fixture has uniform type and no exact registry ID or extraction
+    # model. Keep its conference claim, but do not guess bibliographic fields.
+    assert paper["title"] == "未命名论文"
+    assert paper["authors"] == []
+    assert paper["year"] is None
     assert paper["venue"]["id"] == "iclr"
     assert gate["is_core_venue"] is True
     assert gate["venue_track"] == "ai"
@@ -180,7 +182,7 @@ def test_pdf_ingest_exposes_core_venue_document_claim_without_promoting_it(tmp_p
     assert "待官方记录核验" in gate["label"]
 
 
-def test_pdf_ingest_promotes_exact_registry_match_to_ai_core_gate(tmp_path):
+def test_pdf_ingest_does_not_promote_title_only_resolver_to_registry_identity(tmp_path):
     repo = PaperArtifactRepository(tmp_path)
 
     def registry_match(claim):
@@ -212,12 +214,12 @@ def test_pdf_ingest_promotes_exact_registry_match_to_ai_core_gate(tmp_path):
 
     gate = repo.read_result(created["task_id"])["paper_document"]["academic_gate"]
 
-    assert gate["level"] == "A1"
-    assert gate["gate_passed"] is True
-    assert gate["formal_identity_passed"] is True
-    assert gate["identity_source"] == "conference_registry"
+    assert gate["level"] == "U"
+    assert gate["gate_passed"] is False
+    assert gate["formal_identity_passed"] is False
+    assert gate["identity_source"] == "document_claim"
     assert gate["venue_track"] == "ai"
-    assert gate["registry_record_url"] == "https://openreview.net/forum?id=fixture"
+    assert not gate.get("registry_record_url")
 
 
 def test_paper_landing_url_follows_linked_pdf_and_preserves_metadata(monkeypatch, tmp_path):
