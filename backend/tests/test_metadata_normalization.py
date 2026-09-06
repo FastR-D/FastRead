@@ -36,6 +36,22 @@ def test_wrapped_title_stops_at_comma_separated_author_block():
     assert candidates["author_candidates"] == ["Alice Example", "Bob Researcher"]
 
 
+def test_star_footnotes_do_not_merge_first_author_row_into_title():
+    candidates = first_page_candidates(
+        "Retrieval-Augmented Generation for\nKnowledge-Intensive NLP Tasks\n"
+        "Patrick Lewis†‡, Ethan Perez⋆\n"
+        "Aleksandra Piktus†, Fabio Petroni†, Vladimir Karpukhin†\n"
+        "Abstract\nWe study retrieval."
+    )
+
+    assert candidates["title_candidates"][-1] == (
+        "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks"
+    )
+    assert candidates["author_candidates"] == [
+        "Patrick Lewis", "Ethan Perez", "Aleksandra Piktus", "Fabio Petroni", "Vladimir Karpukhin"
+    ]
+
+
 def test_identity_keys_close_doi_arxiv_official_url_and_title_aliases():
     source = canonical_identity_keys(
         {

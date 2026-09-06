@@ -31,6 +31,7 @@ import httpx
 
 from app.core.settings import get_settings
 from app.services.academic_evidence import allowed_venue_catalog, match_allowed_venue, normalize_doi
+from app.services.arxiv_gateway import route_arxiv_request
 from app.services.metadata_normalization import canonical_identity_keys
 from app.services.search_connection_config import get_search_connection_config
 from app.utils.logger import get_logger
@@ -1229,19 +1230,28 @@ class PaperSearchService:
     def _fetch_arxiv(self, query: str, tracks: tuple[str, ...], limit: int) -> tuple[list[dict], dict]:
         url = _arxiv_query(query, tracks, limit)
         try:
+            route = route_arxiv_request(url)
             with self._client_factory(
                 **public_academic_client_kwargs(
                     self.proxy_url,
-                    require_proxy=self.require_proxy,
+                    require_proxy=self.require_proxy and not route.via_gateway,
                 )
             ) as client:
                 response = client.get(
-                    url,
-                    headers={"User-Agent": "FastRead/1.0 (academic metadata discovery)"},
+                    route.request_url,
+                    headers={
+                        "User-Agent": "FastRead/1.0 (academic metadata discovery)",
+                        **route.headers,
+                    },
                 )
                 response.raise_for_status()
                 papers = _parse_arxiv_feed(response.text)
-            return papers, {"configured": True, "available": True, "result_count": len(papers)}
+            return papers, {
+                "configured": True,
+                "available": True,
+                "provider": "arxiv_gateway" if route.via_gateway else "arxiv_api",
+                "result_count": len(papers),
+            }
         except AcademicProxyRequiredError:
             return [], {
                 "configured": True,

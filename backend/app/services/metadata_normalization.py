@@ -10,7 +10,7 @@ from app.services.academic_evidence import assess_academic_identity, normalize_d
 
 
 METADATA_SCHEMA_VERSION = "paper-metadata-v2"
-METADATA_PARSER_VERSION = "first-page-layout-v3"
+METADATA_PARSER_VERSION = "first-page-layout-v5"
 METADATA_STRATEGY_VERSION = "verified-overlay-v2"
 
 _EMAIL_RE = re.compile(r"(?:mailto:)?[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}")
@@ -22,7 +22,8 @@ _ADDRESS_RE = re.compile(
 )
 _ORCID_RE = re.compile(r"\b\d{4}-\d{4}-\d{4}-\d{3}[\dX]\b", re.IGNORECASE)
 _ADDRESS_LINE_RE = re.compile(r",\s*[A-Z]{2,3}\s*,|\b\d{5}(?:-\d{4})?\b")
-_FOOTNOTE_RE = re.compile(r"^(?:[*†‡§¶∗]|\d+[.)]?\s*)+")
+_AUTHOR_MARKERS_RE = re.compile(r"[\d*†‡§¶∗⋆⁎⁑]+")
+_FOOTNOTE_RE = re.compile(r"^(?:[*†‡§¶∗⋆⁎⁑]|\d+[.)]?\s*)+")
 _ABSTRACT_RE = re.compile(r"^(?:abstract|summary)\b", re.IGNORECASE)
 _SECTION_RE = re.compile(r"^(?:\d+(?:\.\d+)*[.)]?\s*)?(?:introduction|abstract)\b", re.IGNORECASE)
 _VENUE_RE = re.compile(
@@ -49,7 +50,7 @@ def _is_noise_line(line: str) -> bool:
 
 
 def _looks_like_author_piece(value: str) -> bool:
-    value = re.sub(r"[\d*†‡§¶∗]+", "", value).strip(" ,;:")
+    value = _AUTHOR_MARKERS_RE.sub("", value).strip(" ,;:")
     tokens = [token for token in value.split() if token]
     if not 2 <= len(tokens) <= 6 or _is_noise_line(value) or any(mark in value for mark in ("?", ":")):
         return False
@@ -90,7 +91,7 @@ def _authors_from_lines(lines: list[str]) -> list[str]:
         if len(pieces) == 1 and _looks_like_author_piece(line):
             pieces = [line]
         for piece in pieces:
-            cleaned = re.sub(r"[\d*†‡§¶∗]+", "", piece).strip(" .;:")
+            cleaned = _AUTHOR_MARKERS_RE.sub("", piece).strip(" .;:")
             if _looks_like_author_piece(cleaned) and cleaned not in authors:
                 authors.append(cleaned)
     return authors[:50]
@@ -117,7 +118,8 @@ def first_page_candidates(first_page_text: str | None) -> dict:
     if author_start is None:
         single_flags = [_looks_like_author_piece(line) for line in usable]
         for index in range(1, len(usable) - 1):
-            if single_flags[index] and single_flags[index + 1]:
+            following_affiliation = bool(_ADDRESS_RE.search(usable[index + 1]) or _EMAIL_RE.search(usable[index + 1]))
+            if single_flags[index] and (single_flags[index + 1] or following_affiliation):
                 prefix = " ".join(usable[:index])
                 if len(prefix) >= 8:
                     author_start = index

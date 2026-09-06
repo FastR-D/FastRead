@@ -1,4 +1,4 @@
-
+import os
 
 from app.db.model_dao import insert_model, get_all_models, get_model_by_provider_and_name, delete_model
 from app.db.provider_dao import get_enabled_providers
@@ -61,7 +61,10 @@ class ModelService:
     @staticmethod
     def _format_models(raw_models: list) -> list:
         """
-        格式化模型列表
+        格式化模型列表，并将显式配置的默认模型稳定置于首位。
+
+        前端以列表首项作为新任务的默认值，因此不能依赖数据库未定义的
+        返回顺序。未配置默认模型，或配置项不在启用列表中时，保留原顺序。
         """
         formatted = []
         for model in raw_models:
@@ -71,6 +74,15 @@ class ModelService:
                 "model_name": model.get("model_name"),
                 "created_at": model.get("created_at", None),  # 如果有created_at字段
             })
+        default_provider = os.getenv("FASTREAD_DEFAULT_PROVIDER", "").strip()
+        default_model = os.getenv("FASTREAD_DEFAULT_MODEL", "").strip()
+        if default_provider and default_model:
+            formatted.sort(
+                key=lambda item: (
+                    str(item.get("provider_id")) != default_provider
+                    or str(item.get("model_name")) != default_model
+                )
+            )
         return formatted
     @staticmethod
     def get_enabled_models_by_provider( provider_id: str|int,):

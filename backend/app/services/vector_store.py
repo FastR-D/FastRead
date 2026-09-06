@@ -5,6 +5,7 @@ import os
 import re
 from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 
 from app.core.settings import get_settings
 from app.repositories.paper_artifacts import PaperArtifactRepository
@@ -14,6 +15,11 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 ARTIFACTS = PaperArtifactRepository()
 VECTOR_DB_DIR = get_settings().vector_db_dir
+# Chroma publishes its shared system before the Rust backend finishes starting.
+# Keep one live client per directory, and serialize first initialization so
+# concurrent status, indexing, and chat requests cannot see a partial backend.
+_CLIENTS: dict[str, object] = {}
+_CLIENT_LOCK = Lock()
 INDEX_VERSION = "paper-pages-v3-700-100"
 FASTEMBED_VERSION = "0.8.0"
 DEFAULT_EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
@@ -203,28 +209,34 @@ class VectorStoreManager:
                 "如需启用，请运行：backend\\.venv\\Scripts\\python.exe -m pip install chromadb"
             ) from exc
 
-        VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
-        self._client = chromadb.PersistentClient(
-            path=str(VECTOR_DB_DIR),
-            settings=Settings(anonymized_telemetry=False),
-        )
+        path = str(VECTOR_DB_DIR.resolve())
+        with _CLIENT_LOCK:
+            client = _CLIENTS.get(path)
+            if client is None:
+                VECTOR_DB_DIR.mkdir(parents=True, exist_ok=True)
+                client = chromadb.PersistentClient(
+                    path=path,
+                    settings=Settings(anonymized_telemetry=False),
+                )
+                _CLIENTS[path] = client
+            self._client = client
 
     @staticmethod
     def _collection_name(task_id: str) -> str:
         return task_id
 
-    def index_task(self, task_id: str) -> dict:
-        paper_result = ARTIFACTS.read_result(task_id)
+    def index_task(self, task_id: str, *, paper_result: dict | None = None, chunks: list[dict] | None = None) -> dict:
+        paper_result = paper_result if paper_result is not None else ARTIFACTS.read_result(task_id)
         if not paper_result or paper_result.get("paper_task") is not True:
             logger.warning(f"论文任务不存在，跳过索引: {task_id}")
             return {"status": "skipped", "reason": "paper_not_found", "chunk_count": 0}
-        chunks = _chunk_paper_pages(paper_result)
+        chunks = chunks if chunks is not None else _chunk_paper_pages(paper_result)
         if not chunks:
             logger.warning(f"论文分页原文为空，跳过索引: {task_id}")
             return {"status": "skipped", "reason": "empty_pages", "chunk_count": 0}
 
         collection_name = self._collection_name(task_id)
-        content_hash = str((paper_result.get("paper_document") or {}).get("content_hash") or "")
+        content_hash = str((paper_result.get("paper_document") or {}).get("content_hash") or (paper_result.get("paper_document") or {}).get("document_version_id") or "")
         embedding_config = embedding_model_config()
         embedding_identity = embedding_index_identity(embedding_config)
         try:
@@ -289,9 +301,10 @@ class VectorStoreManager:
             )
         return chunks
 
-    def query(self, task_id: str, query_text: str, n_results: int = 6) -> list[dict]:
+    def query(self, task_id: str, query_text: str, n_results: int = 6, *, paper_result: dict | None = None, chunks: list[dict] | None = None) -> list[dict]:
         try:
-            if not self.is_indexed(task_id):
+            indexed = self.is_indexed(task_id) if paper_result is None and chunks is None else self.is_indexed(task_id, paper_result=paper_result, chunks=chunks)
+            if not indexed:
                 return []
             collection = self._client.get_collection(self._collection_name(task_id))
             query_embedding = _embed_query(query_text)
@@ -312,12 +325,12 @@ class VectorStoreManager:
         except Exception:
             pass
 
-    def is_indexed(self, task_id: str) -> bool:
+    def is_indexed(self, task_id: str, *, paper_result: dict | None = None, chunks: list[dict] | None = None) -> bool:
         try:
-            paper_result = ARTIFACTS.read_result(task_id)
+            paper_result = paper_result if paper_result is not None else ARTIFACTS.read_result(task_id)
             paper = (paper_result or {}).get("paper_document") or {}
-            chunks = _chunk_paper_pages(paper_result or {})
-            content_hash = str(paper.get("content_hash") or "")
+            chunks = chunks if chunks is not None else _chunk_paper_pages(paper_result or {})
+            content_hash = str(paper.get("content_hash") or paper.get("document_version_id") or "")
             embedding_identity = embedding_index_identity()
             if not paper_result or not content_hash or not chunks:
                 return False

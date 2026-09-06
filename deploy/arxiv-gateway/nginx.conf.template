@@ -1,0 +1,98 @@
+# Installed as /etc/nginx/sites-available/fastread-arxiv-gateway.
+# Replace __GATEWAY_KEY__ before enabling. Keep the rendered file root-readable only.
+
+proxy_cache_path /var/cache/nginx/fastread-arxiv
+    levels=1:2
+    keys_zone=fastread_arxiv_cache:20m
+    max_size=4g
+    inactive=14d
+    use_temp_path=off;
+
+limit_req_zone $binary_remote_addr zone=fastread_arxiv_per_ip:10m rate=5r/s;
+
+map_hash_bucket_size 128;
+map $http_x_fastread_gateway_key $fastread_arxiv_authorized {
+    default 0;
+    "__GATEWAY_KEY__" 1;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name 8-219-149-159.sslip.io;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/html;
+        default_type text/plain;
+    }
+
+    location / {
+        return 308 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name 8-219-149-159.sslip.io;
+
+    ssl_certificate /etc/letsencrypt/live/8-219-149-159.sslip.io/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/8-219-149-159.sslip.io/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:FastReadArxivTLS:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    access_log /var/log/nginx/fastread-arxiv-access.log;
+    error_log /var/log/nginx/fastread-arxiv-error.log warn;
+
+    limit_req zone=fastread_arxiv_per_ip burst=15 nodelay;
+    limit_req_status 429;
+    client_max_body_size 1k;
+
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Accept-Encoding "";
+    proxy_set_header User-Agent "FastRead-arXiv-Gateway/1.0 (restricted academic client)";
+    proxy_connect_timeout 10s;
+    proxy_send_timeout 15s;
+    proxy_read_timeout 90s;
+    proxy_cache_lock on;
+    proxy_cache_background_update on;
+    proxy_cache_use_stale error timeout updating http_500 http_502 http_503 http_504;
+    add_header X-FastRead-Cache $upstream_cache_status always;
+
+    location = /healthz {
+        if ($fastread_arxiv_authorized = 0) { return 401; }
+        default_type application/json;
+        return 200 '{"status":"ok","service":"fastread-arxiv-gateway"}';
+    }
+
+    location = /api/query {
+        if ($fastread_arxiv_authorized = 0) { return 401; }
+        limit_except GET HEAD { deny all; }
+        proxy_set_header Host export.arxiv.org;
+        proxy_ssl_server_name on;
+        proxy_ssl_name export.arxiv.org;
+        proxy_pass https://export.arxiv.org;
+        proxy_cache fastread_arxiv_cache;
+        proxy_cache_valid 200 10m;
+        proxy_cache_valid 301 302 1m;
+    }
+
+    location ~ ^/(?:abs|pdf)/[A-Za-z0-9._/-]+$ {
+        if ($fastread_arxiv_authorized = 0) { return 401; }
+        limit_except GET HEAD { deny all; }
+        proxy_set_header Host arxiv.org;
+        proxy_ssl_server_name on;
+        proxy_ssl_name arxiv.org;
+        proxy_pass https://arxiv.org;
+        proxy_cache fastread_arxiv_cache;
+        proxy_cache_valid 200 7d;
+        proxy_cache_valid 301 302 10m;
+    }
+
+    location / {
+        return 404;
+    }
+}

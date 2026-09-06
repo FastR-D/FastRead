@@ -109,7 +109,7 @@ function ResultCard({
                 {paper.authors.slice(0, 4).join('、')}{paper.authors.length > 4 ? ' 等' : ''}
               </span>
             )}
-            {typeof paper.cited_by === 'number' && <span>Scholar 引用 {paper.cited_by}</span>}
+            {typeof paper.cited_by === 'number' && <span>引用 {paper.cited_by}</span>}
             <span className="font-mono text-slate-400">rel {paper.relevance}</span>
           </div>
         </div>
@@ -400,7 +400,7 @@ export default function SearchPage() {
               <div>
                 <h2 className="text-sm font-semibold text-slate-900">检索结果 · {response.result_count} 篇</h2>
                 <p className="mt-0.5 text-[11px] text-slate-500">
-                  核心 {response.scope_counts.core} · arXiv {response.scope_counts.arxiv} · Scholar {response.scope_counts.scholar}
+                  核心 {response.scope_counts.core} · arXiv {response.scope_counts.arxiv} · 其他学术来源 {response.scope_counts.scholar}
                   {response.result_count > 0 && ` · 当前显示 ${(currentPage - 1) * pageSize + 1}–${Math.min(currentPage * pageSize, response.result_count)}`}
                 </p>
               </div>
@@ -451,7 +451,7 @@ export default function SearchPage() {
                   <span>索引更新 {formatTime(response.index_updated_at)}</span>
                   <span>本次检索 {formatTime(response.retrieved_at)}</span>
                   <span>{response.index_stale ? '索引可能过期' : '索引时效正常'}</span>
-                  <span>核心 {response.scope_counts.core} · arXiv {response.scope_counts.arxiv} · Scholar {response.scope_counts.scholar}</span>
+                  <span>核心 {response.scope_counts.core} · arXiv {response.scope_counts.arxiv} · 其他学术来源 {response.scope_counts.scholar}</span>
                   <span>学术网络：{response.network_policy?.academic_proxy_configured ? '经专用代理' : response.network_policy?.public_direct_allowed ? '境内直连' : '等待配置代理'}</span>
                 </div>
                 <div className="mt-2 flex flex-wrap gap-2 text-[11px]">

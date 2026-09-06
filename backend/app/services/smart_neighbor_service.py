@@ -18,7 +18,11 @@ from app.db.related_work_dao import (
 )
 from app.repositories.paper_artifacts import PaperArtifactRepository
 from app.services.gpt_provider import GPTProvider
-from app.services.llm_compat import create_chat_completion
+from app.services.llm_compat import (
+    StructuredOutputError,
+    create_chat_completion,
+    create_structured_chat_completion,
+)
 from app.utils.logger import get_logger
 
 
@@ -86,22 +90,6 @@ class SmartSelectionError(ValueError):
     def __init__(self, reason: str, message: str):
         super().__init__(message)
         self.reason = reason
-
-
-def _strip_code_fence(value: str) -> str:
-    text = str(value or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*```$", "", text)
-    return text.strip()
-
-
-def _response_format_is_unsupported(exc: Exception) -> bool:
-    status_code = getattr(exc, "status_code", None)
-    text = str(exc or "").lower()
-    mentions_format = "response_format" in text or "json_object" in text or "json mode" in text
-    mentions_support = any(token in text for token in ("unsupported", "not support", "unknown", "invalid"))
-    return bool(mentions_format and mentions_support and status_code in {None, 400, 404, 422})
 
 
 def _balanced_page_context(document: dict) -> tuple[list[dict], dict]:
@@ -419,21 +407,16 @@ class SmartNeighborService:
                 "temperature": 0.1,
             }
             try:
-                response = self._completion_factory(
+                structured = create_structured_chat_completion(
                     model.client,
+                    completion_factory=self._completion_factory,
                     **kwargs,
-                    response_format={"type": "json_object"},
                 )
-            except Exception as exc:
-                if not _response_format_is_unsupported(exc):
-                    raise
-                logger.warning(f"智能近邻模型不支持 JSON response_format，回退普通 JSON 提示: {exc}")
-                response = self._completion_factory(model.client, **kwargs)
-            raw = response.choices[0].message.content or ""
-            try:
-                payload = json.loads(_strip_code_fence(raw))
-            except json.JSONDecodeError as exc:
-                raise SmartSelectionError("invalid_json", f"智能精选不是有效 JSON: {exc}") from exc
+                payload = structured.payload
+            except StructuredOutputError as exc:
+                raise SmartSelectionError(
+                    exc.reason, f"智能精选结构化输出失败: {exc}"
+                ) from exc
             selections, rejected = _normalize_selections(
                 payload, candidates, selection_limit, include_rejections=True
             )

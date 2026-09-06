@@ -1,0 +1,15 @@
+[Unit]
+Description=FastRead Web API
+After=network.target
+[Service]
+Type=simple
+User=dev
+WorkingDirectory=/home/dev/fastread-web-current/backend
+EnvironmentFile=/home/dev/fastread-web-shared/web.env
+ExecStart=/home/dev/fastread-web-venv/bin/uvicorn main:app --host 127.0.0.1 --port 8584 --no-proxy-headers
+Restart=on-failure
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+[Install]
+WantedBy=multi-user.target
