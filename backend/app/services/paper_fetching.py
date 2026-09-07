@@ -423,6 +423,7 @@ def _pdf_snapshot(url: str, content: bytes) -> dict:
     page_spans = []
     status = "pdf_unparsed"
     pdf_metadata = {}
+    first_page_layout = {}
     parser = ""
     parser_version = ""
     page_count_total = 0
@@ -438,6 +439,9 @@ def _pdf_snapshot(url: str, content: bytes) -> dict:
                 for index in range(page_count_parsed)
             ]
             pdf_metadata = document.metadata or {}
+            if page_count_total:
+                from app.services.document_metadata import page_layout
+                first_page_layout = page_layout(document[0])
         parser = "pymupdf"
         parser_version = _package_version("PyMuPDF")
         text, page_spans = _pdf_text_with_spans(pages)
@@ -519,6 +523,7 @@ def _pdf_snapshot(url: str, content: bytes) -> dict:
         "official_record_verified": False,
         "verified_academic_metadata": {},
         "document_claimed_metadata": document_claimed_metadata,
+        "first_page_layout": first_page_layout,
     }
 
 
@@ -689,6 +694,7 @@ def fetch_source_snapshot(
             "retrieved_at": datetime.now(timezone.utc).isoformat(),
             "text": "",
             "fetch_status": "failed",
+            "failure_kind": "timeout" if isinstance(exc, httpx.TimeoutException) else "transport" if isinstance(exc, httpx.TransportError) else "source_rejected",
             "source_type": "web",
             "source_status": "blocked",
             "official_record_verified": False,

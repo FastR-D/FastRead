@@ -25,12 +25,16 @@ class PaperIngestService:
         academic_resolver=None,
         persist_legacy_registry: bool = True,
         pdf_sink=None,
+        metadata_client_factory=None,
+        metadata_registry_lookup=None,
     ):
         self.artifacts = artifacts or PaperArtifactRepository()
         self._academic_resolver = academic_resolver or resolve_document_claim_record
         self._identity = AcademicIdentityService()
         self.persist_legacy_registry = persist_legacy_registry
         self.pdf_sink = pdf_sink
+        self.metadata_client_factory = metadata_client_factory
+        self.metadata_registry_lookup = metadata_registry_lookup
 
     @staticmethod
     def _pages_from_snapshot(snapshot: dict) -> list[dict]:
@@ -73,6 +77,10 @@ class PaperIngestService:
         }
         text = (snapshot.get("text") or "").strip()
         if snapshot.get("fetch_status") not in {"ok", "pdf_ok"} or not text:
+            if snapshot.get("failure_kind") == "timeout":
+                raise TimeoutError("paper_source_timeout")
+            if snapshot.get("failure_kind") == "transport":
+                raise ConnectionError("paper_source_transport")
             raise ValueError("论文原文无法解析；扫描版、加密 PDF 或抓取失败时不能生成报告")
 
         metadata = {
@@ -83,6 +91,13 @@ class PaperIngestService:
             "unverified_supplement": unverified_supplement,
         }
         pages = self._pages_from_snapshot(snapshot)
+        if "first_page_layout" in snapshot:
+            from app.services.document_metadata import resolve_metadata
+            # Re-establish identity against this PDF, including linked-PDF imports.
+            metadata.update(official_record_verified=False, registry_record_verified=False,
+                            verified_academic_metadata={}, registry_record_url="", registry_name="")
+            metadata.update(resolve_metadata(snapshot, model_client_factory=self.metadata_client_factory,
+                                             registry_lookup=self.metadata_registry_lookup))
         metadata_contract = normalize_paper_metadata(
             metadata,
             first_page_text=str((pages[0] if pages else {}).get("text") or ""),
@@ -111,7 +126,7 @@ class PaperIngestService:
             "year": normalized.get("year"),
             "doi": normalized.get("doi") or "",
             "source_url": source_url or snapshot.get("url") or "",
-            "resolved_source_url": snapshot.get("url") or source_url or "",
+            "resolved_source_url": metadata.get("registry_record_url") or snapshot.get("url") or source_url or "",
             "pdf_url": metadata.get("pdf_url") or (source_url if snapshot.get("source_type") == "pdf" else ""),
             "filename": filename,
             "content_hash": metadata.get("content_hash") or "",
@@ -130,6 +145,7 @@ class PaperIngestService:
             "text_chars": len(text),
             "academic_gate": academic_gate,
             "raw_metadata": metadata_contract["raw_metadata"],
+            "metadata_resolution": metadata.get("metadata_resolution") or {},
             "normalized_metadata": normalized,
             "verified_identity": verified_identity,
             "metadata_contract": {
@@ -203,7 +219,7 @@ class PaperIngestService:
             raise ValueError("PDF 文件为空")
         snapshot = parse_pdf_bytes(content, source_url)
         document_claim = snapshot.get("document_claimed_metadata") or {}
-        if document_claim:
+        if document_claim and "first_page_layout" not in snapshot:
             try:
                 spans = snapshot.get("page_spans") or []
                 first_page = ""

@@ -18,6 +18,9 @@ ARTIFACTS = PaperArtifactRepository()
 PAPER_SYSTEM_PROMPT = """你是 FastRead 的单篇论文阅读问答助手。
 只能依据下面给出的论文分页原文回答，不能使用模型记忆补写事实，也不能把单篇论文陈述升级成领域共识。
 每个实质结论必须引用当前上下文中的页码和逐字短引文；证据不足时回答“原文证据不足”。
+上下文按页码排列，句子、论证或脚注可能跨片段、跨页；先阅读相邻片段再判断证据是否不足，跨页解释分别引用各页。
+PDF 文本可能将分子、分母、上下标拆成多行。只有周围原文能消除歧义时，才将公式转写为 LaTeX（行内用 $...$，独立公式用 $$...$$），并明确标为“公式转写”；不能把转写放进 exact_quote。结构仍不确定时说明“公式排版待核对”，继续回答有文字证据的部分。
+解释量化结论时区分运算量占比、运行时间占比和硬件吞吐量；不得把低运算量占比说成低时间开销。明确区分作者推测、假设、实验观察与推导。
 
 论文原文：
 {context}
@@ -43,7 +46,9 @@ def _tokens(text: str) -> list[str]:
 
 
 def _chunk_page(text: str, size: int = 900, overlap: int = 120) -> list[str]:
-    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    # Preserve PDF line breaks: flattening a stacked fraction destroys even
+    # the limited layout information available to a text-only model.
+    cleaned = re.sub(r"[^\S\n]+", " ", str(text or "")).strip()
     if not cleaned:
         return []
     chunks: list[str] = []
@@ -381,10 +386,43 @@ def _task_retrieval(
         chunks = _balanced_chunks(paper_chunks, limit)
         if chunks:
             diagnostics["strategy"] = "balanced_fallback"
+    chunks = _expand_context(chunks, paper_chunks)
+    diagnostics["context_chunk_count"] = len(chunks)
     diagnostics["retrieved_pages"] = sorted(
         {int((chunk.get("metadata") or {}).get("page_start") or 0) for chunk in chunks}
     )
     return payload, chunks, diagnostics
+
+
+def _expand_context(anchors: list[dict], all_chunks: list[dict], budget: int = 32000) -> list[dict]:
+    """Keep anchors, then their pages and page-boundary continuations, bounded.
+
+    Expansion uses only this document's authoritative chunks; it never invents
+    a cross-page quote or treats a retrieval miss as absence from the paper.
+    """
+    def identity(chunk):
+        meta = chunk.get('metadata') or {}
+        return (int(meta.get('page_start') or 0), int(meta.get('chunk_index') or 0))
+
+    authoritative = {identity(chunk): chunk for chunk in all_chunks}
+    selected = {identity(chunk): authoritative[identity(chunk)] for chunk in anchors if identity(chunk) in authoritative}
+    remaining = max(0, budget - sum(len(c.get('text') or '') for c in selected.values()))
+    groups = []
+    for anchor in anchors:
+        page, ordinal = identity(anchor)
+        same_page = [c for c in all_chunks if identity(c)[0] == page]
+        same_page.sort(key=lambda c: abs(identity(c)[1] - ordinal))
+        previous = [c for c in all_chunks if identity(c)[0] == page - 1][-2:]
+        following = [c for c in all_chunks if identity(c)[0] == page + 1][:2]
+        # Reserve boundary context early, before a long page consumes the budget.
+        groups.append(same_page[:2] + previous + following + same_page[2:])
+    for chunk in _merge_chunk_groups(groups, len(all_chunks)):
+        key = identity(chunk)
+        size = len(chunk.get('text') or '')
+        if key not in selected and size <= remaining:
+            selected[key] = chunk
+            remaining -= size
+    return list(selected.values())
 
 
 def _task_chunks(task_id: str, question: str, limit: int = 8) -> tuple[dict, list[dict]]:
@@ -407,6 +445,11 @@ def _library_chunks(
 
 def _context(chunks: list[dict], *, source_labels: bool = False) -> str:
     lines = []
+    if not source_labels:
+        chunks = sorted(chunks, key=lambda c: (
+            int((c.get('metadata') or {}).get('page_start') or 0),
+            int((c.get('metadata') or {}).get('chunk_index') or 0),
+        ))
     for index, chunk in enumerate(chunks, 1):
         metadata = chunk.get("metadata") or {}
         label = f"[S{index}] " if source_labels else ""
@@ -519,6 +562,8 @@ def _ground_task_answer(
         )
     if not answer:
         return _grounding_failure("response_format_invalid", retrieval=retrieval)
+    if rejected_citation:
+        return _grounding_failure("citation_rejected", retrieval=retrieval)
     if not sources:
         if citations or rejected_citation:
             return _grounding_failure("citation_rejected", retrieval=retrieval)
@@ -531,7 +576,9 @@ def _ground_task_answer(
         "answer": answer,
         "sources": sources,
         "grounding_status": "source_grounded",
-        "grounding_detail": "页码与逐字引文已通过原文校验。",
+        "grounding_detail": "页码与逐字引文已通过原文校验；结论支持关系与公式转写未独立验证。",
+        "citation_validation": "quote_and_page_location",
+        "claim_support_validation": "not_independently_verified",
         "retrieval_strategy": (retrieval or {}).get("strategy") or "unknown",
         "retrieved_pages": (retrieval or {}).get("retrieved_pages") or sorted(allowed_pages),
     }

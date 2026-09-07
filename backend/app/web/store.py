@@ -144,7 +144,13 @@ class Store:
             raise ValueError("document_has_no_pages")
         # Content digest is required for import deduplication, not a delivery checksum.
         content_fingerprint = hashlib.sha256(encode(pages).encode()).hexdigest()
-        fingerprint = hashlib.sha256(encode([pages,document.get("metadata_contract",{}).get("parser_version","")]).encode()).hexdigest()
+        contract = document.get("metadata_contract") or {}
+        # A successful extraction/registry retry can improve the same PDF. Keep
+        # that as an immutable metadata revision without keying on timestamps.
+        metadata_revision = {key: document.get(key) for key in ("title", "authors", "year", "doi")}
+        metadata_revision["resolution"] = (document.get("metadata_resolution") or {}).get("status")
+        fingerprint = hashlib.sha256(encode([pages, contract.get("parser_version", ""),
+            contract.get("strategy_version", ""), metadata_revision]).encode()).hexdigest()
         import re
         identities = sorted({re.sub(r"v\d+$", "", key) if key.startswith("arxiv:") else key
                              for key in canonical_identity_keys(document) if key.startswith(("doi:","arxiv:","openreview:"))})
@@ -157,6 +163,12 @@ class Store:
         existing = db.execute("SELECT * FROM papers WHERE id=?", (next(iter(matches)),)).fetchone() if matches else db.execute("SELECT * FROM papers WHERE workspace_id=? AND identity=?", (workspace, identity)).fetchone()
         paper_id = existing["id"] if existing else uid()
         metadata = {k: v for k, v in document.items() if k not in {"pages", "id"}}
+        if existing and metadata_revision["resolution"] != "registry_verified":
+            active = db.execute("SELECT id,metadata FROM document_versions WHERE id=?", (existing["active_version"],)).fetchone()
+            if active and (json.loads(active["metadata"]).get("metadata_resolution") or {}).get("status") == "registry_verified":
+                active_pages = [dict(p) for p in db.execute("SELECT number AS page,text FROM pages WHERE version_id=? ORDER BY number", (active["id"],))]
+                if active_pages == [{"page": p["page"], "text": p["text"]} for p in pages]:
+                    return {"paper_id": paper_id, "version_id": active["id"], "deduplicated": True}
         now = time.time()
         if not existing:
             db.execute("INSERT INTO papers(id,workspace_id,identity,title,metadata,created) VALUES(?,?,?,?,?,?)",

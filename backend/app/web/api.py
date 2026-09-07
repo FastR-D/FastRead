@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.gzip import GZipMiddleware
@@ -27,6 +27,8 @@ class LoginInput(BaseModel):
 
 class ImportInput(BaseModel):
     url: str = Field(min_length=8, max_length=2048)
+    provider_id: str = Field(default="", max_length=100)
+    model: str = Field(default="", max_length=100)
 
     @field_validator("url")
     @classmethod
@@ -208,15 +210,25 @@ def create_web_app(root=None, frontend=None):
 
     @api.post("/imports/url", status_code=202)
     def import_url(data: ImportInput, user: User, idempotency_key: str = Header()):
-        return enqueue(user, "import_url", data.model_dump(), idempotency_key)
+        if data.provider_id or data.model:
+            model(user, data)
+        return enqueue(user, "import_url", data.model_dump(exclude_defaults=True), idempotency_key, billable=bool(data.provider_id))
 
     @api.post("/imports/pdf", status_code=202)
-    async def import_pdf(user: User, file: UploadFile = File(), idempotency_key: str = Header()):
+    async def import_pdf(user: User, file: UploadFile = File(), idempotency_key: str = Header(),
+                         provider_id: str = Form("", max_length=100), model_name: str = Form("", alias="model", max_length=100)):
+        if provider_id or model_name:
+            if not provider_id or not model_name:
+                raise HTTPException(400, "请同时选择供应商与模型")
+            model(user, ModelInput(provider_id=provider_id, model=model_name))
         if not idempotency_key or len(idempotency_key) > 160:
             raise HTTPException(400, "需要有效 Idempotency-Key")
         previous = store.one("SELECT * FROM jobs WHERE workspace_id=? AND dedupe_key=?", (user.workspace_id, idempotency_key))
         if previous:
             if previous["kind"] != "import_pdf":
+                raise HTTPException(409, "idempotency_key_conflict")
+            previous_payload = json.loads(previous["payload"])
+            if previous_payload.get("provider_id", "") != provider_id or previous_payload.get("model", "") != model_name:
                 raise HTTPException(409, "idempotency_key_conflict")
             return job_view(previous)
         relative = "files/" + uid() + ".pdf"
@@ -233,7 +245,8 @@ def create_web_app(root=None, frontend=None):
                     handle.write(chunk)
             if not count:
                 raise HTTPException(400, "PDF 为空")
-            return enqueue(user, "import_pdf", {"path": relative, "filename": Path(file.filename or "paper.pdf").name}, idempotency_key)
+            return enqueue(user, "import_pdf", {"path": relative, "filename": Path(file.filename or "paper.pdf").name,
+                           "provider_id": provider_id, "model": model_name}, idempotency_key, billable=bool(provider_id))
         except BaseException:
             path.unlink(missing_ok=True)
             raise
