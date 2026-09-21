@@ -42,6 +42,14 @@ def execute(store, job, owner):
     kind = job["kind"]
     file_path = None
     result = {}
+    if kind == 'book_questions':
+        from .book_questions import execute as execute_questions
+        execute_questions(store, job, owner, model_client)
+        return
+    if kind in {'organize','knowledge_chat'}:
+        from .knowledge import execute_knowledge
+        execute_knowledge(store,job,owner,model_client)
+        return
     if kind in {"import_url", "import_pdf"}:
         from app.services.paper_ingest_service import PaperIngestService
         artifacts = MemoryArtifacts()
@@ -61,12 +69,32 @@ def execute(store, job, owner):
         else:
             imported = service.ingest_url(url=payload["url"])
         document = imported["result"]["paper_document"]
+        if payload.get('source'):
+            document['import_origin'] = {'source':payload['source'],'external_id':payload.get('external_id','')}
         with store.connect(write=True) as db:
             store.assert_lease(db, job, owner)
-            result = store.ingest(job["workspace_id"], document, file_path=file_path, db=db)
+            result = store.ingest(job["workspace_id"], document, file_path=file_path, db=db,
+                                  paper_id=payload.get("paper_id") or None)
             store.enqueue(job["workspace_id"], job["user_id"], "index", {}, "index:"+result["version_id"],
                           resource_id=result["paper_id"], version_id=result["version_id"], db=db)
+            from .knowledge import choose_model
+            bid=payload.get('knowledge_id','')
+            if bid:
+                if not db.execute('SELECT id FROM knowledge_bases WHERE id=? AND workspace_id=?',(bid,job['workspace_id'])).fetchone():
+                    raise ValueError('knowledge_not_found')
+                db.execute("INSERT OR IGNORE INTO knowledge_papers VALUES(?,?,'manual',?)",(bid,result['paper_id'],time.time()))
+            if payload.get('organize',True):
+                from fastapi import HTTPException
+                try:
+                    config=choose_model(store,job['workspace_id'],payload.get('provider_id',''),payload.get('model',''))
+                    child=store.enqueue(job['workspace_id'],job['user_id'],'organize',config | {'knowledge_id':bid},'organize:'+job['id'],resource_id=result['paper_id'],version_id=result['version_id'],billable=True,db=db)
+                    result['organize_job_id']=child['id']
+                except (HTTPException,ValueError):
+                    result['organize_notice']='论文已保存；智能整理未启动，请检查模型配置或任务额度后重试。'
             complete(db, job, result)
+        if bid:
+            from .book_questions import schedule_optional
+            schedule_optional(store, job['workspace_id'], job['user_id'], bid)
         return
     if kind == "chat":
         conversation = store.one("SELECT * FROM conversations WHERE id=? AND workspace_id=?", (job["resource_id"], job["workspace_id"]))
@@ -120,8 +148,8 @@ def execute(store, job, owner):
         else:
             result["vector"] = {"status":"disabled","reason":reason}
     elif kind == "neighbors":
-        from .search import PublicSearch
-        result = PublicSearch(store).search(source["paper_document"]["title"], 20)
+        from .reading import discover
+        result = discover(store, evidence)
         result.update(document_version_id=job["version_id"], evidence_status="discovery_candidates_not_verified_support")
     else:
         raise ValueError("unknown_job_kind")

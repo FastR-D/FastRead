@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -20,7 +22,7 @@ def encode(value) -> str:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_versions(version INTEGER PRIMARY KEY, applied REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL,
- password TEXT NOT NULL, created REAL NOT NULL);
+ password TEXT NOT NULL, created REAL NOT NULL, research_key_id TEXT, display_name TEXT);
 CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY, name TEXT NOT NULL, daily_limit INTEGER NOT NULL DEFAULT 50);
 CREATE TABLE IF NOT EXISTS memberships(user_id TEXT REFERENCES users(id), workspace_id TEXT REFERENCES workspaces(id),
  role TEXT NOT NULL CHECK(role IN ('owner','member')), PRIMARY KEY(user_id,workspace_id));
@@ -80,14 +82,28 @@ class Store:
         self.path = self.root / "fastread-web.sqlite3"
 
     def initialize(self):
+        from .knowledge import SCHEMA as KNOWLEDGE_SCHEMA
+        from .reading import SCHEMA as READING_SCHEMA
+        from .notebook_notes import SCHEMA as NOTES_SCHEMA
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "files").mkdir(exist_ok=True)
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
-            db.executescript(SCHEMA)
-            if "archived" not in {row[1] for row in db.execute("PRAGMA table_info(papers)")}:
+            db.executescript(SCHEMA + KNOWLEDGE_SCHEMA + READING_SCHEMA + NOTES_SCHEMA)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(papers)")}
+            if "archived" not in columns:
                 db.execute("ALTER TABLE papers ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            user_columns = {row[1] for row in db.execute("PRAGMA table_info(users)")}
+            if "research_key_id" not in user_columns:
+                db.execute("ALTER TABLE users ADD COLUMN research_key_id TEXT")
+            if "display_name" not in user_columns:
+                db.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_research_key_id ON users(research_key_id) WHERE research_key_id IS NOT NULL AND research_key_id != ''")
             db.execute("INSERT OR IGNORE INTO schema_versions VALUES(1,?)", (time.time(),))
+            if not db.execute("SELECT name FROM knowledge_migrations WHERE name='legacy-topics-v1'").fetchone():
+                db.execute('INSERT OR IGNORE INTO knowledge_bases SELECT id,workspace_id,question,scope,created FROM topics')
+                db.execute("INSERT OR IGNORE INTO knowledge_papers SELECT DISTINCT e.topic_id,e.paper_id,'manual',? FROM topic_evidence e JOIN topics t ON t.id=e.topic_id JOIN papers p ON p.id=e.paper_id AND p.workspace_id=t.workspace_id",(time.time(),))
+                db.execute("INSERT INTO knowledge_migrations VALUES('legacy-topics-v1',?)",(time.time(),))
 
     @contextmanager
     def connect(self, *, write=False):
@@ -131,14 +147,66 @@ class Store:
         document["pages"] = self.all("SELECT number AS page,text FROM pages WHERE version_id=? ORDER BY number", (version["id"],))
         return paper, version, document
 
-    def ingest(self, workspace: str, document: dict, *, file_path=None, source_key=None, db=None):
+    def intake_fastnews(self, workspace: str, paper: dict) -> dict:
+        """Create or update a metadata-only FastNews paper. PDF is attached later."""
+        title = " ".join(str(paper.get("title") or "").split())[:300]
+        if not title:
+            raise ValueError("title required")
+        authors_raw = " ".join(str(paper.get("authors") or "").split())[:400]
+        authors = [part.strip() for part in re.split(r"[;；、]", authors_raw) if part.strip()] if authors_raw else []
+        abstract = " ".join(str(paper.get("abstract") or "").split())[:800]
+        url = " ".join(str(paper.get("url") or "").split())[:2048]
+        venue = " ".join(str(paper.get("venue") or "").split())[:80]
+        year = " ".join(str(paper.get("year") or "").split())[:8]
+        external_id = " ".join(str(paper.get("external_id") or paper.get("id") or "").split())[:200]
+        if external_id:
+            identity = "fastnews:" + external_id
+        elif url:
+            identity = "fastnews-url:" + hashlib.sha256(url.encode("utf-8")).hexdigest()[:32]
+        else:
+            identity = "fastnews-title:" + hashlib.sha256(title.encode("utf-8")).hexdigest()[:32]
+        now = time.time()
+        with self.connect(write=True) as db:
+            existing = db.execute(
+                "SELECT * FROM papers WHERE workspace_id=? AND identity=?",
+                (workspace, identity),
+            ).fetchone()
+            paper_id = existing["id"] if existing else uid()
+            old_meta = json.loads(existing["metadata"]) if existing else {}
+            awaiting_file = not (existing and existing["active_version"])
+            metadata = dict(old_meta) if existing and existing["active_version"] else {}
+            metadata.update({
+                "source": "fastnews",
+                "title": title,
+                "authors": authors,
+                "abstract": abstract,
+                "url": url,
+                "venue": venue,
+                "year": year,
+                "external_id": external_id,
+                "page_count": old_meta.get("page_count") or 0 if existing and existing["active_version"] else 0,
+                "awaiting_file": awaiting_file,
+            })
+            if existing:
+                db.execute(
+                    "UPDATE papers SET archived=0, title=?, metadata=? WHERE id=?",
+                    (title, encode(metadata), paper_id),
+                )
+            else:
+                db.execute(
+                    "INSERT INTO papers(id,workspace_id,identity,title,metadata,created) VALUES(?,?,?,?,?,?)",
+                    (paper_id, workspace, identity, title, encode(metadata), now),
+                )
+            db.execute("INSERT OR IGNORE INTO paper_identities VALUES(?,?,?)", (workspace, identity, paper_id))
+        return {"id": paper_id, "title": title, "awaiting_file": awaiting_file, "created": not existing}
+
+    def ingest(self, workspace: str, document: dict, *, file_path=None, source_key=None, paper_id=None, db=None):
         """Atomically publish immutable document/pages/chunks and the active-version pointer."""
         if db is None:
             with self.connect(write=True) as connection:
-                return self.ingest(workspace, document, file_path=file_path, source_key=source_key, db=connection)
+                return self.ingest(workspace, document, file_path=file_path, source_key=source_key, paper_id=paper_id, db=connection)
         from app.services.metadata_normalization import canonical_identity_keys
         from app.services.chat_service import _chunk_page
-        import hashlib
         pages = document.get("pages") or []
         if not pages:
             raise ValueError("document_has_no_pages")
@@ -151,18 +219,37 @@ class Store:
         metadata_revision["resolution"] = (document.get("metadata_resolution") or {}).get("status")
         fingerprint = hashlib.sha256(encode([pages, contract.get("parser_version", ""),
             contract.get("strategy_version", ""), metadata_revision]).encode()).hexdigest()
-        import re
         identities = sorted({re.sub(r"v\d+$", "", key) if key.startswith("arxiv:") else key
                              for key in canonical_identity_keys(document) if key.startswith(("doi:","arxiv:","openreview:"))})
         identity = next((x for x in identities if x.startswith("doi:")), None)
         identity = identity or next((x for x in identities if x.startswith("arxiv:")), None) or "content:" + content_fingerprint
         identities.append("content:" + content_fingerprint)
-        matches = {row[0] for key in identities for row in db.execute("SELECT paper_id FROM paper_identities WHERE workspace_id=? AND identity=?", (workspace,key))}
-        if len(matches)>1:
-            raise ValueError("paper_identity_conflict_requires_review")
-        existing = db.execute("SELECT * FROM papers WHERE id=?", (next(iter(matches)),)).fetchone() if matches else db.execute("SELECT * FROM papers WHERE workspace_id=? AND identity=?", (workspace, identity)).fetchone()
+        existing = None
+        if paper_id:
+            existing = db.execute(
+                "SELECT * FROM papers WHERE id=? AND workspace_id=? AND archived=0",
+                (paper_id, workspace),
+            ).fetchone()
+            if not existing:
+                raise LookupError("paper_not_found")
+        else:
+            matches = {row[0] for key in identities for row in db.execute("SELECT paper_id FROM paper_identities WHERE workspace_id=? AND identity=?", (workspace,key))}
+            if len(matches)>1:
+                raise ValueError("paper_identity_conflict_requires_review")
+            existing = db.execute("SELECT * FROM papers WHERE id=?", (next(iter(matches)),)).fetchone() if matches else db.execute("SELECT * FROM papers WHERE workspace_id=? AND identity=?", (workspace, identity)).fetchone()
         paper_id = existing["id"] if existing else uid()
         metadata = {k: v for k, v in document.items() if k not in {"pages", "id"}}
+        title = document.get("title") or "未命名论文"
+        if existing:
+            old_meta = json.loads(existing["metadata"] or "{}")
+            if old_meta.get("source") == "fastnews":
+                for key in ("title", "authors", "year", "venue", "abstract", "url", "external_id"):
+                    if old_meta.get(key) not in (None, "", []):
+                        metadata[key] = old_meta[key]
+                metadata["source"] = "fastnews"
+                metadata["awaiting_file"] = False
+                if old_meta.get("title"):
+                    title = old_meta["title"]
         if existing and metadata_revision["resolution"] != "registry_verified":
             active = db.execute("SELECT id,metadata FROM document_versions WHERE id=?", (existing["active_version"],)).fetchone()
             if active and (json.loads(active["metadata"]).get("metadata_resolution") or {}).get("status") == "registry_verified":
@@ -172,8 +259,11 @@ class Store:
         now = time.time()
         if not existing:
             db.execute("INSERT INTO papers(id,workspace_id,identity,title,metadata,created) VALUES(?,?,?,?,?,?)",
-                       (paper_id, workspace, identity, document.get("title") or "未命名论文", encode(metadata), now))
+                       (paper_id, workspace, identity, title, encode(metadata), now))
         for key in identities:
+            owner = db.execute("SELECT paper_id FROM paper_identities WHERE workspace_id=? AND identity=?", (workspace, key)).fetchone()
+            if owner and owner["paper_id"] != paper_id:
+                continue
             db.execute("INSERT OR IGNORE INTO paper_identities VALUES(?,?,?)", (workspace,key,paper_id))
         version = db.execute("SELECT id FROM document_versions WHERE paper_id=? AND fingerprint=?", (paper_id, fingerprint)).fetchone()
         version_id = version["id"] if version else uid()
@@ -187,12 +277,14 @@ class Store:
                     db.execute("INSERT INTO evidence_chunks VALUES(?,?,?,?,?)",
                                (f"{version_id}:p{number}:c{ordinal}", version_id, number, ordinal, text))
             db.execute("UPDATE papers SET active_version=?,title=?,metadata=? WHERE id=?",
-                       (version_id, document.get("title") or "未命名论文", encode(metadata), paper_id))
+                       (version_id, title, encode(metadata), paper_id))
         if source_key:
             db.execute("INSERT INTO migration_records VALUES(?,?,?,?)", (source_key, paper_id, version_id, now))
         return {"paper_id": paper_id, "version_id": version_id, "deduplicated": bool(version)}
 
     def enqueue(self, workspace, user, kind, payload, key, *, resource_id=None, version_id=None, billable=False, db=None):
+        if not key or len(key) > 160:
+            raise ValueError('需要有效 Idempotency-Key')
         if db is None:
             with self.connect(write=True) as connection:
                 return self.enqueue(workspace, user, kind, payload, key, resource_id=resource_id,

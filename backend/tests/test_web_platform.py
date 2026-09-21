@@ -18,16 +18,22 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setenv("CHAT_VECTOR_INDEX_ENABLED", "false")
     app = create_web_app(tmp_path)
     store = app.state.store
-    a = create_user(store, "a@example.org", "test-password-for-a")
-    b = create_user(store, "b@example.org", "test-password-for-b")
+    def consume(method, path, payload, **kwargs):
+        assert method == "POST" and path == "/api/sso/consume"
+        assert payload["audience"] == "fast-read"
+        return {"keyId": payload["ticket"], "person": payload["ticket"]}, 200
+    monkeypatch.setattr("app.web.auth.research_json", consume)
     clients = []
-    for email, password in [("a@example.org", "test-password-for-a"), ("b@example.org", "test-password-for-b")]:
+    users = []
+    for ticket in ["test-a", "test-b"]:
         client = TestClient(app)
-        response = client.post("/api/auth/login", json={"email": email, "password": password})
+        response = client.post("/api/auth/research", json={"ticket": ticket})
         assert response.status_code == 200
         client.headers["X-CSRF-Token"] = response.json()["csrf"]
         clients.append(client)
-    return store, a, b, *clients
+        me = client.get("/api/auth/me").json()
+        users.append({"user_id": store.one("SELECT id FROM users WHERE research_key_id=?", (ticket,))["id"], "workspace_id": me["workspace_id"]})
+    return store, *users, *clients
 
 
 def document(text="A real page of scientific evidence about a controlled experiment."):
@@ -195,15 +201,14 @@ def test_worker_atomic_index_and_relogin_summary(setup):
     ca.cookies.set("fastread_session", old_cookie)
     assert ca.get("/api/papers").status_code == 401
     other_device = TestClient(ca.app)
-    assert other_device.post("/api/auth/login", json={"email": "a@example.org", "password": "test-password-for-a"}).status_code == 200
+    assert other_device.post("/api/auth/research", json={"ticket": "test-a"}).status_code == 200
     assert other_device.get(f"/api/papers/{p['paper_id']}").json()["summary"] == "My persisted summary"
 
 
 def test_failed_login_limit_and_daily_budget(setup):
     store, a, _, ca, _ = setup
     for _ in range(8):
-        assert ca.post("/api/auth/login", json={"email": "a@example.org", "password": "wrong"}).status_code == 401
-    assert ca.post("/api/auth/login", json={"email": "a@example.org", "password": "wrong"}).status_code == 429
+        assert ca.post("/api/auth/login", json={"email": "a@example.org", "password": "wrong"}).status_code == 403
     with store.connect(write=True) as db:
         db.execute("UPDATE workspaces SET daily_limit=1 WHERE id=?", (a["workspace_id"],))
     store.enqueue(a["workspace_id"], a["user_id"], "report", {}, "first", billable=True)
