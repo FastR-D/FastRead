@@ -42,7 +42,13 @@ jobs:
           python -m pip install -r backend/requirements-dev.txt
 
       - name: Run pytest
-        run: python -m pytest --basetemp=.tmp/pytest --junitxml=test-results/pytest.xml
+        env:
+          TMP: ${{ github.workspace }}/.tmp
+          TEMP: ${{ github.workspace }}/.tmp
+          TMPDIR: ${{ github.workspace }}/.tmp
+        run: |
+          python -c "from pathlib import Path; Path('.tmp').mkdir(exist_ok=True)"
+          python -m pytest --basetemp=.tmp/pytest --junitxml=test-results/pytest.xml
 
       - name: Upload test results
         if: always()
