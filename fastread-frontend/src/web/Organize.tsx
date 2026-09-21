@@ -4,6 +4,7 @@ export type Job = Record<string, any> & { id: string; kind: string; resource_id:
 type Status = 'idle' | 'pending' | 'succeeded' | 'failed'
 const OrganizeContext = createContext<{
   status: (id: string) => Status
+  failure: (ids: string[]) => string
   organize: (ids: string[], body: unknown) => Promise<void>
 } | null>(null)
 
@@ -29,14 +30,28 @@ export function OrganizeProvider({ jobs, submit, api, children }: {
     const timer = setInterval(refresh, 3000)
     return () => { stopped = true; clearInterval(timer) }
   }, [missing, api])
-  function status(id: string): Status {
+  function latest(id: string) {
     const own = local[id]
     if (own === 'pending' || own === 'failed') return own
     const remote = jobs.filter(j => j.kind === 'organize' && j.resource_id === id)
-    const job = own ? remote.find(j => j.id === own.id) || own : remote[0]
+    return own ? remote.find(j => j.id === own.id) || own : remote[0]
+  }
+  function status(id: string): Status {
+    const job = latest(id)
+    if (job === 'pending' || job === 'failed') return job
     if (!job) return 'idle'
     if (['queued', 'running'].includes(job.state)) return 'pending'
     return job.state === 'succeeded' ? 'succeeded' : 'failed'
+  }
+  function failure(ids: string[]) {
+    const job = ids.filter(id => status(id) === 'failed').map(latest)[0]
+    const reason: Record<string, string> = {
+      invalid_input: '本次整理未通过校验',
+      timeout: '本次整理超时',
+      transport: '整理服务连接中断',
+      worker_crash: '本次整理被中断',
+    }
+    return `${job && typeof job === 'object' ? reason[job.error_code] || '本次整理失败' : '暂未收到提交确认'}，已有内容保留。`
   }
   async function organize(ids: string[], body: unknown) {
     const ready = ids.filter(id => !locks.current.has(id) && status(id) !== 'pending')
@@ -51,7 +66,7 @@ export function OrganizeProvider({ jobs, submit, api, children }: {
       } finally { locks.current.delete(id) }
     }))
   }
-  return <OrganizeContext.Provider value={{ status, organize }}>{children}</OrganizeContext.Provider>
+  return <OrganizeContext.Provider value={{ status, failure, organize }}>{children}</OrganizeContext.Provider>
 }
 
 export function OrganizeButton({ ids, body, disabled, label = 'AI 整理', className = 'quiet' }: {
@@ -62,14 +77,13 @@ export function OrganizeButton({ ids, body, disabled, label = 'AI 整理', class
   const states = ids.map(context.status)
   const pending = states.includes('pending')
   const failed = !pending && states.includes('failed')
-  const done = !!ids.length && states.every(s => s === 'succeeded')
   return <span className="organize-control">
     <button className={className} disabled={disabled || !ids.length || pending} aria-busy={pending}
       onClick={() => void context.organize(ids, body)}>
-      {pending ? <><span className="organize-spinner" aria-hidden="true" />正在整理…</> : failed ? '整理失败，点击重试' : label}
+      {pending ? <><span className="organize-spinner" aria-hidden="true" />正在整理…</> : failed ? '重试整理' : label}
     </button>
     <span className="organize-status" role="status" aria-live="polite">
-      {pending ? 'AI 正在整理原理与标签，完成后会自动更新。' : failed ? '整理未完成，请稍后重试。' : done ? '整理完成' : ''}
+      {pending ? 'AI 正在整理原理与标签，请稍候。' : failed ? context.failure(ids) : ''}
     </span>
   </span>
 }
