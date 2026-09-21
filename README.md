@@ -4,6 +4,10 @@
 
 <h1 align="center">FastRead</h1>
 
+[![CI](https://github.com/FastR-D/FastRead/actions/workflows/quality-gate.yml/badge.svg?branch=main)](https://github.com/FastR-D/FastRead/actions/workflows/quality-gate.yml)
+
+CI 在每个 Pull Request 和 `main` / `master` 推送时自动运行，也可在 Actions → Quality Gate → Run workflow 手动触发。检查包含 Linux / Windows 后端测试、前端 lint / 类型检查 / 单元测试 / 构建，以及两套 Docker Compose 配置校验。测试报告和 Web 构建产物保留 14 天，可在对应运行的 Artifacts 下载。
+
 ## 当前主线：FastRead Web
 
 当前入口是带账户和工作区权限的 Web 应用：服务端保存论文、版本化证据、报告、聊天与总结，独立 worker 执行可恢复的后台任务。部署、离线开户、只读源迁移、备份和回滚见 [Web 部署指南](deploy/web/README.md)。API 使用 `backend/main.py`，worker 使用 `python -m app.web.worker`，两者必须指向同一 Web 数据根。生产环境使用 HTTPS 与 Secure cookie。

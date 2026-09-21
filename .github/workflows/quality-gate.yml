@@ -1,16 +1,29 @@
 name: Quality Gate
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
       - main
       - master
 
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   backend-tests:
-    name: Backend tests
-    runs-on: windows-latest
+    name: Backend tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
       - name: Checkout
@@ -29,16 +42,21 @@ jobs:
           python -m pip install -r backend/requirements-dev.txt
 
       - name: Run pytest
-        env:
-          TMP: ${{ github.workspace }}\.tmp
-          TEMP: ${{ github.workspace }}\.tmp
-        run: |
-          New-Item -ItemType Directory -Force .tmp | Out-Null
-          python -m pytest
+        run: python -m pytest --basetemp=.tmp/pytest --junitxml=test-results/pytest.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-tests-${{ matrix.os }}
+          path: test-results/pytest.xml
+          if-no-files-found: ignore
+          retention-days: 14
 
   frontend-checks:
     name: Frontend lint and build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: fastread-frontend
@@ -68,21 +86,24 @@ jobs:
       - name: Type-check frontend
         run: pnpm run typecheck
 
-      - name: Test frontend when a suite is defined
-        shell: bash
-        run: |
-          if node -e "process.exit(require('./package.json').scripts?.test ? 0 : 1)"; then
-            pnpm run test
-          else
-            echo "No frontend test script is defined; no tests were run."
-          fi
+      - name: Test frontend
+        run: pnpm run test
 
       - name: Build frontend
         run: pnpm run build
 
+      - name: Upload web build
+        uses: actions/upload-artifact@v4
+        with:
+          name: fastread-web-${{ github.sha }}
+          path: fastread-frontend/dist/
+          if-no-files-found: error
+          retention-days: 14
+
   docker-compose-config:
     name: Docker compose config
     runs-on: ubuntu-latest
+    timeout-minutes: 5
 
     steps:
       - name: Checkout
