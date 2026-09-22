@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { mergeHighlightRects } from './highlightRects'
 
 type Row = Record<string, any>
@@ -6,7 +6,8 @@ type Props = { paper: Row; version: string; page: number; setPage: (p: number) =
 let engine: Promise<any> | undefined
 let worker: any
 function pdfEngine() {
-  const url = '/vendor/pdfjs/pdf.js?v=4.10.38'
+  // An absolute runtime URL keeps Vite from transforming this public, prebuilt module.
+  const url = new URL('/vendor/pdfjs/pdf.js?v=4.10.38', window.location.origin).href
   return engine ||= import(/* @vite-ignore */ url).then(pdf => {
     pdf.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.js?v=4.10.38'
     return pdf
@@ -20,7 +21,10 @@ export default function PdfReader({ paper, version, page, setPage, api, summary,
   const text = useRef<HTMLDivElement>(null)
   const [document, setDocument] = useState<any>(null)
   const [width, setWidth] = useState(800)
-  const [zoom, setZoom] = useState(1)
+  const [zoom, setZoom] = useState(() => {
+    const saved = Number(localStorage.getItem(`fastread:zoom:${paper.id}`))
+    return [1, 1.25, 1.5, 2].includes(saved) ? saved : 1
+  })
   const [size, setSize] = useState({ width: 1, height: 1 })
   const [ready, setReady] = useState(false)
   const [citationRects, setCitationRects] = useState<Row[]>([])
@@ -31,7 +35,9 @@ export default function PdfReader({ paper, version, page, setPage, api, summary,
   const [selection, setSelection] = useState<Row | null>(null)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
-  const [notesOpen, setNotesOpen] = useState(true)
+  const [notesOpen, setNotesOpen] = useState(() => localStorage.getItem('fastread:reader-companion') === 'open')
+  const [panelWidth, setPanelWidth] = useState(() => Math.max(280, Math.min(520, Number(localStorage.getItem('fastread:companion-width')) || 340)))
+  const dragging = useRef<{ x: number; width: number } | null>(null)
   const [editing, setEditing] = useState('')
   const [editText, setEditText] = useState('')
   const summarySaved = useRef(paper.summary || '')
@@ -40,6 +46,10 @@ export default function PdfReader({ paper, version, page, setPage, api, summary,
   const [recovered, setRecovered] = useState(() => localStorage.getItem(draftKey) || '')
   const base = `/papers/${paper.id}/annotations`
   const file = `/api/papers/${paper.id}/file?version=${encodeURIComponent(version)}`
+  useEffect(() => { localStorage.setItem(`fastread:zoom:${paper.id}`, String(zoom)) }, [zoom, paper.id])
+  useEffect(() => { localStorage.setItem('fastread:reader-companion', notesOpen ? 'open' : 'closed') }, [notesOpen])
+  useEffect(() => { localStorage.setItem('fastread:companion-width', String(panelWidth)) }, [panelWidth])
+  useEffect(() => { if (status) { const timer = window.setTimeout(() => setStatus(''), 4500); return () => window.clearTimeout(timer) } }, [status])
   async function reload() { setAnnotations((await api(`${base}?version=${encodeURIComponent(version)}`)).items) }
   async function perform(fn: () => Promise<void>) {
     setError(''); setBusy(true)
@@ -135,9 +145,9 @@ export default function PdfReader({ paper, version, page, setPage, api, summary,
     setSelection(picked); setNotesOpen(true)
     localStorage.setItem(annotationDraftKey, JSON.stringify({ note, selection: picked }))
   }
-  return <div className={`pdf-workspace ${notesOpen ? '' : 'notes-hidden'}`}>
+  return <div className={`pdf-workspace ${notesOpen ? '' : 'notes-hidden'}`} style={{ '--companion-width': `${panelWidth}px` } as CSSProperties}>
     <div className="pdf-column">
-      <div className="pdf-toolbar"><button className="quiet" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button><label>页码<input aria-label="PDF 页码" type="number" min={1} max={document?.numPages || 1} value={page} onChange={e => setPage(Math.max(1, Math.min(document?.numPages || 1, Number(e.target.value) || 1)))} /></label><span>/ {document?.numPages || '…'}</span><button className="quiet" disabled={!document || page >= document.numPages} onClick={() => setPage(page + 1)}>下一页</button><select aria-label="PDF 缩放" value={zoom} onChange={e => setZoom(Number(e.target.value))}><option value={1}>适合宽度</option><option value={1.25}>125%</option><option value={1.5}>150%</option><option value={2}>200%</option></select><button className="quiet" aria-expanded={notesOpen} onClick={() => setNotesOpen(!notesOpen)}>{notesOpen ? '收起右侧' : '展开右侧'}</button><a href={file} target="_blank" rel="noreferrer">原文件</a></div>
+      <div className="pdf-toolbar"><button className="quiet" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一页</button><label>页码<input aria-label="PDF 页码" type="number" min={1} max={document?.numPages || 1} value={page} onChange={e => setPage(Math.max(1, Math.min(document?.numPages || 1, Number(e.target.value) || 1)))} /></label><span>/ {document?.numPages || '…'}</span><button className="quiet" disabled={!document || page >= document.numPages} onClick={() => setPage(page + 1)}>下一页</button><select aria-label="PDF 缩放" value={zoom} onChange={e => setZoom(Number(e.target.value))}><option value={1}>适合宽度</option><option value={1.25}>125%</option><option value={1.5}>150%</option><option value={2}>200%</option></select><button className="quiet" aria-expanded={notesOpen} onClick={() => setNotesOpen(!notesOpen)}>{notesOpen ? '收起辅助栏' : '笔记与问答'}</button><a href={file} target="_blank" rel="noreferrer">原文件</a></div>
       {selection && onQuote && <div className="selection-actions"><span>已选原文</span><button onClick={() => { onQuote({ ...selection, paper_id: paper.id, version_id: version }); setNotesOpen(true) }}>问这段</button><button className="quiet" onClick={() => { onPane?.('notes'); setNotesOpen(true) }}>添加批注</button><button className="quiet" onClick={clearSelection}>取消</button></div>}
       {citationMissing && <p className="citation-fallback">已定位到第 {page} 页，当前版面未能逐字高亮。请对照右侧引文。</p>}
       <div className="pdf-scroll" ref={host}>
@@ -149,13 +159,18 @@ export default function PdfReader({ paper, version, page, setPage, api, summary,
         </div>
       </div>
     </div>
+    {notesOpen && <div className="reader-divider" role="separator" aria-label="调整辅助栏宽度" aria-orientation="vertical" aria-valuemin={280} aria-valuemax={520} aria-valuenow={panelWidth} tabIndex={0}
+      onPointerDown={e => { dragging.current = { x: e.clientX, width: panelWidth }; e.currentTarget.setPointerCapture(e.pointerId) }}
+      onPointerMove={e => { if (dragging.current) setPanelWidth(Math.max(280, Math.min(520, dragging.current.width + dragging.current.x - e.clientX))) }}
+      onPointerUp={() => { dragging.current = null }} onPointerCancel={() => { dragging.current = null }}
+      onKeyDown={e => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { e.preventDefault(); setPanelWidth(w => Math.max(280, Math.min(520, w + (e.key === 'ArrowLeft' ? 16 : -16)))) } }} />}
     {notesOpen && <div className="reading-notes">{companionHeader}{pane !== "notes" ? companion : <><div className="section-heading"><h2>批注与笔记</h2><span>第 {page} 页</span></div><p className="muted">在 PDF 上选中文字即可批注，也可以直接记下这一页的想法。</p>
       <form onSubmit={e => { e.preventDefault(); void perform(async () => { await api(base, 'POST', { version_id: version, page: selection?.page || page, quote: selection?.quote || '', rects: selection?.rects || [], note }); setSelection(null); window.getSelection()?.removeAllRanges(); setNote(''); localStorage.removeItem(annotationDraftKey); await reload(); setStatus('批注已保存') }) }}>
         {selection && <div className="annotation-selection"><div className="annotation-selection-header"><span>选中原文 · 第 {selection.page} 页</span><button type="button" className="quiet" onClick={clearSelection}>取消选文</button></div><blockquote>{selection.quote}</blockquote></div>}
         <label>当前页批注<textarea aria-label="当前页批注" value={note} onChange={e => changeNote(e.target.value)} maxLength={10000} rows={3} placeholder="这段话的含义、疑问或你的想法…" /></label><button disabled={busy || (!note.trim() && !selection)}>保存批注</button>
       </form>
       <div className="annotation-list">{annotations.map(a => <article key={a.id} className={a.page === page ? 'current-page-note' : ''}><button className="page-link" onClick={() => setPage(a.page)}>第 {a.page} 页</button>{a.quote && <blockquote>{a.quote}</blockquote>}{editing === a.id ? <><textarea aria-label="编辑批注" value={editText} onChange={e => setEditText(e.target.value)} maxLength={10000} /><button disabled={busy} onClick={() => void perform(async () => { await api(`${base}/${a.id}`, 'PATCH', { note: editText }); setEditing(''); await reload() })}>保存修改</button><button className="quiet" onClick={() => setEditing('')}>取消</button></> : <><p>{a.note}</p><button className="quiet" onClick={() => { setEditing(a.id); setEditText(a.note) }}>编辑</button><button className="quiet" disabled={busy} onClick={() => { if (window.confirm('删除这条批注？')) void perform(async () => { await api(`${base}/${a.id}`, 'DELETE'); await reload() }) }}>删除</button></>}</article>)}</div>
-      {notebookNotes}<div className="reading-summary"><h2>阅读笔记</h2>{recovered && recovered !== summary && <button className="quiet" onClick={() => { setSummary(recovered); setRecovered('') }}>恢复未保存的笔记草稿</button>}<label>整篇论文的理解<textarea aria-label="阅读笔记" value={summary} onChange={e => setSummary(e.target.value)} maxLength={10000} rows={8} placeholder="边读边整理你的理解…" /></label><button disabled={busy} onClick={() => void perform(async () => { await api(`/papers/${paper.id}/summary`, 'PUT', { content: summary }); summarySaved.current = summary; onSaved(summary); localStorage.removeItem(draftKey); setRecovered(''); setStatus('阅读笔记已保存') })}>保存笔记</button><small>原有个人总结保留在这里。草稿暂存本机，保存后可在其他设备继续阅读。</small></div>
+      {notebookNotes}<div className="reading-summary"><h2>阅读笔记</h2><span className="summary-save-state" role="status">{summary !== summarySaved.current ? '有未保存修改 · 草稿暂存在本机' : '已保存到资料库'}</span>{recovered && recovered !== summary && <button className="quiet" onClick={() => { setSummary(recovered); setRecovered('') }}>恢复未保存的笔记草稿</button>}<label>整篇论文的理解<textarea aria-label="阅读笔记" value={summary} onChange={e => setSummary(e.target.value)} maxLength={10000} rows={8} placeholder="边读边整理你的理解…" /></label><button disabled={busy} onClick={() => void perform(async () => { await api(`/papers/${paper.id}/summary`, 'PUT', { content: summary }); summarySaved.current = summary; onSaved(summary); localStorage.removeItem(draftKey); setRecovered(''); setStatus('阅读笔记已保存') })}>保存笔记</button><small>原有个人总结保留在这里。草稿暂存本机，保存后可在其他设备继续阅读。</small></div>
     </>}</div>}
     {error && <p className="error reader-feedback" role="alert">{error}</p>}{status && <p className="notice reader-feedback" role="status">{status}</p>}
   </div>

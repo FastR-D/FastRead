@@ -9,12 +9,12 @@ import Neighbors from './Neighbors'
 import { PaperTools } from './Knowledge'
 import './notebook.css'
 type Row = Record<string, any>
-export default function NotebookDesk({ target, api, action, jobs, providerId, model, sidebarOpen, onHome, onExternal }: Row) {
+export default function NotebookDesk({ target, api, action, jobs, providerId, model, sidebarOpen, onHome, onExternal, onLocation }: Row) {
   const scope = target.book_id ? 'book' : 'paper', scopeId = target.book_id || target.paper_id
   const [book, setBook] = useState<Row | null>(null), [sources, setSources] = useState<Row[]>([])
   const [checked, setChecked] = useState<string[]>([]), [filter, setFilter] = useState('')
   const [paper, setPaper] = useState<Row | null>(null), [page, setPage] = useState(target.page || 1), [version, setVersion] = useState('')
-  const [summary, setSummary] = useState(''), [pane, setPane] = useState('chat')
+  const [summary, setSummary] = useState(''), [pane, setPane] = useState(() => localStorage.getItem('fastread:reader-pane') || 'notes')
   const [conversation, setConversation] = useState(''), [messages, setMessages] = useState<Row[]>([])
   const [quote, setQuote] = useState<Row | null>(null), [citation, setCitation] = useState<Row | null>(null)
   const draftKey = `desk-question:${scope}:${scopeId}`
@@ -25,6 +25,11 @@ export default function NotebookDesk({ target, api, action, jobs, providerId, mo
   const [sourceError, setSourceError] = useState('')
   const [allBooks, setAllBooks] = useState<Row[]>([]), [neighborTag, setNeighborTag] = useState(''), [matrix, setMatrix] = useState(false)
   const generation = useRef(0), initial = useRef(true), activePaper = useRef('')
+  const locationCallback = useRef(onLocation)
+  const paperId = paper?.id
+  locationCallback.current = onLocation
+  useEffect(() => { localStorage.setItem('fastread:reader-pane', pane) }, [pane])
+  useEffect(() => { if (paperId && version) locationCallback.current?.(paperId, page, version) }, [paperId, page, version])
   const revision = jobs.map((j: Row) => `${j.id}:${j.state}`).join(',')
   const messagePath = scope === 'book' ? `/knowledge-bases/${scopeId}/messages` : conversation ? `/conversations/${conversation}/messages` : ''
   const pending = jobs.find((j: Row) => (scope === 'book' ? j.kind === 'knowledge_chat' && j.resource_id === scopeId : j.kind === 'chat' && j.resource_id === conversation) && ['queued','running'].includes(j.state))
@@ -32,7 +37,14 @@ export default function NotebookDesk({ target, api, action, jobs, providerId, mo
   async function loadNotes() { setNotes((await api(`/workspace-notes?scope=${scope}&scope_id=${scopeId}`)).items) }
   async function open(id: string, location?: Row) {
     const request = ++generation.current
-    const p = await api(`/papers/${id}`)
+    // Reserve the target before awaiting: overlapping source refreshes must not
+    // replace an explicit citation page with the last saved reading position.
+    activePaper.current = id
+    let p: Row
+    try { p = await api(`/papers/${id}`) } catch (error) {
+      if (request === generation.current) activePaper.current = ''
+      throw error
+    }
     if (request !== generation.current) return
     activePaper.current = id; setPaper(p); setSummary(localStorage.getItem(`notes:${id}`) ?? p.summary)
     localStorage.setItem(`desk-current:${scope}:${scopeId}`, id)
@@ -112,14 +124,14 @@ export default function NotebookDesk({ target, api, action, jobs, providerId, mo
     {messages.map(m => <article className={`desk-message ${m.role}`} key={m.id}><b>{m.role === 'user' ? '你' : 'FastRead'}</b>{markdown(m.content,m.evidence)}<div className="citation-list">{references(m.evidence)}</div>{m.role === 'assistant' && <button className="save-answer quiet" onClick={() => void action(() => saveAnswer(m))}>{notes.some(n => n.source_message_id === m.id) ? <><Check size={14} /> 已存入笔记</> : <><StickyNote size={14} /> 保存为笔记</>}</button>}</article>)}
     {(busy || pending) && <p className="answer-progress" role="status">正在结合所选资料回答…</p>}
     {lastFailure && !pending && <details className="answer-failure"><summary>有一条回答未完成</summary><p>{lastFailure.error || '请稍后重试。'}</p><button className="quiet" onClick={() => { const last = [...messages].reverse().find(m => m.role === 'user'); if(last) setQuestion(last.content) }}>恢复问题</button></details>}
-    </div><form className="desk-composer" onSubmit={e => { e.preventDefault(); void action(send) }}>
+    </div>{!providerId && <p className="desk-muted" role="status">问答需要模型，请先在右上角设置中配置。原文阅读和笔记不受影响。</p>}<form className="desk-composer" onSubmit={e => { e.preventDefault(); void action(send) }}>
     {quote && <blockquote><span>选文 · 第 {quote.page} 页</span><p>{quote.quote}</p><button type="button" className="quiet" onClick={() => setQuote(null)}>移除选文</button></blockquote>}
     <textarea aria-label="向所选资料提问" value={question} onChange={e => setQuestion(e.target.value)} placeholder={checked.length ? '输入问题，或在 PDF 上选中一段文字…' : '请先勾选左侧资料'} maxLength={quote ? 3000 : 5000} rows={3} /><div className="composer-footer"><span>参考 {checked.length} 篇资料</span><button disabled={!providerId || !checked.length || busy || !!pending || (!question.trim() && !quote)}>发送</button></div></form></div>
   const reportPanel = <section className="desk-report">{paper && <details><summary>标签、原理与知识库归属</summary><PaperTools paper={paper} books={allBooks} api={api} action={action} openPaper={onExternal} submitJob={submit} providerId={providerId} model={model} revision={revision} onTag={tag => { setNeighborTag(tag); setPane('neighbors') }} reload={async () => { await loadSources(); setPaper(await api(`/papers/${paper.id}`)) }} /></details>}<h2>阅读报告</h2><p className="desk-muted">{paper?.title}</p><button disabled={!paper || !providerId || jobs.some((j: Row) => j.kind === 'report' && j.resource_id === paper?.id && ['queued','running'].includes(j.state))} onClick={() => void action(() => submit(`/papers/${paper?.id}/reports`,{provider_id:providerId,model}))}>{report ? '重新生成报告' : '生成阅读报告'}</button>{report && <>{['key_questions','process','contributions'].map(k => <div key={k}><h3>{{key_questions:'关键问题',process:'方法过程',contributions:'主要贡献'}[k]}</h3>{report.content[k]?.map((r: Row,i:number) => <article key={i}><b>{r.question || r.step || r.title}</b><ReactMarkdown>{r.answer || r.description || ''}</ReactMarkdown>{r.evidence?.map((ev:Row,j:number) => <button key={j} className="citation-chip" title={ev.exact_quote} onClick={() => void action(() => locate({...ev,version_id:report.version_id}))}>第 {ev.page_start || ev.page} 页 · 查看依据</button>)}</article>)}</div>)}<a href={`/api/papers/${paper?.id}/export`} download>导出报告</a></>}</section>
-  const paneHeader = <nav className="desk-pane-tabs" aria-label="研究工具">{[['chat','对话',MessageSquare],['notes','笔记',StickyNote],['report','报告',BookOpen],['neighbors','近邻',Network]].map(([id,label,Icon]) => { const I=Icon as typeof FileText;return <button key={String(id)} className={pane === id ? 'active' : ''} onClick={() => setPane(String(id))}><I size={16} />{String(label)}</button> })}</nav>
+  const paneHeader = <nav className="desk-pane-tabs" aria-label="研究工具">{[['notes','笔记',StickyNote],['chat','问答',MessageSquare],['report','报告',BookOpen],['neighbors','相关',Network]].map(([id,label,Icon]) => { const I=Icon as typeof FileText;return <button key={String(id)} className={pane === id ? 'active' : ''} onClick={() => setPane(String(id))}><I size={16} />{String(label)}</button> })}</nav>
   const companion = pane === 'chat' ? chat : pane === 'report' ? reportPanel : paper ? <Neighbors key={paper.id + neighborTag} initialTag={neighborTag} paper={paper} api={api} action={action} openPaper={onExternal} submitJob={submit} revision={revision} pending={jobs.some((j:Row) => j.kind === 'neighbors' && j.resource_id === paper.id && ['queued','running'].includes(j.state))} /> : null
   return <section className={`notebook-desk ${sidebarOpen ? '' : 'sources-closed'}`}>
-    <aside id="desk-sources" className="desk-sources"><button className="back-home quiet" onClick={onHome}><ArrowLeft size={15} /> 所有知识库</button><h1>{book?.name || '论文阅读'}</h1><div className="section-heading"><h2>资料</h2><button className="quiet" onClick={() => void action(async () => { setAdding(true); setLibrary((await api('/papers?limit=100')).items) })}><Plus size={16} /> 添加</button></div><input aria-label="筛选知识库资料" placeholder="筛选资料…" value={filter} onChange={e => setFilter(e.target.value)} /><label className="select-sources"><input type="checkbox" checked={!!sources.length && checked.length === sources.length} onChange={e => setChecked(e.target.checked ? sources.map(p => p.id) : [])} />选择全部 <span>{checked.length} / {sources.length}</span></label>
+    <aside id="desk-sources" className="desk-sources"><button className="back-home quiet" onClick={onHome}><ArrowLeft size={15} /> {scope === 'book' ? '所有知识库' : '文献库'}</button><h1>{book?.name || '论文阅读'}</h1><div className="section-heading"><h2>资料</h2><button className="quiet" onClick={() => void action(async () => { setAdding(true); setLibrary((await api('/papers?limit=100')).items) })}><Plus size={16} /> 添加</button></div><input aria-label="筛选知识库资料" placeholder="筛选资料…" value={filter} onChange={e => setFilter(e.target.value)} /><label className="select-sources"><input type="checkbox" checked={!!sources.length && checked.length === sources.length} onChange={e => setChecked(e.target.checked ? sources.map(p => p.id) : [])} />选择全部 <span>{checked.length} / {sources.length}</span></label>
     <nav>{sources.filter(p => p.title.toLowerCase().includes(filter.toLowerCase())).map(p => <div className={`desk-source ${paper?.id === p.id ? 'active' : ''}`} key={p.id}><input type="checkbox" aria-label={`问答参考 ${p.title}`} checked={checked.includes(p.id)} onChange={e => setChecked(ids => e.target.checked ? [...ids,p.id] : ids.filter(id => id !== p.id))} /><button onClick={() => void action(() => open(p.id))}><FileText size={16} /><span>{p.title}</span></button></div>)}</nav><p className="desk-muted">勾选决定问答参考范围；点击标题阅读原文。</p><button className="quiet" onClick={() => setMatrix(true)}>查看关系矩阵</button>
     </aside><div className="desk-reading"><div className="desk-reading-heading"><div><span>{book ? book.name : '论文阅读'}</span><h2>{paper?.title || '添加资料，开始阅读'}</h2></div>{paper && <details><summary>文档版本</summary><select aria-label="文档版本" value={version} onChange={e => { setVersion(e.target.value); setPage(1); setCitation(null) }}>{paper.versions.map((v:Row) => <option key={v.id} value={v.id}>{new Date(v.created*1000).toLocaleDateString()}{v.id === paper.active_version ? '（当前）' : ''}</option>)}</select></details>}</div>
     {paper ? <PdfReader key={paper.id} paper={paper} version={version} page={page} setPage={setPage} api={api} summary={summary} setSummary={setSummary} onSaved={s => setPaper(p => p ? {...p,summary:s} : p)} pane={pane} onPane={setPane} onQuote={capture} citation={citation} companion={companion} companionHeader={paneHeader} notebookNotes={notebookNotes} /> : <div className="desk-empty"><FileText size={40} /><h2>把论文放进来</h2><p>{book?.description || '上传 PDF 或从资料库添加论文，就可以阅读和提问。'}</p><button onClick={() => void action(async () => { setAdding(true); setLibrary((await api('/papers?limit=100')).items) })}>添加资料</button></div>}
