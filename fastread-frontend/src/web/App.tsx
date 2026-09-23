@@ -9,11 +9,13 @@ import {
   FileText,
   LibraryBig,
   LoaderCircle,
+  Moon,
   PanelLeft,
   Plus,
   Search,
   Settings2,
   StickyNote,
+  Sun,
   X,
 } from 'lucide-react'
 import 'katex/dist/katex.min.css'
@@ -27,7 +29,9 @@ import Notes from './Notes'
 import ImportDialog from './ImportDialog'
 import { api, setCsrf, type Row } from './api'
 import { useWorkspaceRoute, type WorkspaceRoute } from './navigation'
+import { useTheme } from './useTheme'
 import './product.css'
+import './theme.css'
 
 const jobNames: Record<string, string> = {
   import_pdf: '导入 PDF',
@@ -48,6 +52,7 @@ const jobStates: Record<string, string> = {
 }
 
 export default function WebApp() {
+  const { theme, selectTheme } = useTheme()
   const [route, navigate] = useWorkspaceRoute()
   const [arrival] = useState(() => new URLSearchParams(window.location.search))
   const [user, setUser] = useState<Row | null>(null)
@@ -364,6 +369,14 @@ export default function WebApp() {
               )}
             </div>
             <div className="topbar-actions">
+              <button
+                className="icon-button quiet theme-toggle"
+                aria-label={theme === 'dark' ? '切换到白天模式' : '切换到夜间模式'}
+                title={theme === 'dark' ? '切换到白天模式' : '切换到夜间模式'}
+                onClick={() => selectTheme(theme === 'dark' ? 'light' : 'dark')}
+              >
+                {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
               <button className="quiet discover-button" onClick={() => go({ view: 'discover' })}>
                 <Search size={15} />
                 搜索公开论文
@@ -700,6 +713,29 @@ export default function WebApp() {
             description="模型用于论文报告、问答和整理。阅读已有原文不需要模型。"
             onClose={() => setSettings(false)}
           >
+            <fieldset className="theme-settings">
+              <legend>外观</legend>
+              <div className="segmented-control" role="group" aria-label="外观模式">
+                <button
+                  type="button"
+                  className={theme === 'light' ? 'active' : ''}
+                  aria-pressed={theme === 'light'}
+                  onClick={() => selectTheme('light')}
+                >
+                  <Sun size={16} />
+                  白天
+                </button>
+                <button
+                  type="button"
+                  className={theme === 'dark' ? 'active' : ''}
+                  aria-pressed={theme === 'dark'}
+                  onClick={() => selectTheme('dark')}
+                >
+                  <Moon size={16} />
+                  夜间
+                </button>
+              </div>
+            </fieldset>
             <label>
               当前模型
               <select

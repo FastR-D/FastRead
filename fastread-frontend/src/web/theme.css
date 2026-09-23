@@ -1,0 +1,396 @@
+/* Theme is on html so portal dialogs and native controls share the same palette. */
+.theme-settings {
+  min-width: 0;
+  border: 0;
+  margin: 0 0 24px;
+  padding: 0;
+}
+.theme-settings legend {
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+.theme-toggle {
+  flex-shrink: 0;
+}
+
+:root[data-theme='dark'] {
+  --ink: #e4e9e3;
+  --muted-ink: #a8b4a9;
+  --line: #39443c;
+  --paper: #202722;
+  --canvas: #171c19;
+  --nav: #1c221e;
+  --green: #a1ceb0;
+  --soft-green: #2d3e32;
+  --night-hover: #29332c;
+  --night-accent-ink: #132a1c;
+  --night-warning: #e1c18a;
+  --night-error: #f0b3a6;
+  color-scheme: dark;
+}
+:root[data-theme='dark'] body {
+  background: var(--canvas);
+  color: var(--ink);
+  scrollbar-color: #647869 var(--canvas);
+}
+:root[data-theme='dark'] :is(.product-app, .product-dialog) :focus-visible {
+  outline-color: var(--green);
+}
+:root[data-theme='dark'] :is(.product-app, .product-dialog) button,
+:root[data-theme='dark'] .product-start button {
+  color: var(--night-accent-ink);
+}
+:root[data-theme='dark'] :is(.product-app, .product-dialog) button:hover {
+  background: #b9dfc5;
+}
+:root[data-theme='dark'] :is(.product-app, .product-dialog) button.quiet {
+  color: var(--muted-ink);
+  background: transparent;
+}
+:root[data-theme='dark'] :is(.product-app, .product-dialog) button.quiet:hover {
+  background: var(--night-hover);
+  color: var(--ink);
+}
+:root[data-theme='dark'] :is(.product-app, .product-dialog) :is(input, textarea, select) {
+  background: var(--canvas);
+  color: var(--ink);
+  border-color: var(--line);
+}
+:root[data-theme='dark'] :is(.product-app, .product-dialog) label {
+  color: var(--muted-ink);
+}
+:root[data-theme='dark'] :is(input, textarea)::placeholder {
+  color: #95a196;
+  opacity: 1;
+}
+
+/* Workspace navigation, library, and saved notes. */
+:root[data-theme='dark'] .product-app .product-brand {
+  color: var(--ink);
+}
+:root[data-theme='dark'] .product-brand > span:first-child {
+  color: var(--night-accent-ink);
+}
+:root[data-theme='dark'] :is(.workspace-avatar, .account-avatar) {
+  background: var(--soft-green);
+  color: var(--green);
+  border-color: var(--line);
+}
+:root[data-theme='dark'] .product-app .nav-item {
+  color: var(--muted-ink);
+  background: transparent;
+}
+:root[data-theme='dark'] .product-app .nav-item:hover {
+  background: var(--night-hover);
+  color: var(--ink);
+}
+:root[data-theme='dark'] .product-app .nav-item.active {
+  background: var(--soft-green);
+  color: var(--green);
+}
+:root[data-theme='dark'] .product-topbar {
+  background: var(--canvas);
+}
+:root[data-theme='dark']
+  :is(
+    .workspace-label,
+    .nav-item > small,
+    .nav-section-title,
+    .collection-nav p,
+    .account-label small,
+    .breadcrumb,
+    .breadcrumb span,
+    .page-kicker,
+    .page-heading p,
+    .continue-reading small,
+    .continue-reading > span > span,
+    .continue-reading > svg,
+    .library-search,
+    .sort-label,
+    .filter-summary,
+    .paper-table-head,
+    .paper-identity p,
+    .paper-identity small,
+    .paper-tags > span,
+    .paper-availability,
+    .list-footer,
+    .list-caption,
+    .collection-card p,
+    .collection-card > div,
+    .collection-new,
+    .product-empty,
+    .product-empty p,
+    .product-dialog .dialog-heading + p,
+    .advanced-options,
+    .settings-note,
+    .activity-row p,
+    .discovery-search,
+    .result-index,
+    .result-meta,
+    .result-abstract,
+    .discovery-results small,
+    .source-status,
+    .search-progress,
+    .note-editor small,
+    .saved-notes-list > article > div:first-child,
+    .note-origin,
+    .saved-notes-list p,
+    .summary-note p,
+    .save-state,
+    .desk-reading-heading span,
+    .desk-reading-heading summary,
+    .desk-muted,
+    .annotation-selection-header > span,
+    .reading-summary small,
+    .note-saved-state,
+    .desk-empty,
+    .composer-footer,
+    .composer-footer span,
+    .organize-status,
+    .section-heading span,
+    .section-heading p,
+    .paper-details,
+    .source-versions,
+    .neighbor-card small,
+    .principle p,
+    .knowledge-paper details,
+    .card-top,
+    .paper-tools details,
+    .job-list summary
+  ) {
+  color: var(--muted-ink);
+}
+:root[data-theme='dark'] .product-app .paper-title {
+  color: var(--ink);
+  background: transparent;
+}
+:root[data-theme='dark'] .product-app .paper-title:hover {
+  color: var(--green);
+  background: transparent;
+}
+:root[data-theme='dark']
+  :is(.product-app, .product-dialog)
+  :is(
+    .continue-reading,
+    .continue-reading:hover,
+    .paper-row.is-selected,
+    .bulk-toolbar,
+    .collection-symbol,
+    .annotation-selection,
+    .desk-source.active,
+    .message.user,
+    .desk-message.user,
+    .evidence-note
+  ) {
+  background: var(--soft-green);
+  color: var(--ink);
+  border-color: var(--line);
+}
+:root[data-theme='dark'] .continue-cover {
+  background: var(--nav);
+  color: var(--green);
+  border-color: var(--line);
+}
+:root[data-theme='dark'] .paper-row {
+  border-color: var(--line);
+}
+:root[data-theme='dark'] .paper-row:hover {
+  background: var(--night-hover);
+}
+:root[data-theme='dark'] .product-app button.tag {
+  background: var(--soft-green);
+  border-color: var(--line);
+  color: var(--green);
+}
+:root[data-theme='dark'] .product-app button.tag.active {
+  background: var(--green);
+  color: var(--night-accent-ink);
+}
+:root[data-theme='dark']
+  :is(.product-app, .product-dialog)
+  :is(
+    .library-search,
+    .collection-card,
+    .collection-card:hover,
+    .discovery-search,
+    .note-editor,
+    .reading-notes,
+    .desk-pane-tabs,
+    .annotation-list article,
+    .report article,
+    .matrix-scroll,
+    .neighbor-card,
+    .knowledge-paper,
+    .knowledge-chat,
+    .message,
+    .paper-tools,
+    .desk-modal,
+    .page-text
+  ) {
+  background: var(--paper);
+  color: var(--ink);
+  border-color: var(--line);
+}
+:root[data-theme='dark'] .product-app .collection-card:hover {
+  border-color: var(--green);
+}
+:root[data-theme='dark'] .collection-symbol.color-1 {
+  background: #3a3225;
+  color: #ddc39b;
+}
+:root[data-theme='dark'] .collection-symbol.color-2 {
+  background: #293b40;
+  color: #a2c7d0;
+}
+:root[data-theme='dark'] .library-skeleton span {
+  background: var(--line);
+}
+
+/* Dialogs are portaled outside product-app. */
+:root[data-theme='dark'] .product-dialog {
+  background: var(--paper);
+  border-color: var(--line);
+  box-shadow: 0 24px 80px #0006;
+}
+:root[data-theme='dark'] :is(.product-overlay, .desk-modal-backdrop) {
+  background: #050a07b3;
+}
+:root[data-theme='dark'] .product-app .navigation-scrim {
+  background: #050a0799;
+}
+:root[data-theme='dark'] .product-dialog .segmented-control {
+  background: var(--canvas);
+}
+:root[data-theme='dark'] .product-dialog .segmented-control button {
+  color: var(--muted-ink);
+  background: transparent;
+}
+:root[data-theme='dark'] .product-dialog .segmented-control button.active {
+  color: var(--green);
+  background: var(--soft-green);
+}
+:root[data-theme='dark'] .product-dialog .upload-zone {
+  background: var(--canvas);
+  color: var(--muted-ink);
+  border-color: #647869;
+}
+:root[data-theme='dark'] :is(.product-toast, .desk-toast) {
+  background: var(--soft-green);
+  border-color: var(--line);
+  color: var(--green);
+}
+:root[data-theme='dark'] :is(.product-error, .inline-error, .error) {
+  color: var(--night-error);
+  background: #382722;
+  border-color: #67463b;
+}
+:root[data-theme='dark'] :is(.job-error, .state.failed, .state.needs_attention) {
+  color: var(--night-error);
+}
+:root[data-theme='dark']
+  :is(.inline-warning, .paper-availability.pending, .job-icon, .answer-failure) {
+  color: var(--night-warning);
+}
+:root[data-theme='dark'] :is(.job-icon.succeeded, .state.succeeded, .answer-progress) {
+  color: var(--green);
+}
+:root[data-theme='dark'] .skip-link {
+  background: var(--paper);
+  color: var(--green);
+}
+
+/* Reader chrome changes theme; the source PDF and its evidence colors stay intact. */
+:root[data-theme='dark'] .product-app .notebook-desk {
+  background: var(--canvas);
+}
+:root[data-theme='dark'] .product-app .desk-sources {
+  background: var(--nav);
+}
+:root[data-theme='dark'] .product-app .desk-source button {
+  color: var(--ink);
+  background: transparent;
+}
+:root[data-theme='dark'] .product-app :is(.pdf-column, .pdf-scroll) {
+  background: #121613;
+  border-color: var(--line);
+  scrollbar-color: #647869 #121613;
+}
+:root[data-theme='dark'] .product-app .pdf-scroll::-webkit-scrollbar-thumb {
+  background: #647869;
+  border-color: #121613;
+}
+:root[data-theme='dark'] .product-app .pdf-scroll::-webkit-scrollbar-track {
+  background: #121613;
+}
+:root[data-theme='dark'] .product-app :is(.pdf-toolbar, .desk-composer, .selection-actions) {
+  background: var(--nav);
+  border-color: var(--line);
+}
+:root[data-theme='dark'] .pdf-sheet {
+  color-scheme: light;
+  background: white;
+  color: #262b29;
+}
+:root[data-theme='dark'] .pdf-loading {
+  color: var(--ink);
+}
+:root[data-theme='dark'] .reader-divider::after {
+  background: #647869;
+}
+:root[data-theme='dark'] .reader-divider:is(:hover, :focus-visible) {
+  background: var(--soft-green);
+}
+:root[data-theme='dark'] .product-app .desk-pane-tabs button {
+  color: var(--muted-ink);
+  background: transparent;
+}
+:root[data-theme='dark'] .product-app .desk-pane-tabs button.active {
+  color: var(--green);
+  border-bottom-color: var(--green);
+}
+:root[data-theme='dark'] .product-app :is(.citation-chip, .inline-citation) {
+  background: var(--soft-green);
+  color: var(--green);
+  border-color: var(--line);
+}
+:root[data-theme='dark']
+  .product-app
+  :is(.chat-welcome, .chat-welcome > svg, .desk-message b, .message b) {
+  color: var(--green);
+}
+:root[data-theme='dark']
+  .product-app
+  :is(blockquote, .reading-notes .annotation-selection blockquote) {
+  background: var(--nav);
+  color: var(--muted-ink);
+  border-color: #647869;
+}
+:root[data-theme='dark'] .product-app .annotation-selection-header button {
+  background: var(--paper);
+  color: var(--green);
+  border-color: var(--line);
+}
+:root[data-theme='dark'] .product-app .citation-fallback {
+  background: #382f20;
+  color: var(--night-warning);
+}
+:root[data-theme='dark'] .relation-matrix thead {
+  background: var(--nav);
+}
+:root[data-theme='dark'] .relation-matrix td span {
+  color: var(--green);
+}
+:root[data-theme='dark']
+  .product-app
+  :is(
+    .desk-saved-notes,
+    .saved-note,
+    .desk-message,
+    .desk-message td,
+    .desk-message th,
+    .relation-matrix td,
+    .relation-matrix th,
+    hr
+  ) {
+  border-color: var(--line);
+}
