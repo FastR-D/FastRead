@@ -207,8 +207,12 @@ def test_worker_atomic_index_and_relogin_summary(setup):
 
 def test_failed_login_limit_and_daily_budget(setup):
     store, a, _, ca, _ = setup
+    anonymous = TestClient(ca.app)
+    csrf = anonymous.get("/api/auth/session-init").json()["csrf"]
+    anonymous.headers["X-CSRF-Token"] = csrf
     for _ in range(8):
-        assert ca.post("/api/auth/login", json={"email": "a@example.org", "password": "wrong"}).status_code == 403
+        assert anonymous.post("/api/auth/login", json={"email": "a@example.org", "password": "wrong"}).status_code == 401
+    assert anonymous.post("/api/auth/login", json={"email": "a@example.org", "password": "wrong"}).status_code == 429
     with store.connect(write=True) as db:
         db.execute("UPDATE workspaces SET daily_limit=1 WHERE id=?", (a["workspace_id"],))
     store.enqueue(a["workspace_id"], a["user_id"], "report", {}, "first", billable=True)

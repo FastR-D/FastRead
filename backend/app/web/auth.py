@@ -97,8 +97,8 @@ def login(store: Store, email, password, peer):
             token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
             db.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
             db.execute(
-                "INSERT INTO sessions VALUES(?,?,?,?,?)",
-                (token_hash(token), user["id"], member["workspace_id"], csrf, time.time() + 7 * 86400),
+                "INSERT INTO sessions(token,user_id,workspace_id,csrf,expires,auth_source,authenticated_at) VALUES(?,?,?,?,?,?,?)",
+                (token_hash(token), user["id"], member["workspace_id"], csrf, time.time() + 7 * 86400, "local", time.time()),
             )
             return token, csrf
     raise HTTPException(401, "邮箱或密码错误")
@@ -148,8 +148,8 @@ def _issue_session(db, user_id: str, workspace_id: str):
     token, csrf = secrets.token_urlsafe(32), secrets.token_urlsafe(24)
     db.execute("DELETE FROM sessions WHERE expires<?", (time.time(),))
     db.execute(
-        "INSERT INTO sessions VALUES(?,?,?,?,?)",
-        (token_hash(token), user_id, workspace_id, csrf, time.time() + 7 * 86400),
+        "INSERT INTO sessions(token,user_id,workspace_id,csrf,expires,auth_source,authenticated_at) VALUES(?,?,?,?,?,?,?)",
+        (token_hash(token), user_id, workspace_id, csrf, time.time() + 7 * 86400, "research", time.time()),
     )
     return token, csrf
 
@@ -167,7 +167,7 @@ def login_from_research(store: Store, ticket: str):
             user_id = user["id"]
             db.execute(
                 "UPDATE users SET display_name=?, email=?, research_key_id=? WHERE id=?",
-                (person, email, key_id, user_id),
+                (person, user["email"] if user["password"].startswith("scrypt$") else email, key_id, user_id),
             )
         else:
             user_id = uid()
@@ -186,7 +186,7 @@ def login_from_research(store: Store, ticket: str):
             workspace_id = uid()
             db.execute("INSERT INTO workspaces(id,name) VALUES(?,?)", (workspace_id, person))
             db.execute("INSERT INTO memberships VALUES(?,?,'owner')", (user_id, workspace_id))
-        db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM sessions WHERE user_id=? AND auth_source IN ('research','legacy')", (user_id,))
         return _issue_session(db, user_id, workspace_id)
 
 
@@ -214,6 +214,8 @@ def require_user(request: Request) -> Principal:
     )
     if not row:
         raise HTTPException(401, "请先登录")
+    if row["auth_source"] == "fastcas":
+        request.app.state.fastcas.validate_session(row)
     if request.method not in {"GET", "HEAD", "OPTIONS"}:
         csrf = request.headers.get("x-csrf-token", "")
         if not hmac.compare_digest(csrf, row["csrf"]):

@@ -13,16 +13,11 @@ from pydantic import BaseModel, Field, field_validator
 from .pdf_delivery import ReaderGZipMiddleware
 from starlette.staticfiles import StaticFiles
 
-from .auth import Principal, login_from_research, panel_url, public_workspace_id, require_owner, require_user, secure_cookie, session_exists, token_hash
+from .auth import Principal, login_from_research, panel_url, public_workspace_id, require_owner, require_user, secure_cookie, token_hash
 from .evidence import EvidenceRepository
 from .store import Store, encode, uid
 
 User = Annotated[Principal, Depends(require_user)]
-
-
-class LoginInput(BaseModel):
-    email: str = Field(max_length=254)
-    password: str = Field(max_length=256)
 
 
 class ResearchLoginInput(BaseModel):
@@ -173,10 +168,6 @@ def create_web_app(root=None, frontend=None):
                 response.headers["Cache-Control"] = "no-store"
                 _set_session_cookie(response, token)
                 return response
-            if not session_exists(store, request.cookies.get("fastread_session", "")):
-                response = RedirectResponse(panel_url(), status_code=302)
-                response.headers["Cache-Control"] = "no-store"
-                return response
         return await call_next(request)
 
     @app.middleware("http")
@@ -208,13 +199,14 @@ def create_web_app(root=None, frontend=None):
         store.one("SELECT version FROM schema_versions LIMIT 1")
         return {"status": "healthy", "schema": 1}
 
-    @app.post("/api/auth/login")
-    def sign_in(data: LoginInput, request: Request, response: Response):
-        raise HTTPException(403, "请从 FastResearch 进入")
+    from .local_routes import register_local_routes
+    register_local_routes(app, store, _set_session_cookie)
+    from .fastcas_routes import register_fastcas_routes
+    register_fastcas_routes(app, store, _set_session_cookie)
 
     @app.get("/api/auth/login-info")
     def login_info():
-        return {"mode": "fastresearch-key", "panel_url": panel_url()}
+        return {"mode": "local", "local": True, "registration": "invite", "panel_url": panel_url()}
 
     @app.post("/api/auth/research")
     def research_login(data: ResearchLoginInput, response: Response):

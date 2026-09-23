@@ -1,0 +1,4 @@
+# Optional development install, from the FastRead repository root:
+# python -m pip install -r requirements-fastcas.txt
+# Normal local/Research login does not import this SDK.
+-e ../FastCAS/sdk/python

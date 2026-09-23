@@ -13,7 +13,7 @@ def test_sso_rotates_session_and_preserves_workspace(setup):
     assert other.post('/api/knowledge-bases', json={'name': 'Test'}).status_code == 403
 
 
-def test_sso_rejects_expired_ticket_and_html_redirects(setup, monkeypatch):
+def test_sso_rejects_expired_ticket_without_forcing_external_login(setup, monkeypatch):
     _, _, _, ca, _ = setup
     def reject(*args, **kwargs):
         raise HTTPException(401, 'Expired ticket')
@@ -23,8 +23,10 @@ def test_sso_rejects_expired_ticket_and_html_redirects(setup, monkeypatch):
     assert anonymous.get('/api/auth/me').status_code == 401
     info = anonymous.get('/api/auth/login-info').json()
     response = anonymous.get('/', headers={'Accept': 'text/html'}, follow_redirects=False)
-    assert response.status_code in (302, 307)
-    assert response.headers['location'].startswith(info['panel_url'])
+    assert info['local'] is True
+    # An unbuilt frontend returns 404; a built frontend serves its login shell.
+    assert response.status_code in (200, 404)
+    assert 'location' not in response.headers
 
 
 def test_fastnews_intake_pdf_attachment_and_workspace_isolation(setup):

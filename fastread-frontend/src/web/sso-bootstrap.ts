@@ -96,8 +96,10 @@ export async function start(loadApp: () => Promise<void>) {
   } else {
     const me = await fetch("/api/auth/me", { credentials: "same-origin", cache: "no-store" });
     if (me.status === 401) {
-      if (panel) location.replace(panel);
-      else showTicketError("/");
+      // Local password and optional FastCAS login live on FastRead itself.
+      // Keep the legacy Research ticket path above, but let unauthenticated
+      // visitors reach the project's own login and invitation screens.
+      await loadApp();
       return;
     }
     if (!me.ok) {

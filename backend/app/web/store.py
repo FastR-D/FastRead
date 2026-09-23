@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS memberships(user_id TEXT REFERENCES users(id), worksp
 CREATE TABLE IF NOT EXISTS sessions(token TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id),
  workspace_id TEXT REFERENCES workspaces(id), csrf TEXT NOT NULL, expires REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS login_attempts(key TEXT PRIMARY KEY, failures INTEGER NOT NULL, until REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS account_credentials(token_hash TEXT PRIMARY KEY,kind TEXT NOT NULL CHECK(kind IN ('invite','recovery')),email TEXT NOT NULL,user_id TEXT REFERENCES users(id),expires REAL NOT NULL,consumed REAL);
+CREATE TABLE IF NOT EXISTS account_audit(id TEXT PRIMARY KEY,user_id TEXT,action TEXT NOT NULL,created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS providers(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
  name TEXT NOT NULL, base_url TEXT NOT NULL, secret TEXT NOT NULL, models TEXT NOT NULL, created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS papers(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
@@ -82,17 +84,33 @@ class Store:
         self.path = self.root / "fastread-web.sqlite3"
 
     def initialize(self):
+        from .fastcas_store import SCHEMA as FASTCAS_SCHEMA
         from .knowledge import SCHEMA as KNOWLEDGE_SCHEMA
         from .reading import SCHEMA as READING_SCHEMA
         from .notebook_notes import SCHEMA as NOTES_SCHEMA
-        self.root.mkdir(parents=True, exist_ok=True)
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         (self.root / "files").mkdir(exist_ok=True)
+        # Account/session hashes and short-lived PKCE verifiers share this DB.
+        descriptor = os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600)
+        os.close(descriptor)
+        for private_path in (self.path, Path(str(self.path)+"-wal"), Path(str(self.path)+"-shm")):
+            if private_path.exists():
+                private_path.chmod(0o600)
         with self.connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
-            db.executescript(SCHEMA + KNOWLEDGE_SCHEMA + READING_SCHEMA + NOTES_SCHEMA)
+            db.executescript(SCHEMA + KNOWLEDGE_SCHEMA + READING_SCHEMA + NOTES_SCHEMA + FASTCAS_SCHEMA)
             columns = {row[1] for row in db.execute("PRAGMA table_info(papers)")}
             if "archived" not in columns:
                 db.execute("ALTER TABLE papers ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            session_columns = {row[1] for row in db.execute("PRAGMA table_info(sessions)")}
+            for name, definition in {
+                "auth_source": "TEXT NOT NULL DEFAULT 'legacy'",
+                "authenticated_at": "REAL",
+                "cas_issuer": "TEXT", "cas_sid": "TEXT",
+                "cas_link_id": "TEXT", "cas_link_version": "INTEGER", "cas_checked": "REAL",
+            }.items():
+                if name not in session_columns:
+                    db.execute(f"ALTER TABLE sessions ADD COLUMN {name} {definition}")
             user_columns = {row[1] for row in db.execute("PRAGMA table_info(users)")}
             if "research_key_id" not in user_columns:
                 db.execute("ALTER TABLE users ADD COLUMN research_key_id TEXT")

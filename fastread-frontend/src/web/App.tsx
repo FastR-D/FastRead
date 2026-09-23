@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import LocalLogin from './LocalLogin'
+import FastCASAccount from './FastCASAccount'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -31,7 +33,7 @@ export default function WebApp() {
   const [user, setUser] = useState<Row | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState(arrival.get('fastcas') === 'complete' ? 'FastCAS 操作已完成' : arrival.get('fastcas') === 'failed' ? 'FastCAS 操作未完成；可在账号设置检查状态或重试。' : '')
   const [papers, setPapers] = useState<Row[]>([])
   const [total, setTotal] = useState(0)
   const [offset, setOffset] = useState(0)
@@ -54,6 +56,7 @@ export default function WebApp() {
   const [searchResults, setSearchResults] = useState<Row | null>(null)
   const [searching, setSearching] = useState(false)
   const [settings, setSettings] = useState(false)
+  const [accountSettings, setAccountSettings] = useState(false)
   const [topic, setTopic] = useState<Row | null>(null)
   const [books, setBooks] = useState<Row[]>([])
   const [importBook, setImportBook] = useState('')
@@ -145,11 +148,12 @@ export default function WebApp() {
     return job
   }
   if (loading) return <div className="web-center">正在连接资料库…</div>
-  if (!user) return <main className="web-login"><div className="wordmark">FastRead</div><h1>正在连接共享资料库</h1><p>暂时无法连接服务，请稍后重试。</p><button onClick={() => window.location.reload()}>重新连接</button></main>
+  if (!user) return <LocalLogin />
 
-  return (<OrganizeProvider jobs={jobs} submit={submitJob} api={api}><div className={`web-shell ${(sidebarOpen ? "sidebar-open" : "sidebar-closed") + (deskTarget ? " desk-mode" : "")}`}><header><button className="sidebar-toggle quiet" aria-label={sidebarOpen ? "收起左边栏" : "展开左边栏"} title={sidebarOpen ? "收起左边栏" : "展开左边栏"} aria-expanded={sidebarOpen} aria-controls={deskTarget ? "desk-sources" : "library-sidebar"} onClick={() => setSidebarOpen(!sidebarOpen)}><PanelLeft size={22} strokeWidth={1.7} /></button><button className="wordmark quiet" onClick={() => { setSelected(null); setTopic(null); setSearchResults(null); setTagFilter(''); setDeskTarget(null); window.history.replaceState(null, '', '/') }}>FastRead <span>KNOWLEDGE</span></button><span className="workspace-name">{user.workspace.name}</span><div className="header-actions"><button className="quiet" onClick={() => setSettings(!settings)}>模型设置</button><span>{user.public ? "共享资料库" : user.email}</span>{!user.public && <button className="quiet" onClick={() => void action(async () => { await api('/auth/logout', 'POST'); csrf = ''; setUser(null); setSelected(null); setMessages([]); setPapers([]); setJobs([]) })}>退出登录</button>}</div></header>
+  return (<OrganizeProvider jobs={jobs} submit={submitJob} api={api}><div className={`web-shell ${(sidebarOpen ? "sidebar-open" : "sidebar-closed") + (deskTarget ? " desk-mode" : "")}`}><header><button className="sidebar-toggle quiet" aria-label={sidebarOpen ? "收起左边栏" : "展开左边栏"} title={sidebarOpen ? "收起左边栏" : "展开左边栏"} aria-expanded={sidebarOpen} aria-controls={deskTarget ? "desk-sources" : "library-sidebar"} onClick={() => setSidebarOpen(!sidebarOpen)}><PanelLeft size={22} strokeWidth={1.7} /></button><button className="wordmark quiet" onClick={() => { setSelected(null); setTopic(null); setSearchResults(null); setTagFilter(''); setDeskTarget(null); window.history.replaceState(null, '', '/') }}>FastRead <span>KNOWLEDGE</span></button><span className="workspace-name">{user.workspace.name}</span><div className="header-actions"><button className="quiet" onClick={() => setSettings(!settings)}>模型设置</button><button className="quiet" onClick={() => setAccountSettings(!accountSettings)}>{user.public ? "账号设置" : user.email}</button>{!user.public && <button className="quiet" onClick={() => void action(async () => { await api('/auth/logout', 'POST'); csrf = ''; setUser(null); setSelected(null); setMessages([]); setPapers([]); setJobs([]) })}>退出登录</button>}</div></header>
     {error && <div className="error banner" role="alert">{error}<button className="quiet" onClick={() => setError('')}>关闭</button></div>}
     {notice && <div role="status" className="notice banner">{notice}</div>}
+    {accountSettings && <FastCASAccount api={api} />}
     {settings && <section className="settings"><h2>工作区模型</h2><label>当前使用的模型<select aria-label="当前使用的模型" value={`${providerId}|${model}`} onChange={e => { const [p,m] = e.target.value.split('|'); setProviderId(p); setModel(m) }}>{providers.flatMap(p => p.models.map((m: string) => <option key={`${p.id}|${m}`} value={`${p.id}|${m}`}>{m} · {p.name}</option>))}</select></label><p>供应商密钥仅保存在服务器，其他设备登录后可继续使用。当前 24 小时任务上限：{user.workspace.daily_limit}。</p>{providers.map(p => <p key={p.id}>{p.name} · {p.models.join(' / ')}</p>)}
       {user.role === 'owner' && <form onSubmit={e => { e.preventDefault(); const f = e.currentTarget; const data = Object.fromEntries(new FormData(f)); void action(async () => { await api('/providers', 'POST', { ...data, models: String(data.models).split(',').map(v => v.trim()) }); f.reset(); await loadProviders(); setNotice('供应商已保存') }) }}>
         <label>名称<input name="name" required /></label><label>API 地址<input name="base_url" type="url" placeholder="https://api.example.com/v1" required /></label><label>API 密钥<input name="api_key" type="password" autoComplete="off" required /></label><label>模型 ID（逗号分隔）<input name="models" defaultValue="qwen3.8-27b,glm-5.2" required /></label><button>保存供应商</button>
