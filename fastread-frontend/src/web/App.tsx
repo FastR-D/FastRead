@@ -19,10 +19,85 @@ async function api(path: string, method = 'GET', body?: unknown, key?: string) {
 }
 const labels: Record<string, string> = { queued: '排队中', running: '处理中', succeeded: '已完成', failed: '失败', needs_attention: '执行结果待确认', cancelled: '已取消', import_url: '导入论文', import_pdf: '解析 PDF', report: '阅读报告', chat: '回答问题', index: '重建索引', neighbors: '近邻论文' }
 
+function stripSsoParam() {
+  const url = new URL(window.location.href)
+  if (!url.searchParams.has('sso')) return
+  url.searchParams.delete('sso')
+  const search = url.searchParams.toString()
+  window.history.replaceState({}, '', `${url.pathname}${search ? `?${search}` : ''}${url.hash}`)
+}
+
+let researchTicketPromise: Promise<void> | null = null
+let consumedResearchTicket = ''
+
+function consumeResearchTicket(ticket: string) {
+  if (consumedResearchTicket === ticket) return Promise.resolve()
+  if (!researchTicketPromise) {
+    researchTicketPromise = api('/auth/research', 'POST', { ticket })
+      .then(() => {
+        consumedResearchTicket = ticket
+      })
+      .finally(() => {
+        researchTicketPromise = null
+      })
+  }
+  return researchTicketPromise
+}
+
+const FASTNEWS_HANDOFF_KEY = 'fastnews-handoff'
+let consumedFastNewsHandoff = false
+let fastNewsHandoffPaper: Row | null = null
+
+function publicHttpUrl(value: unknown): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  try {
+    const parsed = new URL(raw)
+    if ((parsed.protocol !== 'http:' && parsed.protocol !== 'https:') || parsed.username || parsed.password) return ''
+    return raw
+  } catch {
+    return ''
+  }
+}
+
+function parseFastNewsHandoff(raw: string): Row | null {
+  try {
+    const paper = JSON.parse(raw)
+    if (!paper || typeof paper !== 'object' || Array.isArray(paper)) return null
+    const title = String(paper.title || '').trim()
+    if (!title) return null
+    return paper as Row
+  } catch {
+    return null
+  }
+}
+
+function stashFastNewsHandoff() {
+  const hash = window.location.hash || ''
+  if (!hash.startsWith('#fastnews=')) return
+  const encoded = hash.slice('#fastnews='.length)
+  if (!encoded) return
+  let decoded = ''
+  try {
+    decoded = decodeURIComponent(encoded)
+  } catch {
+    return
+  }
+  const paper = parseFastNewsHandoff(decoded)
+  if (!paper) return
+  sessionStorage.setItem(FASTNEWS_HANDOFF_KEY, JSON.stringify(paper))
+  const url = new URL(window.location.href)
+  url.hash = ''
+  window.history.replaceState({}, '', url.pathname + url.search)
+}
+
+stashFastNewsHandoff()
+
 export default function WebApp() {
   const [user, setUser] = useState<Row | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [panelUrl, setPanelUrl] = useState('')
   const [notice, setNotice] = useState('')
   const [papers, setPapers] = useState<Row[]>([])
   const [total, setTotal] = useState(0)
@@ -83,7 +158,45 @@ export default function WebApp() {
     setMessages((await api(`/conversations/${conv.id}/messages`)).items)
     await loadReports(id)
   }
-  useEffect(() => { api('/auth/me').then(data => { csrf = data.csrf; setUser(data) }).catch(() => {}).finally(() => setLoading(false)) }, [])
+  useEffect(() => {
+    let cancelled = false
+    async function boot() {
+      const ticket = new URLSearchParams(window.location.search).get('sso')
+      try {
+        if (ticket) {
+          try {
+            await consumeResearchTicket(ticket)
+          } catch {
+            // Vite/FastAPI may already have exchanged the one-time ticket.
+          }
+          stripSsoParam()
+        }
+        const data = await api('/auth/me')
+        if (cancelled) return
+        csrf = data.csrf
+        setUser(data)
+      } catch (e) {
+        if (ticket) stripSsoParam()
+        if (!cancelled && ticket) setError((e as Error).message || 'Panel 登录已过期，请从 FastResearch 重新进入')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    void boot()
+    return () => { cancelled = true }
+  }, [])
+  useEffect(() => {
+    if (loading || user || error) return
+    let cancelled = false
+    void api('/auth/login-info').then(info => {
+      if (!cancelled) setPanelUrl(info.panel_url || 'http://127.0.0.1:5173')
+    }).catch(() => { if (!cancelled) setPanelUrl('http://127.0.0.1:5173') })
+    return () => { cancelled = true }
+  }, [loading, user, error])
+  useEffect(() => {
+    if (loading || user || error || !panelUrl) return
+    window.location.replace(panelUrl)
+  }, [loading, user, error, panelUrl])
   useEffect(() => { if (user) void action(async () => { await loadLibrary(); await loadProviders() }) }, [user, offset, archived])
   useEffect(() => {
     if (!selected) return
@@ -123,13 +236,64 @@ export default function WebApp() {
     setJobs(current => [job, ...current.filter(j => j.id !== job.id)])
     setNotice('任务已交给服务器，关闭网页后仍会继续。')
   }
+  function fastNewsNotice(paper: Row, imported: boolean) {
+    const title = String(paper.title || '').trim()
+    const authors = String(paper.authors || paper.author || '').trim()
+    const abstract = String(paper.abstract || paper.summary || '').trim()
+    const lines = ['已从 FastNews 收到《' + title + '》']
+    if (authors) lines.push('作者：' + authors)
+    if (abstract) lines.push('摘要：' + abstract)
+    lines.push(imported ? '正在导入公开链接。' : '没有可导入的公开链接，请在「导入论文」中粘贴 PDF 地址。')
+    return lines.join('\n')
+  }
+
+  async function consumeFastNewsHandoff() {
+    if (!fastNewsHandoffPaper) {
+      const raw = sessionStorage.getItem(FASTNEWS_HANDOFF_KEY)
+      if (raw) {
+        sessionStorage.removeItem(FASTNEWS_HANDOFF_KEY)
+        fastNewsHandoffPaper = parseFastNewsHandoff(raw)
+      }
+    }
+    const paper = fastNewsHandoffPaper
+    if (!paper) return
+    const url = publicHttpUrl(paper.url || paper.link)
+    if (!consumedFastNewsHandoff) {
+      consumedFastNewsHandoff = true
+      if (url) {
+        await action(async () => {
+          const rawAuthors = Array.isArray(paper.authors)
+            ? paper.authors
+            : String(paper.authors || paper.author || '').split(/\s*(?:,|;|、|\||\n)\s*/).filter(Boolean)
+          const year = Number(paper.year)
+          await submitJob('/imports/url', {
+            url,
+            title: String(paper.title || '').trim(),
+            authors: rawAuthors,
+            venue: String(paper.venue || '').trim(),
+            doi: String(paper.doi || '').trim(),
+            ...(Number.isInteger(year) ? { year } : {}),
+          })
+          return true
+        })
+      }
+    }
+    setNotice(fastNewsNotice(paper, Boolean(url)))
+  }
+
+  useEffect(() => {
+    if (!user) return
+    void consumeFastNewsHandoff()
+  }, [user])
+
   const sourcePageCount = selected?.versions.find((v: Row) => v.id === sourceVersion)?.page_count || selected?.metadata.page_count || 1
   if (loading) return <div className="web-center">正在连接资料库…</div>
-  if (!user) return <main className="web-login"><div className="wordmark">FastRead <span>WEB</span></div><h1>让阅读留下可追溯的理解</h1><p>登录你的资料库，继续论文、报告与对话。</p><form onSubmit={e => { e.preventDefault(); const form = new FormData(e.currentTarget); void action(async () => { await api('/auth/login', 'POST', Object.fromEntries(form)); const me = await api('/auth/me'); csrf = me.csrf; setUser(me) }) }}>
-    <label>邮箱<input name="email" type="email" autoComplete="username" required /></label><label>密码<input name="password" type="password" autoComplete="current-password" required /></label><button>登录</button>
-  </form>{error && <p role="alert" className="error">{error}</p>}<small>账户由服务管理员开通。</small></main>
+  if (!user) {
+    if (error) return <main className="web-login"><div className="wordmark">FastRead <span>WEB</span></div><h1>让阅读留下可追溯的理解</h1><p>Panel 登录未能进入 FastRead。请从 FastResearch 重新进入，不要在此输入 Key。</p>{panelUrl && <p><a href={panelUrl}>打开 FastResearch</a></p>}<p role="alert" className="error">{error}</p><small>账户由 FastResearch 个人 Key 自动开通。</small></main>
+    return <div className="web-center">正在转到 FastResearch…</div>
+  }
 
-  return (<div className="web-shell"><header><div className="wordmark">FastRead <span>WEB</span></div><span className="workspace-name">{user.workspace.name}</span><div className="header-actions"><button className="quiet" onClick={() => setSettings(!settings)}>模型设置</button><span>{user.email}</span><button className="quiet" onClick={() => void action(async () => { await api('/auth/logout', 'POST'); csrf = ''; setUser(null); setSelected(null); setMessages([]); setPapers([]); setJobs([]) })}>退出登录</button></div></header>
+  return (<div className="web-shell"><header><div className="wordmark">FastRead <span>WEB</span></div><span className="workspace-name">{user.workspace.name}</span><div className="header-actions"><button className="quiet" onClick={() => setSettings(!settings)}>模型设置</button><span>{user.display_name || user.workspace?.name}</span><button className="quiet" onClick={() => void action(async () => { await api('/auth/logout', 'POST'); csrf = ''; setUser(null); setSelected(null); setMessages([]); setPapers([]); setJobs([]) })}>退出登录</button></div></header>
     {error && <div className="error banner" role="alert">{error}<button className="quiet" onClick={() => setError('')}>关闭</button></div>}
     {notice && <div role="status" className="notice banner">{notice}</div>}
     {settings && <section className="settings"><h2>工作区模型</h2><p>供应商密钥仅保存在服务器，其他设备登录后可继续使用。当前 24 小时任务上限：{user.workspace.daily_limit}。</p>{providers.map(p => <p key={p.id}>{p.name} · {p.models.join(' / ')}</p>)}

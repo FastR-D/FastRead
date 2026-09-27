@@ -59,7 +59,12 @@ def execute(store, job, owner):
             imported = service.ingest_pdf(content=path.read_bytes(), filename=payload["filename"])
             file_path = payload["path"]
         else:
-            imported = service.ingest_url(url=payload["url"])
+            overrides = {
+                key: payload[key]
+                for key in ("title", "authors", "venue", "doi", "year")
+                if payload.get(key) not in (None, "", [])
+            }
+            imported = service.ingest_url(url=payload["url"], overrides=overrides)
         document = imported["result"]["paper_document"]
         with store.connect(write=True) as db:
             store.assert_lease(db, job, owner)

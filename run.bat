@@ -61,8 +61,8 @@ for /f "tokens=1 delims= " %%A in ("!FRONTEND_PORT!") do set "FRONTEND_PORT=%%A"
 set "BACKEND_PY=%CD%\backend\.venv\Scripts\python.exe"
 set "FRONTEND_DIR=%CD%\fastread-frontend"
 set "APP_URL=http://127.0.0.1:%FRONTEND_PORT%/"
-set "CHECK_URL=http://127.0.0.1:%BACKEND_PORT%/api/sys_check"
-set "HEALTH_URL=http://127.0.0.1:%BACKEND_PORT%/api/sys_health"
+set "CHECK_URL=http://127.0.0.1:%BACKEND_PORT%/api/health"
+set "HEALTH_URL=http://127.0.0.1:%BACKEND_PORT%/api/health"
 set "FRONTEND_API_BASE=/api"
 set "PNPM_CMD=corepack pnpm"
 
@@ -184,7 +184,7 @@ echo [status] Backend health
 powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r=Invoke-WebRequest -Uri '%HEALTH_URL%' -UseBasicParsing -TimeoutSec 3; Write-Output $r.Content; exit 0 } catch { Write-Output '[error] backend health check failed'; exit 1 }"
 echo.
 echo [status] Frontend
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r=Invoke-WebRequest -Uri '%APP_URL%' -UseBasicParsing -TimeoutSec 3; Write-Output ('[ok] frontend returned HTTP ' + $r.StatusCode); exit 0 } catch { Write-Output '[error] frontend check failed'; exit 1 }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r=Invoke-WebRequest -Uri '%APP_URL%' -UseBasicParsing -TimeoutSec 3 -MaximumRedirection 0; Write-Output ('[ok] frontend returned HTTP ' + $r.StatusCode); exit 0 } catch { $resp = $_.Exception.Response; if ($resp -and [int]$resp.StatusCode -eq 302) { Write-Output '[ok] frontend returned HTTP 302'; exit 0 }; Write-Output '[error] frontend check failed'; exit 1 }"
 exit /b 0
 
 :STOP
@@ -216,7 +216,7 @@ if errorlevel 1 (
 )
 
 echo [start] Backend window...
-start "FastRead Backend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:PYTHONUTF8='1'; Set-Location '%CD%\backend'; .\.venv\Scripts\python.exe main.py"
+start "FastRead Backend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:PYTHONUTF8='1'; $env:BACKEND_HOST='127.0.0.1'; $env:NO_PROXY='127.0.0.1,localhost,::1'; $env:FASTREAD_COOKIE_SECURE='false'; $env:FASTRESEARCH_API_URL='http://127.0.0.1:8787'; $env:FASTRESEARCH_PANEL_URL='http://127.0.0.1:5173'; $env:FASTREAD_PUBLIC_ORIGIN='http://127.0.0.1:%FRONTEND_PORT%'; $env:FASTREAD_FRONTEND_PORT='%FRONTEND_PORT%'; Set-Location '%CD%\backend'; .\.venv\Scripts\python.exe main.py"
 
 echo [wait] Backend health check...
 for /l %%I in (1,1,60) do (
@@ -231,11 +231,11 @@ goto FAIL
 :BACKEND_READY
 echo [ok] Backend is ready.
 echo [start] Frontend window...
-start "FastRead Frontend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:VITE_API_BASE_URL='%FRONTEND_API_BASE%'; $env:VITE_SCREENSHOT_BASE_URL='/static/screenshots'; $env:VITE_FRONTEND_PORT='%FRONTEND_PORT%'; $env:BACKEND_PORT='%BACKEND_PORT%'; $env:VITE_ENV_DIR='%FRONTEND_DIR%'; Set-Location '%FRONTEND_DIR%'; cmd /c call %PNPM_CMD% run dev -- --host 0.0.0.0 --port %FRONTEND_PORT%"
+start "FastRead Frontend" powershell -NoExit -ExecutionPolicy Bypass -Command "$env:VITE_API_BASE_URL='%FRONTEND_API_BASE%'; $env:VITE_SCREENSHOT_BASE_URL='/static/screenshots'; $env:VITE_FRONTEND_PORT='%FRONTEND_PORT%'; $env:BACKEND_PORT='%BACKEND_PORT%'; $env:FASTRESEARCH_PANEL_URL='http://127.0.0.1:5173'; $env:VITE_ENV_DIR='%FRONTEND_DIR%'; Set-Location '%FRONTEND_DIR%'; cmd /c call %PNPM_CMD% run dev -- --host 127.0.0.1 --port %FRONTEND_PORT%"
 
 echo [wait] Frontend dev server...
 for /l %%I in (1,1,60) do (
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r=Invoke-WebRequest -Uri '%APP_URL%' -UseBasicParsing -TimeoutSec 2; if($r.StatusCode -eq 200){ exit 0 } } catch { }; exit 1" >nul 2>nul
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r=Invoke-WebRequest -Uri '%APP_URL%' -UseBasicParsing -TimeoutSec 2 -MaximumRedirection 0; if($r.StatusCode -eq 200 -or $r.StatusCode -eq 302){ exit 0 } } catch { $resp = $_.Exception.Response; if ($resp -and [int]$resp.StatusCode -eq 302) { exit 0 } }; exit 1" >nul 2>nul
   if not errorlevel 1 goto READY
   powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Sleep -Seconds 1" >nul
 )
@@ -246,7 +246,8 @@ goto FAIL
 :READY
 echo.
 echo [done] FastRead local dev is ready.
-echo Open: %APP_URL%
+echo Enter via FastResearch, then click FastRead.
+echo Direct %APP_URL% redirects to Panel.
 echo.
 if "%NO_OPEN%"=="0" start "" "%APP_URL%"
 exit /b 0

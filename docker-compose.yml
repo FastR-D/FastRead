@@ -38,6 +38,8 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
+      FASTRESEARCH_API_URL: ${FASTRESEARCH_API_URL:-http://127.0.0.1:8787}
+      FASTRESEARCH_PANEL_URL: ${FASTRESEARCH_PANEL_URL:-http://127.0.0.1:5173}
       ELASTICSEARCH_URL: http://elasticsearch:9200
       PAPER_SEARCH_ES_REPLICAS: ${PAPER_SEARCH_ES_REPLICAS:-0}
     volumes:
@@ -76,6 +78,7 @@ services:
       - "127.0.0.1:${APP_PORT:-3015}:80"
     environment:
       - BACKEND_PORT=${BACKEND_PORT:-8483}
+      - FASTRESEARCH_PANEL_URL=${FASTRESEARCH_PANEL_URL:-http://127.0.0.1:5173}
     volumes:
       - ./nginx/default.conf:/etc/nginx/templates/default.conf.template
     depends_on:

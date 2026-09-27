@@ -20,7 +20,8 @@ def encode(value) -> str:
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS schema_versions(version INTEGER PRIMARY KEY, applied REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL,
- password TEXT NOT NULL, created REAL NOT NULL);
+ password TEXT NOT NULL, created REAL NOT NULL, research_key_id TEXT,
+ research_account_id TEXT, display_name TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY, name TEXT NOT NULL, daily_limit INTEGER NOT NULL DEFAULT 50);
 CREATE TABLE IF NOT EXISTS memberships(user_id TEXT REFERENCES users(id), workspace_id TEXT REFERENCES workspaces(id),
  role TEXT NOT NULL CHECK(role IN ('owner','member')), PRIMARY KEY(user_id,workspace_id));
@@ -87,6 +88,15 @@ class Store:
             db.executescript(SCHEMA)
             if "archived" not in {row[1] for row in db.execute("PRAGMA table_info(papers)")}:
                 db.execute("ALTER TABLE papers ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")
+            cols = {row[1] for row in db.execute("PRAGMA table_info(users)")}
+            if "research_key_id" not in cols:
+                db.execute("ALTER TABLE users ADD COLUMN research_key_id TEXT")
+            if "research_account_id" not in cols:
+                db.execute("ALTER TABLE users ADD COLUMN research_account_id TEXT")
+            if "display_name" not in cols:
+                db.execute("ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_research_key_id ON users(research_key_id) WHERE research_key_id IS NOT NULL")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_research_account_id ON users(research_account_id) WHERE research_account_id IS NOT NULL")
             db.execute("INSERT OR IGNORE INTO schema_versions VALUES(1,?)", (time.time(),))
 
     @contextmanager

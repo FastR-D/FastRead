@@ -12,9 +12,9 @@
 
 1. 解包到独立版本目录，创建独立共享数据与兼容配置目录，权限设为 0700；配置文件设为 0600。
 2. 按 `web.env.example` 配置根目录、HTTPS origin、Secure cookie。受限 arXiv gateway 设置沿用现有部署；配置值不要写进报告。
-3. 离线运行 `python -m app.web.admin --help` 开户。生产环境无公开注册接口。供应商归属工作区，密钥用现有 secret store 加密；必须一并保护兼容目录内的加密 key。
+3. 生产登录只接受 FastResearch 个人 Key。配置 `FASTRESEARCH_API_URL`（服务端兑换 `POST /api/sso/consume`，audience=`fast-read`）和 `FASTRESEARCH_PANEL_URL`（无会话文档请求 302 回链）。无公开注册、无邮箱密码登录；直开工作台不是登录页。成员首次从 Panel 进入时按稳定 `accountId` 自动建库；旧 ticket 或旧数据没有 `accountId` 时兼容按 `keyId`。`python -m app.web.admin` 仅用于迁移/应急开户，不能替代 Key 身份。供应商归属工作区，密钥用现有 secret store 加密；必须一并保护兼容目录内的加密 key。
 4. 安装两个 systemd 模板前修正其中路径。API 仅监听 loopback，反向代理终止 HTTPS。API 与 worker 使用同一个新 Web 数据根。
-5. 验证 `/api/health`、匿名资源请求 401、登录、工作区资源隔离、导入后台任务、报告、对话、原文及下载。页面关闭后任务由 worker 继续执行。
+5. 验证 `/api/health`、匿名资源请求 401、`GET /api/auth/login-info`、用 FastResearch 票据 `POST /api/auth/research` 登录、工作区资源隔离、导入后台任务、报告、对话、原文及下载。页面关闭后任务由 worker 继续执行。
 
 ## 迁移
 

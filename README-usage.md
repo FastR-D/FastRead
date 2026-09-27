@@ -15,7 +15,7 @@ PDF / 论文 URL -> 分页原文 -> 关键问题报告 -> 方法与贡献
 .\run.bat --no-open
 ```
 
-访问 `http://127.0.0.1:3015/`。
+不要直接把 `http://127.0.0.1:3015/` 当登录页。先在 FastResearch Panel 用个人 Key 解锁，再点击 FastRead；直开会 302 到 Panel。
 
 ## 2. 导入论文
 

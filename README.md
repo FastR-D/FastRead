@@ -1,4 +1,4 @@
-<p align="center">
+﻿<p align="center">
   <img src="./doc/icon.png" alt="FastRead" width="72" height="72" />
 </p>
 
@@ -6,7 +6,7 @@
 
 ## 当前主线：FastRead Web
 
-当前入口是带账户和工作区权限的 Web 应用：服务端保存论文、版本化证据、报告、聊天与总结，独立 worker 执行可恢复的后台任务。部署、离线开户、只读源迁移、备份和回滚见 [Web 部署指南](deploy/web/README.md)。API 使用 `backend/main.py`，worker 使用 `python -m app.web.worker`，两者必须指向同一 Web 数据根。生产环境使用 HTTPS 与 Secure cookie。
+当前入口是带工作区权限的 Web 应用：必须从 FastResearch 使用个人 Key 进入（服务端兑换 SSO 票据，按稳定 `accountId` 隔离资料库；旧票据兼容按 `keyId`），不再使用邮箱密码。直开 `:3015` 且无会话会 302 到 Panel。服务端保存论文、版本化证据、报告、聊天与总结，独立 worker 执行可恢复的后台任务。部署、FastResearch 联调、只读源迁移、备份和回滚见 [Web 部署指南](deploy/web/README.md)。API 使用 `backend/main.py`，worker 使用 `python -m app.web.worker`，两者必须指向同一 Web 数据根。当前已挂载的 HTTP 接口见工作区 [FastResearch/docs/api.md](../FastResearch/docs/api.md) 第 5 节。生产环境使用 HTTPS 与 Secure cookie。
 
 后文保留早期桌面、容器和模型说明作为历史参考；正式 Web 部署以以上指南为准。
 
@@ -124,9 +124,9 @@ cd ..
 
 | 服务 | 默认地址 |
 | --- | --- |
-| Web 工作台 | `http://127.0.0.1:3015/` |
+| Web 工作台 | `http://127.0.0.1:3015/`（须经 FastResearch 进入） |
 | 后端 API | `http://127.0.0.1:8483/api/` |
-| 健康检查 | `http://127.0.0.1:8483/api/sys_check` |
+| 健康检查 | `http://127.0.0.1:8483/api/health` |
 
 Windows 根目录脚本还支持：
 

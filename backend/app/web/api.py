@@ -5,30 +5,117 @@ import os
 import time
 from pathlib import Path
 from typing import Annotated
+import re
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, Response, UploadFile
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.staticfiles import StaticFiles
 
-from .auth import Principal, login, require_owner, require_user, secure_cookie, token_hash
+from .auth import Principal, login_from_research, require_owner, require_user, set_session_cookie, token_hash
 from .evidence import EvidenceRepository
 from .store import Store, encode, uid
 
 User = Annotated[Principal, Depends(require_user)]
+SESSION_COOKIE = "fastread_session"
+STATIC_SUFFIXES = {
+    ".css", ".gif", ".ico", ".jpeg", ".jpg", ".js", ".json", ".map", ".mjs",
+    ".png", ".svg", ".txt", ".woff", ".woff2", ".webp",
+}
 
 
-class LoginInput(BaseModel):
-    email: str = Field(max_length=254)
-    password: str = Field(max_length=256)
+def research_panel_url() -> str:
+    return os.environ.get("FASTRESEARCH_PANEL_URL", "http://127.0.0.1:5173").strip().rstrip("/") or "http://127.0.0.1:5173"
+
+
+def allowed_origins(request: Request) -> set[str]:
+    origins = {str(request.base_url).rstrip("/")}
+    for key in ("FASTREAD_PUBLIC_ORIGIN", "FASTREAD_FRONTEND_ORIGIN"):
+        value = os.environ.get(key, "").strip().rstrip("/")
+        if value:
+            origins.add(value)
+    panel = os.environ.get("FASTRESEARCH_PANEL_URL", "").strip().rstrip("/")
+    if panel:
+        origins.add(panel)
+    frontend_port = (
+        os.environ.get("FASTREAD_FRONTEND_PORT")
+        or os.environ.get("VITE_FRONTEND_PORT")
+        or "3015"
+    ).strip() or "3015"
+    origins.add(f"http://127.0.0.1:{frontend_port}")
+    origins.add(f"http://localhost:{frontend_port}")
+    return {item for item in origins if item}
+
+
+def is_gated_document(path: str) -> bool:
+    if path.startswith("/api/") or path.startswith("/static/") or path.startswith("/uploads/"):
+        return False
+    suffix = Path(path).suffix.lower()
+    if suffix in STATIC_SUFFIXES:
+        return False
+    return suffix in {"", ".html", ".htm"} or path in {"/", "/index.html"}
+
+
+def should_bounce_to_panel(request: Request) -> bool:
+    if request.method not in {"GET", "HEAD"}:
+        return False
+    if not is_gated_document(request.url.path):
+        return False
+    if (request.query_params.get("sso") or "").strip():
+        return False
+    if (request.cookies.get(SESSION_COOKIE) or "").strip():
+        return False
+    return True
+
+
+def consume_sso_redirect(request: Request) -> RedirectResponse | None:
+    if request.method not in {"GET", "HEAD"}:
+        return None
+    if not is_gated_document(request.url.path):
+        return None
+    ticket = (request.query_params.get("sso") or "").strip()
+    if not ticket:
+        return None
+    try:
+        token, _csrf = login_from_research(
+            request.app.state.store,
+            ticket,
+            request.client.host if request.client else "unknown",
+        )
+    except HTTPException:
+        response = RedirectResponse(research_panel_url(), status_code=302)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+    response = RedirectResponse(request.url.path or "/", status_code=302)
+    response.headers["Cache-Control"] = "no-store"
+    set_session_cookie(response, token)
+    return response
+
+
+class ResearchTicketInput(BaseModel):
+    ticket: str = Field(default="", max_length=256)
 
 
 class ImportInput(BaseModel):
     url: str = Field(min_length=8, max_length=2048)
     provider_id: str = Field(default="", max_length=100)
     model: str = Field(default="", max_length=100)
+    title: str = Field(default="", max_length=300)
+    authors: list[str] = Field(default_factory=list, max_length=50)
+    venue: str = Field(default="", max_length=160)
+    doi: str = Field(default="", max_length=200)
+    year: int | None = Field(default=None, ge=1900, le=2200)
+
+    @field_validator("authors", mode="before")
+    @classmethod
+    def normalize_authors(cls, value):
+        if isinstance(value, str):
+            value = re.split(r"\s*(?:,|;|、|\n|\|)\s*", value)
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip()[:120] for item in value if str(item).strip()][:50]
 
     @field_validator("url")
     @classmethod
@@ -94,11 +181,14 @@ def create_web_app(root=None, frontend=None):
     @app.middleware("http")
     async def browser_boundary(request, call_next):
         origin = request.headers.get("origin")
-        allowed = os.environ.get("FASTREAD_PUBLIC_ORIGIN", "").rstrip("/")
         if request.method not in {"GET", "HEAD", "OPTIONS"} and origin:
-            expected = allowed or str(request.base_url).rstrip("/")
-            if origin.rstrip("/") != expected:
+            if origin.rstrip("/") not in allowed_origins(request):
                 return JSONResponse({"detail": "不允许跨站请求"}, status_code=403)
+        sso_response = consume_sso_redirect(request)
+        if sso_response is not None:
+            return sso_response
+        if should_bounce_to_panel(request):
+            return RedirectResponse(research_panel_url(), status_code=302)
         response = await call_next(request)
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store"
@@ -120,16 +210,32 @@ def create_web_app(root=None, frontend=None):
         store.one("SELECT version FROM schema_versions LIMIT 1")
         return {"status": "healthy", "schema": 1}
 
-    @app.post("/api/auth/login")
-    def sign_in(data: LoginInput, request: Request, response: Response):
-        token, csrf = login(store, data.email, data.password, request.client.host if request.client else "unknown")
-        response.set_cookie("fastread_session", token, httponly=True, secure=secure_cookie(), samesite="lax", max_age=7 * 86400, path="/")
+    @app.get("/api/auth/login-info")
+    def login_info():
+        return {
+            "mode": "fastresearch-key",
+            "panel_url": research_panel_url(),
+        }
+
+    @app.post("/api/auth/research")
+    def research_sign_in(data: ResearchTicketInput, request: Request, response: Response):
+        token, csrf = login_from_research(store, data.ticket, request.client.host if request.client else "unknown")
+        set_session_cookie(response, token)
         return {"csrf": csrf}
 
     @app.get("/api/auth/me")
     def me(user: User):
         workspace = store.one("SELECT name,daily_limit FROM workspaces WHERE id=?", (user.workspace_id,))
-        return {"email": user.email, "workspace_id": user.workspace_id, "role": user.role, "csrf": user.csrf, "workspace": workspace}
+        return {
+            "email": user.email,
+            "display_name": user.display_name or user.email,
+            "research_key_id": user.research_key_id,
+            "research_account_id": user.research_account_id,
+            "workspace_id": user.workspace_id,
+            "role": user.role,
+            "csrf": user.csrf,
+            "workspace": workspace,
+        }
 
     @app.post("/api/auth/logout")
     def logout(request: Request, response: Response, user: User):

@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.web.api import create_web_app
-from app.web.auth import create_user
+from app.web.auth import create_user, issue_session
 from app.web.store import Store
 from app.web.worker import execute
 
@@ -21,11 +21,11 @@ def setup(tmp_path, monkeypatch):
     a = create_user(store, "a@example.org", "test-password-for-a")
     b = create_user(store, "b@example.org", "test-password-for-b")
     clients = []
-    for email, password in [("a@example.org", "test-password-for-a"), ("b@example.org", "test-password-for-b")]:
+    for user in (a, b):
         client = TestClient(app)
-        response = client.post("/api/auth/login", json={"email": email, "password": password})
-        assert response.status_code == 200
-        client.headers["X-CSRF-Token"] = response.json()["csrf"]
+        token, csrf = issue_session(store, user["user_id"], user["workspace_id"])
+        client.cookies.set("fastread_session", token)
+        client.headers["X-CSRF-Token"] = csrf
         clients.append(client)
     return store, a, b, *clients
 
@@ -52,11 +52,26 @@ def test_metadata_model_import_checks_ownership_quota_and_idempotency(setup):
     assert replay.status_code == 202 and replay.json()["id"] == old["id"]
     with store.connect(write=True) as db:
         db.execute("INSERT INTO providers VALUES(?,?,?,?,?,?,?)", ("metadata-provider", a["workspace_id"], "Fixture", "https://example.org/v1", "unused", json.dumps(["qwen-fixture-27b"]), time.time()))
-    payload = {"url": "https://arxiv.org/pdf/1234.56789", "provider_id": "metadata-provider", "model": "qwen-fixture-27b"}
+    payload = {
+        "url": "https://arxiv.org/pdf/1234.56789",
+        "provider_id": "metadata-provider",
+        "model": "qwen-fixture-27b",
+        "title": "Imported from FastNews",
+        "authors": ["Ada Lovelace", "Grace Hopper"],
+        "venue": "ACM CCS",
+        "doi": "10.1145/fastnews",
+        "year": 2024,
+    }
     headers = {"Idempotency-Key": "metadata-import"}
     assert cb.post("/api/imports/url", json=payload, headers=headers).status_code == 400
     first = ca.post("/api/imports/url", json=payload, headers=headers)
     assert first.status_code == 202
+    queued = json.loads(store.one("SELECT payload FROM jobs WHERE id=?", (first.json()["id"],))["payload"])
+    assert queued["title"] == "Imported from FastNews"
+    assert queued["authors"] == ["Ada Lovelace", "Grace Hopper"]
+    assert queued["venue"] == "ACM CCS"
+    assert queued["doi"] == "10.1145/fastnews"
+    assert queued["year"] == 2024
     assert ca.post("/api/imports/url", json=payload, headers=headers).json()["id"] == first.json()["id"]
     assert store.one("SELECT billable FROM jobs WHERE id=?", (first.json()["id"],))["billable"] == 1
     file = {"file": ("fixture.pdf", b"%PDF-fixture", "application/pdf")}
@@ -91,7 +106,11 @@ def test_worker_import_dispatches_metadata_model_and_persists_fallback(setup, mo
     raw = {"fetch_status": "pdf_ok", "source_type": "pdf", "text": "A complete scientific title\nAlice Smith",
            "first_page_layout": {"title_candidates": [{"text": "A complete scientific title", "blocks": ["p1:l0"]}],
             "blocks": [{"id": "p1:l0", "text": "A complete scientific title"}, {"id": "p1:l1", "text": "Alice Smith"}]}}
-    monkeypatch.setattr("app.services.paper_ingest_service.fetch_source_snapshot", lambda *a, **kw: raw)
+    seen_overrides = []
+    def fetch_with_overrides(_url, overrides, **_kwargs):
+        seen_overrides.append(dict(overrides))
+        return raw
+    monkeypatch.setattr("app.services.paper_ingest_service.fetch_source_snapshot", fetch_with_overrides)
     with store.connect(write=True) as db:
         db.execute("INSERT INTO providers VALUES(?,?,?,?,?,?,?)", ("fixture", a["workspace_id"], "Fixture", "https://example.org/v1", "unused", '["qwen-fixture-27b"]', time.time()))
     monkeypatch.setattr("app.services.secret_store.unprotect_secret", lambda _: "disposable-fixture-value")
@@ -105,9 +124,18 @@ def test_worker_import_dispatches_metadata_model_and_persists_fallback(setup, mo
             "authors": [{"text": "Alice Smith", "blocks": ["p1:l1"]}], "year": None})))])
     monkeypatch.setattr("app.services.llm_compat.create_chat_completion", respond)
     job = store.enqueue(a["workspace_id"], a["user_id"], "import_url",
-        {"url": "https://example.org/paper.pdf", "provider_id": "fixture", "model": "qwen-fixture-27b"}, "worker-import", billable=True)
+        {"url": "https://example.org/paper.pdf", "provider_id": "fixture", "model": "qwen-fixture-27b",
+         "title": "FastNews title", "authors": ["Alice Smith"], "venue": "NDSS", "doi": "10.1234/worker", "year": 2026},
+        "worker-import", billable=True)
     claimed = store.claim("metadata-worker")
     execute(store, claimed, "metadata-worker")
+    assert seen_overrides[0] == {
+        "title": "FastNews title",
+        "authors": ["Alice Smith"],
+        "venue": "NDSS",
+        "doi": "10.1234/worker",
+        "year": 2026,
+    }
     saved = store.one("SELECT * FROM jobs WHERE id=?", (job["id"],))
     assert saved["state"] == "succeeded" and saved["dispatch_started"] == 1 and closed
     result = json.loads(saved["result"])
@@ -195,15 +223,14 @@ def test_worker_atomic_index_and_relogin_summary(setup):
     ca.cookies.set("fastread_session", old_cookie)
     assert ca.get("/api/papers").status_code == 401
     other_device = TestClient(ca.app)
-    assert other_device.post("/api/auth/login", json={"email": "a@example.org", "password": "test-password-for-a"}).status_code == 200
+    token, csrf = issue_session(store, a["user_id"], a["workspace_id"])
+    other_device.cookies.set("fastread_session", token)
+    other_device.headers["X-CSRF-Token"] = csrf
     assert other_device.get(f"/api/papers/{p['paper_id']}").json()["summary"] == "My persisted summary"
 
 
-def test_failed_login_limit_and_daily_budget(setup):
+def test_daily_budget(setup):
     store, a, _, ca, _ = setup
-    for _ in range(8):
-        assert ca.post("/api/auth/login", json={"email": "a@example.org", "password": "wrong"}).status_code == 401
-    assert ca.post("/api/auth/login", json={"email": "a@example.org", "password": "wrong"}).status_code == 429
     with store.connect(write=True) as db:
         db.execute("UPDATE workspaces SET daily_limit=1 WHERE id=?", (a["workspace_id"],))
     store.enqueue(a["workspace_id"], a["user_id"], "report", {}, "first", billable=True)

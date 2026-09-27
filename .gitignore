@@ -109,3 +109,6 @@ _archives/
 # Local shell histories
 .Rhistory
 .node_repl_history
+
+# runtime data (sqlite db + uploaded files)
+backend/web-data/
