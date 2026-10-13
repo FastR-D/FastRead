@@ -31,3 +31,9 @@ Keep previous release directories and a deployment receipt/rollback script.
 Before switching: verify the queue is idle, back up SQLite, and test Nginx config.
 The active source and frontend are selected by symlinks. Do not restore an old
 database during ordinary code rollback, as it would discard later user data.
+
+Include `ops/nginx/fastread-static-compression.conf` in the assets and PDF.js
+vendor locations on the origin. The public reverse proxy must preserve
+`Accept-Encoding`, `Content-Encoding` and `Vary`. The default Nginx gzip setting
+compresses HTML only: explicitly enabling JavaScript matters for the 2.27 MB
+PDF worker. Do not apply this snippet to PDF API responses (Range requests).
