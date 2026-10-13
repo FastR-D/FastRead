@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown from './Markdown'
 import { OrganizeButton } from './Organize'
 
 type Row = Record<string, any>

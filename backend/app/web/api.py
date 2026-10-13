@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from pathlib import Path
 from typing import Annotated
@@ -67,6 +68,20 @@ class ImportInput(BaseModel):
     organize: bool = True
     source: str = Field(default="", max_length=40)
     external_id: str = Field(default="", max_length=200)
+    title: str = Field(default="", max_length=300)
+    authors: list[str] = Field(default_factory=list, max_length=50)
+    venue: str = Field(default="", max_length=160)
+    doi: str = Field(default="", max_length=200)
+    year: int | None = Field(default=None, ge=1900, le=2200)
+
+    @field_validator("authors", mode="before")
+    @classmethod
+    def normalize_authors(cls, value):
+        if isinstance(value, str):
+            value = re.split(r"\s*(?:,|;|、|\n|\|)\s*", value)
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip()[:120] for item in value if str(item).strip()][:50]
 
     @field_validator("url")
     @classmethod
@@ -225,6 +240,7 @@ def create_web_app(root=None, frontend=None):
             "workspace": workspace,
             "public": bool(public_workspace_id()),
             "research_key_id": user.research_key_id,
+            "research_account_id": user.research_account_id,
             "display_name": user.display_name,
         }
 

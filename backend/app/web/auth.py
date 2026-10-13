@@ -56,6 +56,7 @@ class Principal:
     csrf: str
     research_key_id: str = ""
     display_name: str = ""
+    research_account_id: str = ""
 
 
 def create_user(store: Store, email, password, workspace_name="我的资料库"):
@@ -141,7 +142,7 @@ def consume_research_ticket(ticket: str) -> dict:
     person = str(payload.get("person") or "").strip()
     if not key_id:
         raise HTTPException(401, "登录票据无效或已过期")
-    return {"keyId": key_id, "person": person[:80]}
+    return {"keyId": key_id, "person": person[:80], "accountId": str(payload.get("accountId") or "").strip()}
 
 
 def _issue_session(db, user_id: str, workspace_id: str):
@@ -158,9 +159,14 @@ def login_from_research(store: Store, ticket: str):
     identity = consume_research_ticket(ticket)
     key_id = identity["keyId"]
     person = identity["person"] or key_id
+    account_id = identity.get("accountId") or None
     email = f"key-{key_id}@{SSO_EMAIL_DOMAIN}"
     with store.connect(write=True) as db:
-        user = db.execute("SELECT * FROM users WHERE research_key_id=?", (key_id,)).fetchone()
+        user = db.execute("SELECT * FROM users WHERE research_account_id=?", (account_id,)).fetchone() if account_id else None
+        if user is None:
+            user = db.execute("SELECT * FROM users WHERE research_key_id=?", (key_id,)).fetchone()
+        if user and account_id and user["research_account_id"] not in (None, "", account_id):
+            raise HTTPException(409, "Research 账号绑定不一致")
         if not user:
             user = db.execute("SELECT * FROM users WHERE email=?", (email,)).fetchone()
         if user:
@@ -175,6 +181,8 @@ def login_from_research(store: Store, ticket: str):
                 "INSERT INTO users(id,email,password,created,research_key_id,display_name) VALUES(?,?,?,?,?,?)",
                 (user_id, email, "disabled", time.time(), key_id, person),
             )
+        if account_id:
+            db.execute("UPDATE users SET research_account_id=? WHERE id=?", (account_id, user_id))
         owner = db.execute(
             "SELECT * FROM memberships WHERE user_id=? AND role='owner' ORDER BY workspace_id LIMIT 1",
             (user_id,),
@@ -208,7 +216,7 @@ def require_user(request: Request) -> Principal:
     token = request.cookies.get("fastread_session", "")
     store = request.app.state.store
     row = store.one(
-        """SELECT s.*,u.email,u.research_key_id,u.display_name,m.role FROM sessions s JOIN users u ON u.id=s.user_id
+        """SELECT s.*,u.email,u.research_key_id,u.display_name,u.research_account_id,m.role FROM sessions s JOIN users u ON u.id=s.user_id
         JOIN memberships m ON m.user_id=s.user_id AND m.workspace_id=s.workspace_id WHERE s.token=? AND s.expires>?""",
         (token_hash(token), time.time()),
     )
@@ -228,6 +236,7 @@ def require_user(request: Request) -> Principal:
         row["csrf"],
         row.get("research_key_id") or "",
         row.get("display_name") or "",
+        row.get("research_account_id") or "",
     )
 
 

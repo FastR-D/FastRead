@@ -1,11 +1,11 @@
 """FastCAS browser endpoints; the signed event endpoint never accepts JSON."""
 import secrets
+import os
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
-from fastcas.fastapi import receive_event, receive_logout
 
 from .auth import require_user, secure_cookie
 from .fastcas_service import FastCASService
@@ -18,6 +18,11 @@ class LocalProof(BaseModel):
 def register_fastcas_routes(app, store, set_session_cookie, service=None):
     service = service or FastCASService(store)
     app.state.fastcas = service
+    configured_path = urlparse(service.config.get('redirect_uri', '')).path
+    default_base = configured_path.removesuffix('/api/auth/fastcas/callback') if configured_path else ''
+    base_path = "/" + os.environ.get("FASTREAD_BASE_PATH", default_base).strip("/")
+    base_path = base_path.rstrip("/")
+    cookie_path = base_path + "/api/auth/fastcas"
 
     def enabled():
         if not service.enabled:
@@ -40,7 +45,7 @@ def register_fastcas_routes(app, store, set_session_cookie, service=None):
             raise HTTPException(status if status in (400,401,403,409,429) else 502, 'FastCAS 请求未完成，请重试或使用本地登录') from None
 
     def cookie(response, binding):
-        response.set_cookie('fastread_fastcas_binding', binding, httponly=True, secure=secure_cookie(), samesite='lax', max_age=300, path='/api/auth/fastcas')
+        response.set_cookie('fastread_fastcas_binding', binding, httponly=True, secure=secure_cookie(), samesite='lax', max_age=300, path=cookie_path)
         response.headers['Cache-Control'] = 'no-store'
         return response
 
@@ -71,12 +76,12 @@ def register_fastcas_routes(app, store, set_session_cookie, service=None):
         try:
             token = execute(lambda: service.finish(callback_url, request.cookies.get('fastread_fastcas_binding',''), request.cookies.get('fastread_session','')))
         except HTTPException:
-            response = RedirectResponse('/?fastcas=failed', status_code=302)
+            response = RedirectResponse(base_path + '/?fastcas=failed', status_code=302)
         else:
-            response = RedirectResponse('/?fastcas=complete', status_code=302)
+            response = RedirectResponse(base_path + '/?fastcas=complete', status_code=302)
             if token:
                 set_session_cookie(response, token)
-        response.delete_cookie('fastread_fastcas_binding', path='/api/auth/fastcas')
+        response.delete_cookie('fastread_fastcas_binding', path=cookie_path)
         response.headers['Cache-Control'] = 'no-store'
         response.headers['Referrer-Policy'] = 'no-referrer'
         return response
@@ -107,6 +112,9 @@ def register_fastcas_routes(app, store, set_session_cookie, service=None):
     @app.post('/api/auth/fastcas/events')
     async def events(request: Request):
         enabled()
+        if request.headers.get('content-type', '').split(';', 1)[0].strip() != 'application/jwt':
+            raise HTTPException(415, '需要签名事件')
+        from fastcas.fastapi import receive_event
         def apply(event):
             if event['type'] == 'account_link.revoked':
                 service.links.apply_verified_event(event)
@@ -118,5 +126,6 @@ def register_fastcas_routes(app, store, set_session_cookie, service=None):
     @app.post('/api/auth/fastcas/backchannel-logout')
     async def backchannel_logout(request: Request):
         enabled()
+        from fastcas.fastapi import receive_logout
         await receive_logout(request, service.sdk, service.links.apply_verified_logout)
         return {'ok': True}

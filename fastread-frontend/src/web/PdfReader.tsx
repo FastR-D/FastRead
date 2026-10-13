@@ -1,3 +1,4 @@
+import { API_BASE, assetUrl } from './urls'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { mergeHighlightRects } from './highlightRects'
 
@@ -6,9 +7,9 @@ type Props = { paper: Row; version: string; page: number; setPage: (p: number) =
 let engine: Promise<any> | undefined
 let worker: any
 function pdfEngine() {
-  const url = '/vendor/pdfjs/pdf.js?v=4.10.38'
+  const url = assetUrl('/vendor/pdfjs/pdf.js?v=4.10.38')
   return engine ||= import(/* @vite-ignore */ url).then(pdf => {
-    pdf.GlobalWorkerOptions.workerSrc = '/vendor/pdfjs/pdf.worker.js?v=4.10.38'
+    pdf.GlobalWorkerOptions.workerSrc = assetUrl('/vendor/pdfjs/pdf.worker.js?v=4.10.38')
     return pdf
   }).catch(error => { engine = undefined; throw error })
 }
@@ -39,7 +40,7 @@ export default function PdfReader({ paper, version, page, setPage, api, summary,
   const annotationDraftKey = `annotation:${paper.id}:${version}:${page}`
   const [recovered, setRecovered] = useState(() => localStorage.getItem(draftKey) || '')
   const base = `/papers/${paper.id}/annotations`
-  const file = `/api/papers/${paper.id}/file?version=${encodeURIComponent(version)}`
+  const file = `${API_BASE}/papers/${paper.id}/file?version=${encodeURIComponent(version)}`
   async function reload() { setAnnotations((await api(`${base}?version=${encodeURIComponent(version)}`)).items) }
   async function perform(fn: () => Promise<void>) {
     setError(''); setBusy(true)
@@ -56,7 +57,7 @@ export default function PdfReader({ paper, version, page, setPage, api, summary,
     pdfEngine().then(pdf => {
       if (dead) return
       worker ||= new pdf.PDFWorker()
-      task = pdf.getDocument({ url: file, worker, disableStream: true, disableAutoFetch: true, rangeChunkSize: 65536, cMapUrl: '/vendor/pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: '/vendor/pdfjs/standard_fonts/' })
+      task = pdf.getDocument({ url: file, worker, disableStream: true, disableAutoFetch: true, rangeChunkSize: 65536, cMapUrl: assetUrl('/vendor/pdfjs/cmaps/'), cMapPacked: true, standardFontDataUrl: assetUrl('/vendor/pdfjs/standard_fonts/') })
       return task.promise.then((doc: any) => { if (!dead) setDocument(doc) })
     }).catch(e => { if (!dead) setError(`PDF 加载失败：${e.message}`) })
     api(`${base}?version=${encodeURIComponent(version)}`).then((r: Row) => { if (!dead) setAnnotations(r.items) }).catch((e: Error) => { if (!dead) setError(e.message) })

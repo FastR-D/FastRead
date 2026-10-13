@@ -1,3 +1,4 @@
+import { API_BASE } from './urls'
 
 
 function dropSso(params: URLSearchParams) {
@@ -18,7 +19,7 @@ function showTicketError(panel: string) {
 }
 
 async function readJson(path: string, options?: RequestInit) {
-  const response = await fetch(path, { credentials: "same-origin", cache: "no-store", ...options });
+  const response = await fetch(path.replace(/^\/api(?=\/)/, API_BASE), { credentials: "same-origin", cache: "no-store", signal: AbortSignal.timeout(10000), ...options });
   const payload = await response.json().catch(() => ({}));
   return { response, payload };
 }
@@ -74,11 +75,11 @@ async function intakeFastNews(csrf: string) {
   history.replaceState(null, "", `${location.pathname}?${kept.toString()}${location.hash}`);
 }
 
-export async function start(loadApp: () => Promise<void>) {
+export async function start(loadApp: (user: Record<string, any> | null) => Promise<void>) {
   const params = new URLSearchParams(location.search);
   const ticket = (params.get("sso") || "").trim();
-  const panel = await panelUrl();
   let csrf = "";
+  let user: Record<string, any> | undefined;
   if (ticket) {
     try {
       const { response, payload } = await readJson("/api/auth/research", {
@@ -86,29 +87,25 @@ export async function start(loadApp: () => Promise<void>) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ticket }),
       });
-      if (!response.ok) throw new Error("ticket");
+      if (response.status >= 500) throw new Error("service");
+      if (!response.ok) { showTicketError((await panelUrl()) || "/"); return; }
       csrf = String(payload.csrf || "");
       dropSso(params);
     } catch {
-      showTicketError(panel || "/");
-      return;
+      throw new Error("Login service unavailable");
     }
   } else {
-    const me = await fetch("/api/auth/me", { credentials: "same-origin", cache: "no-store" });
+    const { response: me, payload } = await readJson("/api/auth/me");
     if (me.status === 401) {
-      // Local password and optional FastCAS login live on FastRead itself.
-      // Keep the legacy Research ticket path above, but let unauthenticated
-      // visitors reach the project's own login and invitation screens.
-      await loadApp();
+      await loadApp(null);
       return;
     }
     if (!me.ok) {
-      showTicketError(panel || "/");
-      return;
+      throw new Error('Login service unavailable');
     }
     try {
-      const payload = await me.json();
       csrf = String(payload.csrf || "");
+      user = payload;
     } catch {
       csrf = "";
     }
@@ -119,5 +116,10 @@ export async function start(loadApp: () => Promise<void>) {
   } catch {
     /* library still loads */
   }
-  await loadApp();
+  if (!user) {
+    const result = await readJson('/api/auth/me');
+    if (!result.response.ok) throw new Error('Login verification failed');
+    user = result.payload;
+  }
+  await loadApp(user!);
 }

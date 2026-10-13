@@ -1,3 +1,4 @@
+import { API_BASE } from './urls'
 import { useEffect, useState, type FormEvent } from 'react'
 
 export default function LocalLogin() {
@@ -8,14 +9,14 @@ export default function LocalLogin() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState(new URLSearchParams(window.location.search).get('fastcas') === 'failed' ? 'FastCAS 登录未完成。请使用原方式登录，并在账号设置中认证；也可稍后重试。' : '')
   const [fastcas, setFastcas] = useState(false)
-  useEffect(() => { fetch('/api/auth/fastcas/available').then(r => r.ok ? r.json() : null).then(v => setFastcas(v?.enabled === true)).catch(() => {}) }, [])
+  useEffect(() => { fetch(`${API_BASE}/auth/fastcas/available`).then(r => r.ok ? r.json() : null).then(v => setFastcas(v?.enabled === true)).catch(() => {}) }, [])
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setMessage('')
     try {
-      const init = await fetch('/api/auth/session-init', { credentials: 'same-origin' })
+      const init = await fetch(`${API_BASE}/auth/session-init`, { credentials: 'same-origin' })
       if (!init.ok) throw new Error('无法初始化登录，请稍后重试')
       const { csrf } = await init.json()
-      const response = await fetch(`/api/auth/${mode}`, {
+      const response = await fetch(`${API_BASE}/auth/${mode}`, {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
         body: JSON.stringify(mode === 'login' ? { email, password } : { token, password }),
@@ -36,7 +37,7 @@ export default function LocalLogin() {
       <button disabled={busy} type="submit">{busy ? '处理中…' : '确认'}</button>
     </form>
     {message && <p role="status">{message}</p>}
-    {fastcas && mode === 'login' && <a href="/api/auth/fastcas/login">使用 FastCAS 登录</a>}
+    {fastcas && mode === 'login' && <a href={`${API_BASE}/auth/fastcas/login`}>使用 FastCAS 登录</a>}
     <nav>{(['login', 'register', 'recover'] as const).filter(v => v !== mode).map(v => <button key={v} disabled={busy} onClick={() => { setMode(v); setMessage(''); setPassword(''); setToken('') }}>{v === 'login' ? '返回登录' : v === 'register' ? '使用邀请注册' : '恢复账号'}</button>)}</nav>
     {mode !== 'login' && <p>请联系此实例管理员获取一次性凭证。</p>}
   </main>

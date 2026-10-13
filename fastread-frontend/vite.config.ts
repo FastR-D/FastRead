@@ -30,10 +30,10 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         output: {
-          manualChunks: {
-            markdown: ['react-markdown', 'react-syntax-highlighter', 'remark-gfm', 'remark-math', 'rehype-katex'],
-            markmap: ['markmap-lib', 'markmap-view', 'markmap-toolbar', 'markmap-common'],
-            vendor: ['react', 'react-dom', 'react-router-dom'],
+          manualChunks(id) {
+            // Keep React in its own eagerly needed chunk. A manual Markdown
+            // chunk must not absorb React and pull the entire parser into boot.
+            if (/\/node_modules\/(react|react-dom|scheduler|react-router|react-router-dom)\//.test(id)) return 'vendor'
           },
         },
       },

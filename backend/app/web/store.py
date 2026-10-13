@@ -114,6 +114,9 @@ class Store:
             user_columns = {row[1] for row in db.execute("PRAGMA table_info(users)")}
             if "research_key_id" not in user_columns:
                 db.execute("ALTER TABLE users ADD COLUMN research_key_id TEXT")
+            if "research_account_id" not in user_columns:
+                db.execute("ALTER TABLE users ADD COLUMN research_account_id TEXT")
+            db.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_research_account_id ON users(research_account_id) WHERE research_account_id IS NOT NULL")
             if "display_name" not in user_columns:
                 db.execute("ALTER TABLE users ADD COLUMN display_name TEXT")
             db.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_research_key_id ON users(research_key_id) WHERE research_key_id IS NOT NULL AND research_key_id != ''")
