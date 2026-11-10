@@ -1,14 +1,16 @@
 import { start } from './web/sso-bootstrap'
+import '@fastrd/ui-react/styles.css'
+import './web/theme'
 
 // Fetch the UI in parallel with authentication, without making authentication
 // wait for React/Markdown to download and execute first.
 const app = Promise.all([import('./web/App'), import('react'), import('react-dom/client')])
 void app.catch(() => {})
-void start(async initialUser => {
+void start(async (initialUser, initialHandoff) => {
   let timer: ReturnType<typeof setTimeout> | undefined
   const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('UI load timeout')), 15000) })
   const [{ default: App }, { createElement, StrictMode }, { createRoot }] = await Promise.race([app, deadline]).finally(() => clearTimeout(timer))
-  createRoot(document.getElementById('root')!).render(createElement(StrictMode, null, createElement(App, { initialUser })))
+  createRoot(document.getElementById('root')!).render(createElement(StrictMode, null, createElement(App, { initialUser, initialHandoff })))
 }).catch(() => {
   const root = document.getElementById('root')!
   root.replaceChildren()
