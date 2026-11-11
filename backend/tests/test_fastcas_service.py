@@ -107,7 +107,7 @@ def test_http_optional_mode_and_mutation_boundary(tmp_path, monkeypatch):
     assert service.session(local)
     assert client.post('/api/auth/fastcas/events', json={}).status_code == 415
     service.enabled = False
-    assert client.get('/api/auth/fastcas/available').json() == {'enabled': False}
+    assert client.get('/api/auth/fastcas/available').json() == {'enabled': False, 'login_enabled': False, 'link_enabled': False}
     assert client.get('/api/auth/fastcas/login').status_code == 404
     assert client.get('/api/auth/fastcas/status').json()['enabled'] is False
 
@@ -155,3 +155,42 @@ def test_reconcile_remote_revocation_deletes_only_cas_sessions(tmp_path):
     assert service.reconcile(service.current(user['user_id']))['state'] == 'revoked'
     assert not service.session(cas)
     assert service.session(local)
+
+
+def test_independent_modes_block_new_flows_but_keep_revocation(tmp_path, monkeypatch):
+    monkeypatch.setenv('FASTREAD_FASTCAS_LOGIN_ENABLED', 'false')
+    monkeypatch.setenv('FASTREAD_FASTCAS_LINK_ENABLED', 'false')
+    store, user, provider, service, identity = setup(tmp_path)
+    local, _ = login(store, user['email'], 'original-password', 'peer')
+    app = FastAPI()
+    app.state.store = store
+    register_fastcas_routes(app, store, lambda *_: None, service)
+    client = TestClient(app)
+    assert client.get('/api/auth/fastcas/available').json() == {
+        'enabled': True, 'login_enabled': False, 'link_enabled': False}
+    assert client.get('/api/auth/fastcas/login').status_code == 403
+    with pytest.raises(HTTPException) as error:
+        service.begin_link('binding', local, 'original-password', 'peer')
+    assert error.value.status_code == 403
+    provider.link.update(state='prepared', version=1)
+    with pytest.raises(HTTPException):
+        service.reconcile(service.current(user['user_id']))
+    assert provider.link['state'] == 'prepared'
+    service.revoke(local, 'original-password', 'peer')
+    assert service.session(local)
+    assert provider.link['state'] == 'revoked'
+    assert provider.calls == 0
+
+
+def test_global_off_overrides_partial_configuration(tmp_path, monkeypatch):
+    monkeypatch.setenv('FASTREAD_FASTCAS_ENABLED', 'false')
+    monkeypatch.setenv('FASTREAD_FASTCAS_ISSUER', 'https://cas.example')
+    for key in ('CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI'):
+        monkeypatch.delenv('FASTREAD_FASTCAS_' + key, raising=False)
+    store = Store(tmp_path)
+    store.initialize()
+    service = FastCASService(store)
+    assert not service.enabled
+    assert not service.login_enabled and not service.link_enabled
+    with pytest.raises(HTTPException):
+        _ = service.sdk

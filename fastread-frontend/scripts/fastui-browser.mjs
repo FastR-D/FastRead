@@ -12,15 +12,22 @@ const browser = await chromium.launch({ headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block', colorScheme: 'light' })
 const writes = [], errors = [], scenarios = []
 let providers = [{ id: 'provider-1', name: 'Workspace model', models: ['model-a', 'model-b'] }]
+let signedIn = true
+let availability = { enabled: true, login_enabled: true, link_enabled: true }
+let accountStatus = { enabled: true, link_enabled: true, link: { id: 'link', state: 'prepared', subject: 'reader', version: 1 } }
 await context.route('**/api/**', async route => {
   const request = route.request(), path = new URL(request.url()).pathname
   if (request.method() === 'POST') writes.push({ path, body: request.postDataJSON() })
   let value = { items: [] }, status = 200
-  if (path === '/api/auth/me') value = { id: 'reader', display_name: 'Reader', role: 'owner', workspace_id: 'workspace', csrf: 'fixture-csrf', workspace: { name: 'Workspace', daily_limit: 24 } }
+  if (path === '/api/auth/me') {
+    status = signedIn ? 200 : 401
+    value = signedIn ? { id: 'reader', display_name: 'Reader', role: 'owner', workspace_id: 'workspace', csrf: 'fixture-csrf', workspace: { name: 'Workspace', daily_limit: 24 } } : { detail: 'Login required' }
+  }
+  else if (path === '/api/auth/fastcas/available') value = availability
   else if (path === '/api/providers') {
     if (request.method() === 'POST') providers = [...providers, { id: 'provider-2', ...request.postDataJSON() }]
     value = { items: providers }
-  } else if (path === '/api/auth/fastcas/status') value = { enabled: true, link: { id: 'link', state: 'prepared', subject: 'reader', version: 1 } }
+  } else if (path === '/api/auth/fastcas/status') value = accountStatus
   else if (path === '/api/auth/local-credential') { status = 422; value = { detail: '原密码未通过校验' } }
   else if (path === '/api/papers') value = { items: [], total: 0 }
   await route.fulfill({ status, json: value })
@@ -30,7 +37,7 @@ try {
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(base)
   await page.getByRole('button', { name: '模型设置', exact: true }).click()
-  await page.getByRole('button', { name: 'Reader', exact: true }).click()
+  await page.getByRole('button', { name: '账号设置', exact: true }).click()
   const model = page.getByRole('region', { name: '模型设置' })
   const account = page.getByRole('region', { name: '账号设置' })
   const name = model.getByLabel('名称', { exact: true })
@@ -86,6 +93,48 @@ try {
     await page.evaluate(() => window.scrollTo(0, 0))
     await page.screenshot({ path: `${artifacts}/${mode}-${width}.png`, fullPage: true })
   }
+  // Merge regression: independent server modes must survive the real FastUI account surface.
+  for (const link of [null, { id: 'link', state: 'prepared', subject: 'reader', version: 1 }]) {
+    accountStatus = { enabled: true, link_enabled: false, link }
+    await page.reload()
+    await page.getByRole('button', { name: '账号设置', exact: true }).click()
+    await account.getByLabel('当前账号密码', { exact: true }).fill('original-password')
+    const blocked = account.getByRole('button', { name: link ? '重试完成认证' : '认证当前账号', exact: true })
+    await expect(blocked).toBeDisabled()
+    if (link) await expect(account.getByRole('button', { name: '解除认证', exact: true })).toBeEnabled()
+    const count = writes.length
+    await blocked.evaluate(button => button.click())
+    assert.equal(writes.length, count)
+  }
+  accountStatus = { enabled: true, link_enabled: true, link: null }
+  await page.reload()
+  await page.getByRole('button', { name: '账号设置', exact: true }).click()
+  await account.getByLabel('当前账号密码', { exact: true }).fill('original-password')
+  await expect(account.getByRole('button', { name: '认证当前账号', exact: true })).toBeEnabled()
+  accountStatus = { enabled: false, link_enabled: false, link: null }
+  await page.reload()
+  await page.getByRole('button', { name: '账号设置', exact: true }).click()
+  await expect(account.getByText('此实例未启用 FastCAS，本地登录照常可用。')).toBeVisible()
+  await expect(account.getByRole('button', { name: '认证当前账号', exact: true })).toHaveCount(0)
+  scenarios.push('link-off blocks new and prepared activation, keeps revoke; enabled and provider-off account states')
+  signedIn = false
+  for (const flags of [
+    { enabled: true, login_enabled: true, link_enabled: false },
+    { enabled: true, login_enabled: false, link_enabled: true },
+    { enabled: false, login_enabled: false, link_enabled: false },
+  ]) {
+    availability = flags
+    await page.reload()
+    await expect(page.getByRole('heading', { name: '登录资料库' })).toBeVisible()
+    await expect.poll(() => page.getByRole('link', { name: '使用 FastCAS 登录' }).count()).toBe(flags.enabled && flags.login_enabled ? 1 : 0)
+    if (flags.login_enabled) await expect(page.getByRole('link', { name: '使用 FastCAS 登录' })).toHaveAttribute('href', '/api/auth/fastcas/login')
+    await page.getByRole('button', { name: '使用邀请注册', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '邀请注册' })).toBeVisible()
+    await expect(page.getByRole('link', { name: '使用 FastCAS 登录' })).toHaveCount(0)
+    await page.getByRole('button', { name: '恢复账号', exact: true }).click()
+    await expect(page.getByRole('heading', { name: '恢复账号' })).toBeVisible()
+  }
+  scenarios.push('independent login visibility with local invitation/recovery always usable')
   assert.deepEqual(errors, [])
   await writeFile(`${artifacts}/results.json`, JSON.stringify({ status: 'passed', scenarios, viewports: [1440, 1024, 390], modes: ['light', 'dark'] }, null, 2))
   console.log('PASS FastRead FastUI production settings/account browser scenarios')

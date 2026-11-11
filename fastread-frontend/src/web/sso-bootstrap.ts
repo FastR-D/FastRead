@@ -2,7 +2,7 @@ import { APP_BASE, API_BASE } from './urls'
 
 type FastNewsIntake = { title: string; authors: string; abstract: string; url: string; venue: string; year: string; external_id: string }
 type FastNewsReceipt = { id: string; title: string; awaiting_file: boolean; created: boolean }
-type PendingFastNews = { status: 'pending' | 'login-required'; body: FastNewsIntake }
+type PendingFastNews = { status: 'pending' | 'login-required'; body: FastNewsIntake; rejectedSession?: string | null }
 export type FastNewsHandoff =
   | PendingFastNews
   | { status: 'failed'; body: FastNewsIntake; error: string }
@@ -26,19 +26,12 @@ function readPending(): PendingFastNews | null {
   if (!raw) return null
   const stored = JSON.parse(raw)
   if (stored?.status !== 'pending' && stored?.status !== 'login-required') throw new Error('FastNews 待收入信息无效，请从原入口重新发送。')
-  return { status: stored.status, body: intakeBody(stored.body) }
+  if (stored.rejectedSession !== undefined && stored.rejectedSession !== null && (typeof stored.rejectedSession !== 'string' || !/^[a-f0-9]{64}$/.test(stored.rejectedSession))) throw new Error('FastNews 登录状态无效，请重新登录。')
+  return { status: stored.status, body: intakeBody(stored.body), rejectedSession: stored.rejectedSession }
 }
 
 function savePending(pending: PendingFastNews) {
   try { sessionStorage.setItem(pendingKey, JSON.stringify(pending)) } catch { /* Keep the carrier in the URL for reload/login. */ }
-}
-
-export function resumeFastNewsAfterLogin() {
-  // Only a successful local login may release a failed-ticket handoff to the new session.
-  try {
-    const pending = readPending()
-    if (pending?.status === 'login-required') savePending({ status: 'pending', body: pending.body })
-  } catch { /* An invalid pending record must not prevent signing in. */ }
 }
 
 function pendingHandoff(): FastNewsHandoff | null {
@@ -58,7 +51,7 @@ function pendingHandoff(): FastNewsHandoff | null {
       return previous
     }
     // Persist paper metadata and its login requirement, never a ticket. Keep the URL until receipt.
-    const pending: PendingFastNews = { status: previous?.status ?? 'pending', body }
+    const pending: PendingFastNews = { ...previous, status: previous?.status ?? 'pending', body }
     savePending(pending)
     return pending
   } catch (error) {
@@ -76,6 +69,14 @@ async function readJson(path: string, options?: RequestInit) {
   const response = await fetch(`${API_BASE}${path}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(10000), ...options })
   const payload = await response.json().catch(() => ({}))
   return { response, payload }
+}
+
+async function sessionFingerprint(user: Record<string, unknown>): Promise<string> {
+  // CSRF is freshly generated for every local, Research and CAS session. Persist
+  // only its digest: a verified different session, never URL text, releases a lock.
+  if (typeof user.csrf !== 'string' || !user.csrf) throw new Error('Login verification failed')
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(user.csrf))
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
 export async function submitFastNews(body: FastNewsIntake, csrf: string): Promise<FastNewsReceipt> {
@@ -106,35 +107,49 @@ export async function start(loadApp: (user: Record<string, any> | null, handoff:
   const ticket = (new URLSearchParams(location.search).get('sso') || '').trim()
   if (ticket) {
     dropSso()
+    if (handoff && 'body' in handoff) {
+      // Lock before any network work: a failed verification must never leave an
+      // unverified arrival eligible for automatic intake through an old cookie.
+      handoff = { status: 'login-required', body: handoff.body }
+      savePending(handoff)
+      const { response, payload } = await readJson('/auth/me')
+      if (!response.ok && response.status !== 401) throw new Error('Login verification failed')
+      handoff = { ...handoff, rejectedSession: response.ok ? await sessionFingerprint(payload) : null }
+      savePending(handoff)
+    }
     try {
       const { response } = await readJson('/auth/research', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket }),
       })
       if (!response.ok) throw new Error('登录票据无效或已过期，请登录后继续收入论文。')
-      if (handoff?.status === 'login-required') {
-        handoff = { status: 'pending', body: handoff.body }
-        savePending(handoff)
-      }
     } catch {
-      if (handoff && 'body' in handoff) {
-        handoff = { status: 'login-required', body: handoff.body }
-        savePending(handoff)
-      }
       // An explicit ticket must not silently fall back to an unrelated existing account.
       await loadApp(null, handoff)
       return
     }
   }
-  if (handoff?.status === 'login-required') {
-    await loadApp(null, handoff)
-    return
-  }
   const { response, payload: user } = await readJson('/auth/me')
   if (response.status === 401) {
+    if (handoff?.status === 'login-required' && handoff.rejectedSession === undefined) {
+      handoff = { ...handoff, rejectedSession: null }
+      savePending(handoff)
+    }
     await loadApp(null, handoff)
     return
   }
   if (!response.ok) throw new Error('Login verification failed')
+  if (handoff?.status === 'login-required') {
+    const currentSession = await sessionFingerprint(user)
+    if (handoff.rejectedSession === undefined || handoff.rejectedSession === currentSession) {
+      // An unrecorded boundary establishes its baseline; it cannot prove a login.
+      handoff = { ...handoff, rejectedSession: currentSession }
+      savePending(handoff)
+      await loadApp(null, handoff)
+      return
+    }
+    handoff = { status: 'pending', body: handoff.body }
+    savePending(handoff)
+  }
   if (handoff?.status === 'pending') {
     const body = handoff.body
     try { handoff = { status: 'received', body, receipt: await submitFastNews(body, String(user.csrf || '')) } }

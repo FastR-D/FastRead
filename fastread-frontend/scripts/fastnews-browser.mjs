@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 const python = process.env.FASTREAD_TEST_PYTHON
 if (!python) throw new Error('Set FASTREAD_TEST_PYTHON to a Python with Read backend requirements and News werkzeug installed.')
 const contract = JSON.parse(await readFile('../contracts/fastnews-intake/v1/cases.json', 'utf8'))
-const news = resolve('../../fast-news/serve.py')
+const news = resolve(process.env.FASTNEWS_TEST_SOURCE || '../../fast-news/serve.py')
 const artifacts = 'test-results/fastnews'
 await mkdir(artifacts, { recursive: true })
 const work = await mkdtemp(join(tmpdir(), 'fastread-ui-wire-'))
@@ -58,7 +58,12 @@ try {
     const page = await context.newPage(), posts = [], receipts = []
     page.on('pageerror', error => errors.push(error.message))
     page.on('request', request => { if (new URL(request.url()).pathname === prefix + 'api/integrations/fastnews/intake') posts.push(request.postDataJSON()) })
-    page.on('response', async response => { if (new URL(response.url()).pathname === prefix + 'api/integrations/fastnews/intake' && response.ok()) receipts.push(await response.json()) })
+    page.on('response', async response => {
+      if (new URL(response.url()).pathname === prefix + 'api/integrations/fastnews/intake' && response.ok()) {
+        try { receipts.push(await response.json()) }
+        catch (error) { errors.push(`intake receipt: ${error.message}`) }
+      }
+    })
     const saved = page.getByRole('status').filter({ hasText: '已收入' })
     return { base, context, page, posts, receipts, saved }
   }

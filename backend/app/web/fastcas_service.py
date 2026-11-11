@@ -15,13 +15,16 @@ from .local_accounts import rate_limit
 class FastCASService:
     def __init__(self, store, sdk=None):
         self.store, self._sdk, self._lock = store, sdk, Lock()
+        configured = os.environ.get('FASTREAD_FASTCAS_ENABLED') != 'false'
+        self.login_enabled = configured and os.environ.get('FASTREAD_FASTCAS_LOGIN_ENABLED') != 'false'
+        self.link_enabled = configured and os.environ.get('FASTREAD_FASTCAS_LINK_ENABLED') != 'false'
         fields = ['ISSUER', 'CLIENT_ID', 'CLIENT_SECRET', 'REDIRECT_URI']
         self.config = {key.lower(): os.environ.get('FASTREAD_FASTCAS_' + key, '').strip() for key in fields}
         if sdk is not None:
             self.config.update(issuer=sdk.config.issuer, client_id=sdk.config.client_id, redirect_uri=sdk.config.redirect_uri)
-        elif any(self.config.values()) and not all(self.config.values()):
+        elif configured and any(self.config.values()) and not all(self.config.values()):
             raise ValueError('FastCAS requires issuer, client ID, client secret and redirect URI together')
-        self.enabled = sdk is not None or all(self.config.values())
+        self.enabled = configured and (sdk is not None or all(self.config.values()))
         self.links = FastCASLinks(store, self.config['issuer'], self.config['client_id'])
 
     @property
@@ -46,6 +49,8 @@ class FastCASService:
         return session
 
     def begin_link(self, binding, raw, password, peer):
+        if not self.link_enabled:
+            raise HTTPException(403, '此实例已关闭新的 FastCAS 认证')
         session = self.prove(raw, password, peer)
         return self.sdk.begin_link(binding, local_account_ref=session['user_id'], local_session_id=session['token'])
 
@@ -57,6 +62,8 @@ class FastCASService:
         if any(remote[k] != json.loads(row['payload'])[k] for k in ('id','subject','local_account_ref','client_id')):
             raise HTTPException(403, 'FastCAS 认证关系不匹配')
         if remote['state'] == 'prepared':
+            if not self.link_enabled:
+                raise HTTPException(403, '此实例已关闭新的 FastCAS 认证')
             remote = self.sdk.activate_link(row['id'])
         self._accept_remote(remote)
         return remote
@@ -74,6 +81,8 @@ class FastCASService:
         session = self.session(raw)
         result = self.sdk.finish_login(callback, binding, local_account_ref=session['user_id'] if session else '', local_session_id=session['token'] if session else '')
         if result['transaction']['purpose'] == 'link':
+            if not self.link_enabled:
+                raise HTTPException(403, '此实例已关闭新的 FastCAS 认证')
             link = self.sdk.prepare_link(result)
             # Recheck the original session after network calls and before committing.
             with self.store.connect(write=True) as db:
@@ -83,6 +92,8 @@ class FastCASService:
                 self.links._save(db, link)
             self._accept_remote(self.sdk.activate_link(link['id']))
             return None
+        if not self.login_enabled:
+            raise HTTPException(403, '此实例已关闭 FastCAS 登录')
         if result['transaction']['purpose'] != 'login':
             raise HTTPException(403, '请先通过项目邀请注册本地账号')
         identity = result['identity']

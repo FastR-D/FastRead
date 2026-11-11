@@ -21,7 +21,7 @@ from app.web.auth import create_user
 
 
 def test_published_sdk_link_login_sid_logout_and_signed_revocation(tmp_path, monkeypatch):
-    assert version('fastcas-sdk') == '0.1.1'
+    assert version('fastcas-sdk') == '0.1.2'
     key = JsonWebKey.generate_key('RSA', 2048, {'kid': 'fixture'}, is_private=True)
     peer = {'codes': {}, 'counter': 0, 'link': None}
     read_origin = 'http://127.0.0.1:8483'

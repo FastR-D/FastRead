@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Alert, Button, Loading, TextField } from '@fastrd/ui-react'
 
-type Status = { enabled: boolean; link: null | { id: string; subject: string; state: string; version: number } }
+type Status = { enabled: boolean; link_enabled?: boolean; link: null | { id: string; subject: string; state: string; version: number } }
 export default function FastCASAccount({ api }: { api: (path: string, method?: string, body?: unknown) => Promise<any> }) {
   const [status, setStatus] = useState<Status | null>(null)
   const [password, setPassword] = useState('')
@@ -34,10 +34,11 @@ export default function FastCASAccount({ api }: { api: (path: string, method?: s
     {error && <Alert tone="danger">{error}</Alert>}
     {!status ? <Loading label="正在读取账号状态…" /> : !status.enabled ? <p>此实例未启用 FastCAS，本地登录照常可用。</p> : <>
       <p>{!status.link ? '尚未认证' : status.link.state === 'active' ? '已通过 FastCAS 认证' : '认证待完成'}</p>
+      {status.link_enabled === false && !status.link && <p>管理员已关闭新的账号认证。</p>}
       <p>认证关联当前账号，资料库与权限保持不变。解除后仍可使用本地密码登录。</p>
       <label>当前账号密码<TextField type="password" autoComplete="current-password" maxLength={256} value={password} onChange={e => setPassword(e.target.value)} /></label>
-      {!status.link ? <Button loading={busy} disabled={!password} onClick={() => void act('link')}>认证当前账号</Button> : <>
-        {status.link.state === 'prepared' && <Button loading={busy} onClick={() => void act('reconcile')}>重试完成认证</Button>}
+      {!status.link ? <Button loading={busy} disabled={status.link_enabled === false || !password} onClick={() => void act('link')}>认证当前账号</Button> : <>
+        {status.link.state === 'prepared' && <Button loading={busy} disabled={status.link_enabled === false} onClick={() => void act('reconcile')}>重试完成认证</Button>}
         <Button variant="danger" loading={busy} disabled={!password} onClick={() => void act('revoke')}>解除认证</Button>
       </>}
     </>}

@@ -13,7 +13,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:fastui:browser": "node scripts/fastui-browser.mjs",
-    "test:fastnews:browser": "node scripts/fastnews-browser.mjs"
+    "test:fastcas:browser": "node scripts/fastcas-modes-browser.mjs",
+    "test:fastnews:browser": "node scripts/fastnews-browser.mjs",
+    "test:fastnews:auth:browser": "node scripts/fastnews-auth-browser.mjs"
   },
   "dependencies": {
     "@fastrd/ui-foundation": "0.1.2",
