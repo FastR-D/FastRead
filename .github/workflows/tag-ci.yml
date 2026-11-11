@@ -47,7 +47,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: FastR-D/FastDeploy
-          ref: cc223a0b83b0ef2389974dd70a4b74148cd1af87
+          ref: 9a2c51dcd63f47a0e6c8f6bb07bd22ea589abbd2
           path: .fastdeploy-tools
           persist-credentials: false
       - name: Package the tested runtime
@@ -62,7 +62,7 @@ jobs:
   deploy:
     needs: validate
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    uses: FastR-D/FastDeploy/.github/workflows/deploy.yml@cc223a0b83b0ef2389974dd70a4b74148cd1af87
+    uses: FastR-D/FastDeploy/.github/workflows/deploy.yml@9a2c51dcd63f47a0e6c8f6bb07bd22ea589abbd2
     with:
       app: fastread
       artifact-name: release-${{ github.sha }}
@@ -87,8 +87,8 @@ jobs:
         FASTREAD_FASTCAS_ALLOW_LOOPBACK_HTTP=false
         FASTREAD_FASTCAS_CLIENT_ID=fastread
         FASTREAD_FASTCAS_ISSUER=https://cas.fastrd.io
-        FASTREAD_FASTCAS_REDIRECT_URI=https://fastrd.io/read/api/auth/fastcas/callback
-        FASTREAD_PUBLIC_ORIGIN=https://fastrd.io
+        FASTREAD_FASTCAS_REDIRECT_URI=https://read.fastrd.io/api/auth/fastcas/callback
+        FASTREAD_PUBLIC_ORIGIN=https://read.fastrd.io
         FASTREAD_WEB_ROOT=/home/dev/fastread-web-shared/data
         FASTRESEARCH_API_URL=http://127.0.0.1:8787
         FASTRESEARCH_PANEL_URL=https://fastrd.io
