@@ -9,10 +9,12 @@
 发布示例（版本号每次必须唯一）：
 
 ```bash
-git tag v2026.11.11.1
-git push origin v2026.11.11.1
+git tag v2026.11.11-deploy.1
+git push origin v2026.11.11-deploy.1
 ```
 
 生产 Environment 仅允许 `v*` 标签和 main 上的手动回滚。切换后自动检查就绪，失败恢复旧代码和运行配置；数据库不会随代码回滚。需要回滚时，在 main 手动执行 `.github/workflows/rollback.yml`，输入部署日志中的准确当前 release ID；若当前版本已变化则拒绝执行。
 
 适配 main 提交不会重启当前业务。首个生产标签仍需验证登录、集成功能及数据兼容性。完整运行时、共享目录、旧服务接管和检查限制见 [FastDeploy README](https://github.com/FastR-D/FastDeploy#readme)。
+
+服务器使用 `v*-deploy.*` 标签，桌面端及 Docker 发布流程排除此类标签，避免服务器部署同时发布客户端或镜像。

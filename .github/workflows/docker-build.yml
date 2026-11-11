@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+      - '!v*-deploy.*'
   workflow_dispatch:
 
 env:
