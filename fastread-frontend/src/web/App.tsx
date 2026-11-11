@@ -12,6 +12,10 @@ import PdfReader from './PdfReader'
 import Neighbors from './Neighbors'
 import NotebookDesk from './NotebookDesk'
 import { PanelLeft } from 'lucide-react'
+import { Alert, Button, Select, TextField } from '@fastrd/ui-react'
+import { submitFastNews, type FastNewsHandoff } from './sso-bootstrap'
+import { colorMode } from './theme'
+import './settings.css'
 
 type Row = Record<string, any>
 let csrf = ''
@@ -38,7 +42,20 @@ async function request(path: string, method = 'GET', body?: unknown, key?: strin
   return value
 }
 
-export default function WebApp({ initialUser }: { initialUser?: Row | null }) {
+function FastNewsNotice({ handoff, onRetry }: { handoff: FastNewsHandoff | null; onRetry?: () => void }) {
+  if (!handoff) return null
+  if (handoff.status === 'invalid') return <Alert tone="danger">{handoff.error}</Alert>
+  if (handoff.status === 'received') return <Alert tone="success">来自 FastNews，已收入「{handoff.receipt.title}」。{handoff.receipt.awaiting_file ? '请自行上传 PDF。' : '原有文档已保留。'}</Alert>
+  if (handoff.status === 'login-required') return <Alert tone="warning">FastNews 登录票据未完成验证，「{handoff.body.title}」尚未收入。请重新登录后继续。</Alert>
+  return <Alert tone={handoff.status === 'failed' ? 'danger' : 'info'}>
+    <p>来自 FastNews，「{handoff.body.title}」尚未收入。{handoff.status === 'failed' ? handoff.error : onRetry ? '正在收入论文信息…' : '请登录后继续。'}</p>
+    {onRetry && <Button onClick={onRetry} loading={handoff.status === 'pending'}>重试收入</Button>}
+  </Alert>
+}
+
+export default function WebApp({ initialUser, initialHandoff = null }: { initialUser?: Row | null; initialHandoff?: FastNewsHandoff | null }) {
+  const [handoff, setHandoff] = useState(initialHandoff)
+  const handoffBody = handoff && 'body' in handoff ? handoff.body : null
   const [arrival] = useState(() => new URLSearchParams(window.location.search))
   const [deskTarget, setDeskTarget] = useState<Row | null>(arrival.get('book') ? { book_id: arrival.get('book') } : null)
   const [user, setUser] = useState<Row | null>(() => { if (initialUser) csrf = initialUser.csrf; return initialUser || null })
@@ -67,14 +84,16 @@ export default function WebApp({ initialUser }: { initialUser?: Row | null }) {
   const [searchResults, setSearchResults] = useState<Row | null>(null)
   const [searching, setSearching] = useState(false)
   const [settings, setSettings] = useState(false)
+  const [themeMode, setThemeMode] = useState(colorMode.mode)
+  useEffect(() => colorMode.subscribe(() => setThemeMode(colorMode.mode)), [])
   const [accountSettings, setAccountSettings] = useState(false)
   const [topic, setTopic] = useState<Row | null>(null)
   const [books, setBooks] = useState<Row[]>([])
   const [importBook, setImportBook] = useState('')
   const [tagFilter, setTagFilter] = useState('')
   const [neighborTag, setNeighborTag] = useState('')
-  const [importUrl, setImportUrl] = useState(arrival.get('url') || '')
-  const [sidebarOpen, setSidebarOpen] = useState(() => arrival.has('url') || arrival.get('source') === 'fastnews' || arrival.has('pending') || localStorage.getItem('fastread:sidebar') === 'open')
+  const [importUrl, setImportUrl] = useState(handoffBody?.url || arrival.get('url') || '')
+  const [sidebarOpen, setSidebarOpen] = useState(() => !!initialHandoff || arrival.has('url') || arrival.get('source') === 'fastnews' || arrival.has('pending') || localStorage.getItem('fastread:sidebar') === 'open')
   useEffect(() => { localStorage.setItem('fastread:sidebar', sidebarOpen ? 'open' : 'closed') }, [sidebarOpen])
   useEffect(() => { const close = (e: KeyboardEvent) => { if (e.key === 'Escape') setSidebarOpen(false) }; window.addEventListener('keydown', close); return () => window.removeEventListener('keydown', close) }, [])
 
@@ -86,6 +105,16 @@ export default function WebApp({ initialUser }: { initialUser?: Row | null }) {
     const data = await api(`/papers?limit=20&offset=${offset}&archived=${archived}`)
     setPapers(data.items); setTotal(data.total)
     setBooks((await api('/knowledge-bases')).items)
+  }
+  async function retryFastNews() {
+    if (!handoffBody || handoff?.status === 'pending') return
+    const body = handoffBody
+    setHandoff({ status: 'pending', body })
+    try {
+      const receipt = await submitFastNews(body, csrf)
+      setHandoff({ status: 'received', body, receipt })
+      void action(loadLibrary)
+    } catch (error) { setHandoff({ status: 'failed', body, error: (error as Error).message }) }
   }
   async function loadProviders() {
     const data = await api('/providers'); setProviders(data.items)
@@ -160,19 +189,20 @@ export default function WebApp({ initialUser }: { initialUser?: Row | null }) {
     return job
   }
   if (loading) return <div className="web-center">正在连接资料库…</div>
-  if (!user) return <LocalLogin />
+  if (!user) return <><FastNewsNotice handoff={handoff} /><LocalLogin /></>
 
   return (<OrganizeProvider jobs={jobs} submit={submitJob} api={api}><div className={`web-shell ${(sidebarOpen ? "sidebar-open" : "sidebar-closed") + (deskTarget ? " desk-mode" : "")}`}><header><button className="sidebar-toggle quiet" aria-label={sidebarOpen ? "收起左边栏" : "展开左边栏"} title={sidebarOpen ? "收起左边栏" : "展开左边栏"} aria-expanded={sidebarOpen} aria-controls={deskTarget ? "desk-sources" : "library-sidebar"} onClick={() => setSidebarOpen(!sidebarOpen)}><PanelLeft size={22} strokeWidth={1.7} /></button><button className="wordmark quiet" onClick={() => { setSelected(null); setTopic(null); setSearchResults(null); setTagFilter(''); setDeskTarget(null); window.history.replaceState(null, '', APP_BASE) }}>FastRead <span>KNOWLEDGE</span></button><span className="workspace-name">{safeIdentityLabel(user.display_name || user.workspace.name, 'FastRead 用户')}</span><div className="header-actions"><button className="quiet" onClick={() => setSettings(!settings)}>模型设置</button><button className="quiet" aria-label="账号设置" aria-expanded={accountSettings} onClick={() => setAccountSettings(!accountSettings)}>{safeIdentityLabel(user.display_name || user.workspace.name, 'FastRead 用户')}</button>{!user.public && <button className="quiet" onClick={() => void action(async () => { await api('/auth/logout', 'POST'); csrf = ''; setUser(null); setSelected(null); setMessages([]); setPapers([]); setJobs([]) })}>退出登录</button>}</div></header>
     {error && <div className="error banner" role="alert">{error}<button className="quiet" onClick={() => setError('')}>关闭</button></div>}
     {notice && <div role="status" className="notice banner">{notice}</div>}
+    <FastNewsNotice handoff={handoff} onRetry={() => void retryFastNews()} />
     {accountSettings && <FastCASAccount api={api} />}
-    {settings && <section className="settings"><h2>工作区模型</h2><label>当前使用的模型<select aria-label="当前使用的模型" value={`${providerId}|${model}`} onChange={e => { const [p,m] = e.target.value.split('|'); setProviderId(p); setModel(m) }}>{providers.flatMap(p => p.models.map((m: string) => <option key={`${p.id}|${m}`} value={`${p.id}|${m}`}>{m} · {p.name}</option>))}</select></label><p>供应商密钥仅保存在服务器，其他设备登录后可继续使用。当前 24 小时任务上限：{user.workspace.daily_limit}。</p>{providers.map(p => <p key={p.id}>{p.name} · {p.models.join(' / ')}</p>)}
+    {settings && <section className="fastread-settings" aria-label="模型设置"><h2>工作区模型</h2><label>设置页颜色模式<Select value={themeMode} onChange={e => colorMode.setMode(e.target.value as 'light' | 'dark' | 'system')}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></Select></label><label>当前使用的模型<Select aria-label="当前使用的模型" value={`${providerId}|${model}`} onChange={e => { const [p,m] = e.target.value.split('|'); setProviderId(p); setModel(m) }}>{providers.flatMap(p => p.models.map((m: string) => <option key={`${p.id}|${m}`} value={`${p.id}|${m}`}>{m} · {p.name}</option>))}</Select></label><p>供应商密钥仅保存在服务器，其他设备登录后可继续使用。当前 24 小时任务上限：{user.workspace.daily_limit}。</p>{providers.map(p => <p key={p.id}>{p.name} · {p.models.join(' / ')}</p>)}
       {user.role === 'owner' && <form onSubmit={e => { e.preventDefault(); const f = e.currentTarget; const data = Object.fromEntries(new FormData(f)); void action(async () => { await api('/providers', 'POST', { ...data, models: String(data.models).split(',').map(v => v.trim()) }); f.reset(); await loadProviders(); setNotice('供应商已保存') }) }}>
-        <label>名称<input name="name" required /></label><label>API 地址<input name="base_url" type="url" placeholder="https://api.example.com/v1" required /></label><label>API 密钥<input name="api_key" type="password" autoComplete="off" required /></label><label>模型 ID（逗号分隔）<input name="models" defaultValue="qwen3.8-27b,glm-5.2" required /></label><button>保存供应商</button>
+        <label>名称<TextField name="name" required /></label><label>API 地址<TextField name="base_url" type="url" placeholder="https://api.example.com/v1" required /></label><label>API 密钥<TextField name="api_key" type="password" autoComplete="off" required /></label><label>模型 ID（逗号分隔）<TextField name="models" defaultValue="qwen3.8-27b,glm-5.2" required /></label><Button type="submit">保存供应商</Button>
       </form>}</section>}
     <div className="web-columns">{sidebarOpen && <button className="sidebar-backdrop" aria-label="关闭资料库抽屉" onClick={() => setSidebarOpen(false)} />}<aside id="library-sidebar" inert={!sidebarOpen}><div className="section-heading"><h2>{archived ? '已归档' : '资料库'}</h2><span>{total} 篇</span><button className="quiet" onClick={() => { setArchived(!archived); setOffset(0); setSelected(null) }}>{archived ? '返回资料库' : '查看归档'}</button></div><form className="search" onSubmit={e => { e.preventDefault(); const query = String(new FormData(e.currentTarget).get('query')); setSearching(true); void action(async () => setSearchResults(await api('/search', 'POST', { query }))).finally(() => setSearching(false)) }}><label>搜索公开论文<input name="query" placeholder="论文标题、DOI 或关键词" required /></label><button disabled={searching}>{searching ? '搜索中…' : '搜索'}</button></form>
       <label>导入时识别标题与作者<select aria-label="元数据模型" value={metadataModel} onChange={e => setMetadataModel(e.target.value)}><option value="">版面识别与公开索引核验</option>{providers.flatMap(p => p.models.map((m: string) => <option key={p.id + '|' + m} value={p.id + '|' + m}>{m} · {p.name}</option>))}</select></label>{metadataModel && <small>第一页文本将交给所选模型，计入工作区模型任务额度。</small>}
-      <button className="home-nav" onClick={() => { setSelected(null); setTopic(null); setSearchResults(null) }}>▦ 知识库与关系矩阵</button><details className="import-box" open={arrival.has("url") || arrival.get("source") === "fastnews" || arrival.has("pending") || undefined}><summary>导入论文</summary>{arrival.get("source") === "fastnews" && <p className="notice">{arrival.get("title") ? `来自 FastNews，已收入「${arrival.get("title")}」。请自行上传 PDF。` : "来自 FastNews，请自行上传 PDF。"}</p>}<label>导入后归入<select aria-label="导入知识库" value={importBook} onChange={e => setImportBook(e.target.value)}><option value="">AI 自动归入知识库</option>{books.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label><form onSubmit={e => { e.preventDefault(); const url = String(new FormData(e.currentTarget).get('url')); void action(() => submitJob('/imports/url', { url, knowledge_id: importBook, source: arrival.get('source') || '', external_id: arrival.get('external_id') || '' })) }}><label>论文链接<input name="url" value={importUrl} onChange={e => setImportUrl(e.target.value)} type="url" placeholder="https://arxiv.org/pdf/…" required /></label><button>导入链接</button></form><label className="file-button">上传 PDF<input aria-label="上传 PDF" type="file" accept="application/pdf" onChange={e => { const file = e.target.files?.[0]; if (!file) return; const data = new FormData(); data.set('file', file); data.set('knowledge_id', importBook); if (arrival.get('pending')) data.set('paper_id', arrival.get('pending')!); void action(() => submitJob('/imports/pdf', data)); e.target.value = '' }} /></label></details>
+      <button className="home-nav" onClick={() => { setSelected(null); setTopic(null); setSearchResults(null) }}>▦ 知识库与关系矩阵</button><details className="import-box" open={!!handoff || arrival.has("url") || arrival.get("source") === "fastnews" || arrival.has("pending") || undefined}><summary>导入论文</summary><label>导入后归入<select aria-label="导入知识库" value={importBook} onChange={e => setImportBook(e.target.value)}><option value="">AI 自动归入知识库</option>{books.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></label><form onSubmit={e => { e.preventDefault(); const url = String(new FormData(e.currentTarget).get('url')); void action(() => submitJob('/imports/url', { url, knowledge_id: importBook, source: handoffBody ? 'fastnews' : arrival.get('source') || '', external_id: handoffBody?.external_id || arrival.get('external_id') || '' })) }}><label>论文链接<input name="url" value={importUrl} onChange={e => setImportUrl(e.target.value)} type="url" placeholder="https://arxiv.org/pdf/…" required /></label><button>导入链接</button></form><label className="file-button">上传 PDF<input aria-label="上传 PDF" type="file" accept="application/pdf" onChange={e => { const file = e.target.files?.[0]; if (!file) return; const data = new FormData(); data.set('file', file); data.set('knowledge_id', importBook); const paperId = handoff?.status === 'received' ? handoff.receipt.id : arrival.get('pending'); if (paperId) data.set('paper_id', paperId); void action(() => submitJob('/imports/pdf', data)); e.target.value = '' }} /></label></details>
       <nav className="paper-list">{papers.map(p => <button key={p.id} className={selected?.id === p.id ? 'paper active' : 'paper'} onClick={() => void action(async () => { if (archived) { await api(`/papers/${p.id}/restore`, 'POST'); await loadLibrary(); setNotice('论文已恢复到资料库') } else await openPaper(p.id) })}><strong>{p.title}</strong>{archived && <span>点击恢复到资料库</span>}<span>{p.year || '年份待核实'} · {p.page_count} 页</span></button>)}</nav><div className="pagination"><button className="quiet" disabled={!offset} onClick={() => setOffset(Math.max(0, offset - 20))}>上一页</button><span>{offset + 1}–{Math.min(offset + 20, total)}</span><button className="quiet" disabled={offset + 20 >= total} onClick={() => setOffset(offset + 20)}>下一页</button></div>
     </aside><main className="reading-main">
       {deskTarget ? <NotebookDesk key={deskTarget.book_id || deskTarget.paper_id} target={deskTarget} api={api} action={action} jobs={jobs} providerId={providerId} model={model} sidebarOpen={sidebarOpen} onHome={() => { setDeskTarget(null); setSelected(null); window.history.replaceState(null, '', APP_BASE) }} onExternal={(id: string) => { setDeskTarget({ paper_id: id }); window.history.replaceState(null, '', APP_BASE + '?paper=' + encodeURIComponent(id)) }} /> : searchResults ? <section className="search-results"><div className="section-heading"><h1>搜索结果</h1><button className="quiet" onClick={() => setSearchResults(null)}>返回阅读</button></div><p>公开来源：{Object.entries(searchResults.sources || {}).map(([name, status]) => `${name} ${(status as Row).available ? '可用' : (status as Row).reason || '暂不可用'}`).join(' · ')}</p>{searchResults.papers.map((p: Row, i: number) => <article key={p.id || i}><h2>{p.title}</h2><p>{p.authors?.join(', ')} · {p.year || '年份待核实'}</p><small>{(p.discovery_sources || []).join(' / ')}{p.doi ? ` · DOI: ${p.doi}` : ''}</small>{p.identity_warning && <p role="note">{p.identity_warning}</p>}<p>{p.abstract?.slice(0, 500)}</p><div className="toolbar">{(p.pdf_url || p.url || p.source_url) && <a href={p.pdf_url || p.url || p.source_url} target="_blank" rel="noreferrer">查看来源</a>}<button onClick={() => void action(() => submitJob('/imports/url', { url: p.pdf_url || p.url || p.source_url || `https://doi.org/${p.doi}` }))}>导入这篇论文</button></div></article>)}</section> : topic ? <section><div className="section-heading"><h1>{topic.question}</h1><button className="quiet" onClick={() => setTopic(null)}>返回阅读</button></div><p>{topic.scope}</p><h2>专题证据</h2>{topic.evidence.map((e: Row) => <article key={e.id}><blockquote>第 {e.page} 页 · {e.quote}</blockquote><p>{e.note}</p><small>{e.location_status === 'located' ? '逐字引文已在迁移原文定位' : '原文定位待复核'}</small></article>)}</section> : !selected ? <Knowledge onOpenBook={(id: string) => { setDeskTarget({ book_id: id }); if(window.innerWidth > 900) setSidebarOpen(true); window.history.replaceState(null, '', APP_BASE + '?book=' + encodeURIComponent(id)) }} api={api} action={action} openPaper={openPaper} submitJob={submitJob} providerId={providerId} model={model} revision={jobs.map(j => `${j.id}:${j.state}`).join(',')} initialTag={tagFilter} /> : <>

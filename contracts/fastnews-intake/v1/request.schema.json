@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FastRead FastNews normalized intake",
+  "type": "object",
+  "required": ["title"],
+  "properties": {
+    "title": {"type": "string", "minLength": 1, "maxLength": 300, "pattern": "\\S"},
+    "authors": {"type": "string", "maxLength": 400, "default": ""},
+    "abstract": {"type": "string", "maxLength": 800, "default": ""},
+    "url": {"type": "string", "maxLength": 2048, "default": ""},
+    "venue": {"type": "string", "maxLength": 80, "default": ""},
+    "year": {"type": "string", "maxLength": 8, "default": ""},
+    "external_id": {"type": "string", "maxLength": 200, "default": ""}
+  },
+  "description": "Canonical input after text whitespace normalization. Raw text fields are stringified, null becomes empty. Invalid/non-HTTP(S)/credential-bearing URLs become empty; URLs truncate to 2048. Extra fields are ignored, including id and doi: browser handoff must map id to external_id."
+}

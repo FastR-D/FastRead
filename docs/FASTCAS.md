@@ -4,7 +4,9 @@
 
 ## 开发配置
 
-在 FastRead 根目录运行 `python -m pip install -r requirements-fastcas.txt`，安装 PyPI 的 `fastcas-sdk[fastapi]==0.1.2`，不需要同级 FastCAS 源码目录。本地模式不需要 SDK，不会访问 FastCAS。
+在 FastRead 根目录运行 `python -m pip install -r backend/requirements.txt -r requirements-fastcas.txt`，从 PyPI 安装固定发行版 `fastcas-sdk[fastapi]==0.1.2`（导入名 `fastcas`），不需要同级 FastCAS 源码目录。本地模式不需要 SDK，不会访问 FastCAS。
+
+三个后端镜像入口 `backend/Dockerfile`、`backend/Dockerfile.gpu`、`Dockerfile.complete` 均通过 `--build-arg FASTCAS_ENABLED=true` 安装同一可选依赖并检查 FastAPI 适配层导入。例如在仓库根执行 `docker build -f backend/Dockerfile --build-arg FASTCAS_ENABLED=true -t fastread-cas:local .`。默认构建保留无 SDK 的本地模式；运行时启用下面四项连接配置前必须选择 CAS-enabled 构建。Compose 用户可在本地 override 的 backend.build.args 中指定 `FASTCAS_ENABLED: "true"`，连接配置放入 backend.environment；这不是自动启用 CAS 登录的开关。
 
 连接配置四项必须同时提供：
 
@@ -28,6 +30,18 @@
 `/api/auth/fastcas` 下提供 GET `available`、`login`、`callback`、`status`；POST `link`、`reconcile`、`revoke`、`events`。link/revoke 接受 `{password}`；reconcile 使用当前账号的 prepared 映射。events 只接受最大 64 KiB 的 `application/jwt`，由 SDK 校验 issuer、audience、签名、类型和期限，应用原子提交去重、版本检查、绑定更新和会话撤销。
 
 ## 验证和剩余工作
+
+发行包门禁 `.github/workflows/fastcas-release-contract.yml` 在单仓 checkout
+安装完整后端依赖与可选集，执行依赖兼容检查及
+`backend/tests/fastcas_release_contract.py`。该场景通过安装的 0.1.2 wheel
+访问可丢弃的 HTTP OIDC 签名对端，并经过 FastRead 实际认证路由与 SQLite，
+覆盖绑定、PKCE/nonce 回调、单次消费、SID/全局登出、签名撤销与本地会话保留。
+它验证发行包与产品 adapter，不代表部署中的 Go FastCAS 提供方联调。
+普通质量门仍只安装基础依赖；CAS 镜像 job 单独构建并检查运行时导入。
+
+FastNews intake 的 receiver-owned wire 合同及浏览器交接边界见
+`contracts/fastnews-intake/v1/README.md`。HTTP intake 回归读取同目录
+`cases.json`，覆盖 CSRF、校验、去重、工作区隔离及已附 PDF 保留。
 
 `PYTHONPATH=backend python3 -m pytest --noconftest backend/tests/test_local_accounts.py backend/tests/test_fastcas_store.py backend/tests/test_fastcas_service.py -q`：16 项通过。跳过全局桌面数据库 fixture，仅验证账号和接入服务；不代表全仓库回归。
 

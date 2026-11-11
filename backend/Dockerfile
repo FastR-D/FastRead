@@ -21,6 +21,12 @@ WORKDIR /app
 # 先复制 requirements.txt 利用层缓存
 COPY ./backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -i ${PIP_INDEX} -r requirements.txt
+COPY ./requirements-fastcas.txt /app/requirements-fastcas.txt
+ARG FASTCAS_ENABLED=false
+RUN if [ "$FASTCAS_ENABLED" = "true" ]; then \
+      pip install --no-cache-dir -i ${PIP_INDEX} -r requirements.txt -r requirements-fastcas.txt && \
+      python -c "from fastcas import FastCAS; from fastcas.fastapi import receive_event, receive_logout"; \
+    fi
 
 # 再复制应用代码（频繁变动不影响 pip 缓存层）
 COPY ./backend /app

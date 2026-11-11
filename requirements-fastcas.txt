@@ -1,2 +1,4 @@
-# Optional FastCAS integration (Python >=3.10); local/Research login remains independent.
+# Optional CAS-enabled install (Python >=3.10), from the FastRead repository root:
+# python -m pip install -r requirements-fastcas.txt
+# Normal local/Research login does not import this SDK.
 fastcas-sdk[fastapi]==0.1.2

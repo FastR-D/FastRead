@@ -1,13 +1,15 @@
 import json
 import sqlite3
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.web.api import create_web_app
-from app.web.auth import create_user
+from app.web.auth import create_user, login
 from app.web.store import Store
 from app.web.worker import execute
 
@@ -152,6 +154,104 @@ def test_paginated_summaries_and_immutable_versions(setup):
     assert listing["total"] == 1 and len(listing["items"]) == 1
     for forbidden in ["pages", "paperDocument", "result", "metadata", "text"]:
         assert forbidden not in listing["items"][0]
+
+
+@pytest.mark.parametrize("count", [0, 1, 49, 50, 51, 60, 121])
+def test_messages_default_latest_window_and_explicit_history(tmp_path, monkeypatch, count):
+    # Gap: the desk omits offset, so a historical first page hides new messages.
+    monkeypatch.setenv("FASTREAD_COOKIE_SECURE", "false")
+    app = create_web_app(tmp_path)
+    store = app.state.store
+    user = create_user(store, "window@example.test", "disposable-password")
+    other = create_user(store, "other@example.test", "disposable-password")
+    client = TestClient(app)
+    token, csrf = login(store, user["email"], "disposable-password", "127.0.0.1")
+    client.cookies.set("fastread_session", token)
+    client.headers["X-CSRF-Token"] = csrf
+    paper = store.ingest(user["workspace_id"], document())
+    cid = client.post(f"/api/papers/{paper['paper_id']}/conversations").json()["id"]
+    path = f"/api/conversations/{cid}/messages"
+    ids = [f"m{i:03}" for i in range(count)]
+    with store.connect(write=True) as db:
+        # Reverse insertion and tied timestamps expose incomplete ordering keys.
+        db.executemany("INSERT INTO messages VALUES(?,?,?,?,?,?,?)", [
+            (mid, cid, "assistant", mid, '{"sources":[]}', None, i // 4)
+            for i, mid in reversed(list(enumerate(ids)))
+        ])
+        db.execute("INSERT INTO providers VALUES(?,?,?,?,?,?,?)", (
+            "window-provider", user["workspace_id"], "Fixture", "https://example.test/v1",
+            "unused", '["window-model"]', time.time()))
+    windows = {}
+    for query, expected in [
+        ("", ids[-50:]), ("?limit=10", ids[-10:]),
+        ("?limit=1", ids[-1:]), ("?limit=100", ids[-100:]),
+        ("?offset=0", ids[:50]), ("?limit=10&offset=0", ids[:10]),
+        ("?limit=10&offset=50", ids[50:60]), (f"?offset={count}", []),
+    ]:
+        response = client.get(path + query)
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert [row["id"] for row in items] == expected, query
+        assert all(row["evidence"] == {"sources": []} for row in items)
+        windows[query or "default"] = [row["id"] for row in items]
+    for query in ["?limit=0", "?limit=101", "?offset=-1", "?offset="]:
+        assert client.get(path + query).status_code == 422
+    sent = client.post(path, json={"content": "latest question", "provider_id": "window-provider",
+                                  "model": "window-model"}, headers={"Idempotency-Key": "latest"})
+    assert sent.status_code == 202
+    for _ in range(2):
+        assert client.get(path).json()["items"][-1]["content"] == "latest question"
+    if count == 60:
+        requests = []
+        class ModelHandler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+                completion = {"answer": "Latest grounded answer", "citations": [
+                    {"page": 1, "exact_quote": document()["pages"][0]["text"]}]}
+                body = json.dumps({"id": "fixture", "object": "chat.completion", "created": 1,
+                    "model": "window-model", "choices": [{"index": 0, "finish_reason": "stop",
+                    "message": {"role": "assistant", "content": json.dumps(completion)}}]}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), ModelHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            monkeypatch.setenv("CHAT_VECTOR_INDEX_ENABLED", "false")
+            with store.connect(write=True) as db:
+                db.execute("UPDATE providers SET base_url=? WHERE id='window-provider'",
+                           (f"http://127.0.0.1:{server.server_port}/v1",))
+            claimed = store.claim("window-worker")
+            assert claimed["id"] == sent.json()["id"]
+            execute(store, claimed, "window-worker")
+            assert len(requests) == 1
+            assert requests[0]["messages"][-1]["content"] == "latest question"
+            assert client.get(f"/api/jobs/{claimed['id']}").json()["state"] == "succeeded"
+            for _ in range(2):
+                latest = client.get(path).json()["items"]
+                assert len(latest) == 50
+                assert [row["role"] for row in latest[-2:]] == ["user", "assistant"]
+                assert latest[-1]["content"] == "Latest grounded answer"
+                assert latest[-1]["evidence"]["sources"][0]["exact_quote"] == document()["pages"][0]["text"]
+        finally:
+            server.shutdown(); server.server_close(); thread.join(timeout=5)
+    assert client.get("/api/conversations/missing/messages").status_code == 404
+    assert TestClient(app).get(path).status_code == 401
+    unrelated = store.ingest(user["workspace_id"], document() | {"doi": "10.1234/other"})
+    unrelated_cid = client.post(f"/api/papers/{unrelated['paper_id']}/conversations").json()["id"]
+    for query in ["", "?offset=0"]:
+        assert client.get(f"/api/conversations/{unrelated_cid}/messages" + query).json()["items"] == []
+    other_token, _ = login(store, other["email"], "disposable-password", "127.0.0.1")
+    client.cookies.set("fastread_session", other_token)
+    for query in ["", "?offset=0"]:
+        assert client.get(path + query).status_code == 404
+    (tmp_path / "message-window.json").write_text(json.dumps({
+        "initial_count": count, "windows": windows, "posted_question_visible": True,
+        "worker_answer_verified": count == 60, "anonymous": 401, "other_workspace": 404,
+    }, sort_keys=True, indent=2), encoding="utf-8")
 
 
 def test_atomic_dedupe_and_concurrency_limits(setup):

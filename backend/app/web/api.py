@@ -468,9 +468,13 @@ def create_web_app(root=None, frontend=None):
         return row
 
     @api.get("/conversations/{cid}/messages")
-    def messages(cid: str, user: User, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)):
+    def messages(cid: str, request: Request, user: User, limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0)):
         owned_conversation(cid, user)
-        rows = store.all("SELECT * FROM messages WHERE conversation_id=? ORDER BY created,id LIMIT ? OFFSET ?", (cid, limit, offset))
+        if "offset" in request.query_params:
+            rows = store.all("SELECT * FROM messages WHERE conversation_id=? ORDER BY created,id LIMIT ? OFFSET ?", (cid, limit, offset))
+        else:
+            rows = store.all("SELECT * FROM messages WHERE conversation_id=? ORDER BY created DESC,id DESC LIMIT ?", (cid, limit))
+            rows.reverse()
         for row in rows:
             row["evidence"] = json.loads(row["evidence"])
         return {"items": rows}

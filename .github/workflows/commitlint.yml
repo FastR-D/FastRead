@@ -2,7 +2,7 @@ name: Commit Lint
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   push:
     branches:
       - develop
@@ -23,8 +23,27 @@ jobs:
           fetch-depth: 0
 
       - name: Run commitlint
+        if: github.event_name == 'push'
         uses: wagoid/commitlint-github-action@v6
         with:
           configFile: .commitlintrc.json
           failOnWarnings: false
-          helpURL: https://github.com/FastR-D/FastRead/blob/develop/CONTRIBUTING.md#5-提交规范
+          helpURL: https://github.com/FastR-D/FastRead/blob/main/docs/CONTRIBUTING.md
+
+      - name: Set up Node
+        if: github.event_name == 'pull_request'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install commitlint
+        if: github.event_name == 'pull_request'
+        run: npm install --prefix "$RUNNER_TEMP/commitlint" --no-package-lock --ignore-scripts @commitlint/cli@19.8.1 @commitlint/config-conventional@19.8.1
+
+      - name: Lint squash commit title
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          export NODE_PATH="$RUNNER_TEMP/commitlint/node_modules"
+          printf '%s\n' "$PR_TITLE" | "$RUNNER_TEMP/commitlint/node_modules/.bin/commitlint" --config .commitlintrc.json
