@@ -9,7 +9,7 @@ export default function LocalLogin() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState(new URLSearchParams(window.location.search).get('fastcas') === 'failed' ? 'FastCAS 登录未完成。请使用原方式登录，并在账号设置中认证；也可稍后重试。' : '')
   const [fastcas, setFastcas] = useState(false)
-  useEffect(() => { fetch(`${API_BASE}/auth/fastcas/available`).then(r => r.ok ? r.json() : null).then(v => setFastcas(v?.enabled === true)).catch(() => {}) }, [])
+  useEffect(() => { fetch(`${API_BASE}/auth/fastcas/available`).then(r => r.ok ? r.json() : null).then(v => setFastcas(v?.enabled === true && v.login_enabled !== false)).catch(() => {}) }, [])
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setMessage('')
     try {

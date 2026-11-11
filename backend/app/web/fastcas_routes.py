@@ -51,11 +51,13 @@ def register_fastcas_routes(app, store, set_session_cookie, service=None):
 
     @app.get('/api/auth/fastcas/available')
     def available():
-        return {'enabled': service.enabled}
+        return {'enabled': service.enabled, 'login_enabled': service.enabled and service.login_enabled, 'link_enabled': service.enabled and service.link_enabled}
 
     @app.get('/api/auth/fastcas/login')
     def login():
         enabled()
+        if not service.login_enabled:
+            raise HTTPException(403, '此实例已关闭 FastCAS 登录')
         binding = secrets.token_urlsafe(32)
         url = execute(lambda: service.sdk.begin_login(binding))
         return cookie(RedirectResponse(url, status_code=302), binding)
@@ -90,7 +92,7 @@ def register_fastcas_routes(app, store, set_session_cookie, service=None):
     def status(request: Request):
         user = require_user(request)
         row = service.current(user.user_id) if service.enabled else None
-        return {'enabled': service.enabled, 'link': {k: row[k] for k in ('id','subject','state','version')} if row else None}
+        return {'enabled': service.enabled, 'link_enabled': service.enabled and service.link_enabled, 'link': {k: row[k] for k in ('id','subject','state','version')} if row else None}
 
     @app.post('/api/auth/fastcas/reconcile')
     def reconcile(request: Request):
