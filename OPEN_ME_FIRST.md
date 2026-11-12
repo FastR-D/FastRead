@@ -2,7 +2,7 @@
 
 Use this project on Windows with the local startup script.
 
-1. Make sure `backend\.venv` and `fastread-frontend\node_modules` already exist.
+1. Install Go 1.26.8, PowerShell 7, Poppler, and the frontend dependencies described in `README.md`.
 2. Double click `run.bat`.
 3. If startup fails, open `README.md` and check the local dependency setup steps.
 

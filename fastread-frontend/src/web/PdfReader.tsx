@@ -7,7 +7,7 @@ type Props = { paper: Row; version: string; page: number; setPage: (p: number) =
 let engine: Promise<any> | undefined
 let worker: any
 function pdfEngine() {
-  const url = assetUrl('/vendor/pdfjs/pdf.js?v=4.10.38')
+  const url = new URL(assetUrl('/vendor/pdfjs/pdf.js?v=4.10.38'), window.location.origin).href
   return engine ||= import(/* @vite-ignore */ url).then(pdf => {
     pdf.GlobalWorkerOptions.workerSrc = assetUrl('/vendor/pdfjs/pdf.worker.js?v=4.10.38')
     return pdf

@@ -1,4 +1,13 @@
 # Git 和 IDE
+AGENTS.md
+**/production-login.txt
+**/production-bootstrap.json
+work/
+.runtime/
+**/web-data/
+backend/.venv/
+backend/.runtime/
+.npm-cache-codex/
 .git
 .github
 .idea/
@@ -31,6 +40,7 @@ build/
 
 # 环境文件
 .env
+.env.*
 .env.local
 .env.*.local
 !.env.example

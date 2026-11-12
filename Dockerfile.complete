@@ -1,118 +1,26 @@
-# === 阶段1：构建 Backend ===
-FROM python:3.11-slim AS backend-builder
+FROM golang:1.26.8-bookworm AS api
+WORKDIR /src
+COPY backend-go/go.mod backend-go/go.sum ./
+RUN go mod download
+COPY backend-go/ ./
+RUN CGO_ENABLED=0 go build -trimpath -o /fastread ./cmd/fastread
 
-ARG PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple
-
-ENV PATH="/usr/bin:${PATH}"
-ENV HF_ENDPOINT=https://hf-mirror.com
-
-WORKDIR /tmp/backend
-
-# 先复制 requirements.txt 利用层缓存
-COPY ./backend/requirements.txt /tmp/backend/requirements.txt
-RUN pip install --no-cache-dir -i ${PIP_INDEX} -r requirements.txt
-COPY ./requirements-fastcas.txt /tmp/backend/requirements-fastcas.txt
-ARG FASTCAS_ENABLED=false
-RUN if [ "$FASTCAS_ENABLED" = "true" ]; then \
-      pip install --no-cache-dir -i ${PIP_INDEX} -r requirements.txt -r requirements-fastcas.txt && \
-      python -c "from fastcas import FastCAS; from fastcas.fastapi import receive_event, receive_logout"; \
-    fi
-
-COPY ./backend /tmp/backend
-
-# === 阶段2：构建 Frontend ===
-# Node 18-alpine 跑不动 Tailwind v4 / Vite 6（前者要求 Node 20+，后者推荐 Node 20+），
-# 升到 node:20-alpine。alpine 走 musl，pnpm 会按 lockfile 拉 *-linux-x64-musl native binary。
-FROM node:20-alpine AS frontend-builder
-
-# pnpm 版本 pin 到 9 系列：
-# - lockfile (fastread-frontend/pnpm-lock.yaml) 是 lockfileVersion '9.0'，由 pnpm 9 生成
-# - pnpm 11+ 要求 Node 22+，与 node:20 不兼容（ERR_UNKNOWN_BUILTIN_MODULE）
-# - 不用 @latest 避免上游 pnpm 升级悄悄破坏 CI
+FROM node:24-bookworm-slim AS web
 RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
-
-WORKDIR /tmp/frontend
-
-# 先复制 package.json + lockfile 利用依赖层缓存
-# --frozen-lockfile 保证 CI 与本地开发依赖版本一致，杜绝 semver 漂移引入的破坏性升级
-COPY ./fastread-frontend/package.json ./fastread-frontend/pnpm-lock.yaml ./
+WORKDIR /src
+COPY fastread-frontend/package.json fastread-frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
+COPY fastread-frontend/ ./
+RUN pnpm build
 
-COPY ./fastread-frontend /tmp/frontend
-
-# 设置环境变量，告诉 vite.config.ts 这是 Docker 构建
-ENV DOCKER_BUILD=1
-RUN pnpm run build
-
-# === 阶段3：完整应用镜像 ===
-FROM python:3.11-slim
-
-ARG APT_MIRROR=mirrors.tuna.tsinghua.edu.cn
-
-# 安装必要的运行时依赖
-RUN set -ex && \
-    rm -f /etc/apt/sources.list && \
-    rm -rf /etc/apt/sources.list.d/* && \
-    echo "deb http://${APT_MIRROR}/debian bookworm main contrib non-free non-free-firmware" > /etc/apt/sources.list && \
-    echo "deb http://${APT_MIRROR}/debian bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-    echo "deb http://${APT_MIRROR}/debian-security bookworm-security main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends nginx supervisor procps && \
-    rm -rf /var/lib/apt/lists/*
-
-ENV PATH="/usr/bin:${PATH}"
-ENV HF_ENDPOINT=https://hf-mirror.com
-ENV PYTHONUNBUFFERED=1
-ENV FASTREAD_DATA_ROOT=/var/lib/fastread \
-    DATABASE_URL=sqlite:////var/lib/fastread/fastread.db \
-    UPLOAD_DIR=/var/lib/fastread/uploads \
-    PAPER_OUTPUT_DIR=/var/lib/fastread/paper_results \
-    DATA_DIR=/var/lib/fastread/data \
-    VECTOR_DB_DIR=/var/lib/fastread/vector_db
-
-# 复制 Python 依赖
-COPY --from=backend-builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=backend-builder /usr/local/bin /usr/local/bin
-
-# 复制 backend 代码
-COPY ./backend /app/backend
-WORKDIR /app/backend
-RUN mkdir -p /var/lib/fastread
-
-# 复制前端静态文件到 nginx
-COPY --from=frontend-builder /tmp/frontend/dist /usr/share/nginx/html
-
-# 配置 nginx
-RUN rm -rf /etc/nginx/conf.d/default.conf
-COPY ./nginx/complete.conf /etc/nginx/conf.d/default.conf
-
-# 创建 supervisor 配置
-RUN mkdir -p /var/log/supervisor
-COPY <<EOF /etc/supervisor/conf.d/supervisord.conf
-[supervisord]
-nodaemon=true
-user=root
-logfile=/var/log/supervisor/supervisord.log
-pidfile=/var/run/supervisord.pid
-
-[program:nginx]
-command=nginx -g "daemon off;"
-stdout_logfile=/var/log/supervisor/nginx.log
-stderr_logfile=/var/log/supervisor/nginx.log
-autorestart=true
-priority=10
-
-[program:backend]
-command=python main.py
-directory=/app/backend
-stdout_logfile=/var/log/supervisor/backend.log
-stderr_logfile=/var/log/supervisor/backend.log
-autorestart=true
-priority=20
-environment=BACKEND_PORT="8483",BACKEND_HOST="127.0.0.1",FASTREAD_DATA_ROOT="/var/lib/fastread"
-EOF
-
-# 启动 supervisor
-VOLUME ["/var/lib/fastread"]
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates poppler-utils tini curl && rm -rf /var/lib/apt/lists/*
+COPY --from=api /fastread /usr/local/bin/fastread
+COPY --from=web /src/dist /app/web
+COPY deploy/web/container-entrypoint.sh /usr/local/bin/fastread-start
+RUN chmod +x /usr/local/bin/fastread-start
+ENV FASTREAD_WEB_ROOT=/var/lib/fastread/web FASTREAD_DATA_ROOT=/var/lib/fastread/config FASTREAD_FRONTEND_DIST=/app/web FASTREAD_COOKIE_SECURE=false
+VOLUME /var/lib/fastread
 EXPOSE 80
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+HEALTHCHECK --interval=20s --timeout=5s CMD curl -fsS http://127.0.0.1/api/health || exit 1
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/fastread-start"]

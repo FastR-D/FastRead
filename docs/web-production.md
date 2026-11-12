@@ -5,10 +5,11 @@ source-grounded organization and questions, and persistent notebook notes. Model
 jobs run on the worker; the browser displays organization progress immediately
 and follows the server's queued, running, succeeded, and failure states.
 
-## FastResearch authentication
+## Account authentication
 
-The web entry point now requires FastResearch SSO. Password login and automatic
-public guest sessions are disabled. Configure these on the backend:
+Local accounts use invite registration, password recovery, and workspace-bound
+sessions. FastResearch SSO and optional FastCAS linking retain the same account
+and workspace. Configure the Research connection on the backend:
 
 ```dotenv
 FASTRESEARCH_API_URL=http://127.0.0.1:8787
@@ -54,6 +55,7 @@ the backend or worker. A frontend-only release does not require a worker restart
 Keep runtime data, uploaded papers, login files, provider secrets, and host-specific
 deployment helpers out of release source commits.
 
-Validation: run root `python -m pytest`; run frontend `pnpm run lint`,
-`pnpm run typecheck`, `pnpm test`, and `pnpm run build`. On Windows, a writable
-workspace-local `--basetemp` can avoid temporary-directory permission errors.
+Validation: run `go test ./...` and `go vet ./...` in `backend-go`; run frontend
+`pnpm run lint`, `pnpm run typecheck`, `pnpm test`, and `pnpm run build`.
+The native worker uses Poppler for PDF extraction. FastDeploy includes its
+executables and shared libraries in the release.

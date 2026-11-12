@@ -10,7 +10,7 @@ CI 在每个 Pull Request 和 `main` / `master` 推送时自动运行，也可�
 
 ## 当前主线：FastRead Web
 
-当前入口是带账户和工作区权限的 Web 应用：服务端保存论文、版本化证据、报告、聊天与总结，独立 worker 执行可恢复的后台任务。部署、离线开户、只读源迁移、备份和回滚见 [Web 部署指南](deploy/web/README.md)。API 使用 `backend/main.py`，worker 使用 `python -m app.web.worker`，两者必须指向同一 Web 数据根。生产环境使用 HTTPS 与 Secure cookie。
+当前版本为 **4.0.0**：Go API 与独立 Go worker 保存论文、版本化证据、报告、聊天和总结，React 19 + FastUI 0.3.0 提供阅读工作台。API 与 worker 共享 `FASTREAD_WEB_ROOT`。生产环境使用 HTTPS 与 Secure cookie。原生部署、账户和迁移说明见 [Go / React 部署指南](docs/GO_REACT_RELEASE.md)。
 
 后文保留早期桌面、容器和模型说明作为历史参考；正式 Web 部署以以上指南为准。
 
@@ -25,7 +25,7 @@ CI 在每个 Pull Request 和 `main` / `master` 推送时自动运行，也可�
 <p align="center">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" />
   <img src="https://img.shields.io/badge/frontend-React%2019-61dafb" alt="React 19" />
-  <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="FastAPI" />
+  <img src="https://img.shields.io/badge/backend-Go-00ADD8" alt="Go" />
   <img src="https://img.shields.io/badge/citations-page--aware-7c3aed" alt="Page-aware citations" />
 </p>
 
@@ -107,10 +107,19 @@ FastRead 明确区分三种边界：
 #### 1. 准备后端
 
 ```powershell
-cd backend
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+cd backend-go
+go mod download
+go test ./...
+```
+
+需要 Go 1.26.8、PowerShell 7，以及 PATH 中的 Poppler `pdftotext` / `pdfinfo`。
+首次本地运行前创建管理员：
+
+```powershell
+$env:FASTREAD_WEB_ROOT = "$PWD/../.runtime/web-data"
+$env:FASTREAD_INITIAL_PASSWORD = Read-Host "管理员密码（至少 12 字符）" -MaskInput
+go run ./cmd/fastread user-create --email admin@example.org --name 管理员 --admin
+Remove-Item Env:FASTREAD_INITIAL_PASSWORD
 ```
 
 #### 2. 准备前端
@@ -168,7 +177,8 @@ Compose 默认只监听 `127.0.0.1:3015`，不直接暴露后端端口；运行�
 
 ```text
 .
-├── backend/               # FastAPI、PDF 解析、阅读报告、相关工作与问答
+├── backend-go/            # Go API、持久任务、PDF 解析、报告与问答
+├── backend/               # 历史 Python / 桌面运行时
 ├── fastread-frontend/     # React 论文阅读工作台
 ├── docs/                  # 产品需求与证据契约
 ├── readme/                # 工程计划和交接材料
@@ -181,8 +191,8 @@ Compose 默认只监听 `127.0.0.1:3015`，不直接暴露后端端口；运行�
 
 | 模块 | 主要技术 |
 | --- | --- |
-| Web | React 19、TypeScript、Vite、Tailwind CSS、Zustand |
-| API | Python、FastAPI、SQLAlchemy、SQLite |
+| Web | React 19、TypeScript、Vite、FastUI 0.3.0、UnoCSS |
+| API | Go 1.26、net/http、SQLite、Poppler |
 | 部署 | Windows 脚本、Docker Compose、Nginx |
 
 产品与证据约束详见 [docs/FASTREAD_REQUIREMENTS.md](./docs/FASTREAD_REQUIREMENTS.md)。

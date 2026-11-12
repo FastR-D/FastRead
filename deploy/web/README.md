@@ -1,4 +1,10 @@
-# FastRead Web 候选部署与回滚
+# FastRead Web 部署与回滚
+
+当前 Go 4.0 使用 `backend-go/cmd/fastread` 的 `serve` 和 `worker` 子命令。
+React dist 与 API 分离构建；FastDeploy v2.1.0 发布 `bin/fastread`、Poppler 和前端资源。
+启动配置、连接码和现有数据库兼容性见 [Go / React 指南](../../docs/GO_REACT_RELEASE.md)。
+
+下述 Python 候选说明保留用于历史版本恢复；当前发布使用 Go 指南与仓库的标签 workflow。
 
 本目录对应独立候选，不能原地替换旧数据目录。后端入口为 `backend/main.py`，独立 worker 为 `python -m app.web.worker`。旧桌面路由不挂载，前端入口仅加载 WebApp。
 

@@ -1,7 +1,7 @@
 {
   "name": "fastread",
   "private": true,
-  "version": "0.0.0",
+  "version": "4.0.0",
   "packageManager": "pnpm@9.15.0",
   "type": "module",
   "scripts": {
@@ -13,14 +13,15 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:fastui:browser": "node scripts/fastui-browser.mjs",
+    "test:go:browser": "node scripts/go-web-browser.mjs",
     "test:fastcas:browser": "node scripts/fastcas-modes-browser.mjs",
     "test:fastnews:browser": "node scripts/fastnews-browser.mjs",
     "test:fastnews:auth:browser": "node scripts/fastnews-auth-browser.mjs"
   },
   "dependencies": {
-    "@fastrd/ui-foundation": "0.1.2",
-    "@fastrd/ui-react": "0.1.2",
     "@ant-design/x": "1.6.1",
+    "@fastrd/ui-foundation": "0.3.0",
+    "@fastrd/ui-react": "0.3.0",
     "@hookform/resolvers": "^5.0.1",
     "@lobehub/icons": "^1.97.1",
     "@lobehub/icons-static-svg": "^1.45.0",
@@ -78,8 +79,8 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
-    "@playwright/test": "^1.63.0",
     "@eslint/js": "^9.21.0",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.1.3",
     "@tauri-apps/cli": "2.5.0",
     "@types/node": "^22.14.0",
@@ -95,6 +96,7 @@
     "prettier-plugin-tailwindcss": "^0.6.11",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.24.1",
+    "unocss": "66.12.0",
     "vite": "^6.2.0",
     "vitest": "^3.2.4"
   }

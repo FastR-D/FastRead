@@ -1,6 +1,24 @@
-# FastRead 笨蛋部署说明
+# FastRead 部署说明
 
-这份说明优先服务普通 Windows 用户：有正式 Release 时，默认使用安装包；`run.bat` 保留给源码开发和本地调试，不要求 Docker。
+## Go / React 4.0
+
+当前 Web 版本使用 Go API、Go worker 和 React + FastUI 0.3.0。安装 Go 1.26.8、
+PowerShell 7、Node 24、pnpm 9.15 和 Poppler 后，按 README 准备依赖和本地账号，
+运行 `run.bat`。状态、停止和依赖检查分别使用 `--status`、`--stop`、`--check`。
+API 为 `127.0.0.1:8483`，前端为 `127.0.0.1:3015`，本地数据在 `.runtime/web-data`。
+
+容器使用 `docker compose up -d --build` 启动独立 API、worker、前端和 Nginx。
+通过 `docker compose exec -e FASTREAD_INITIAL_PASSWORD backend fastread user-create
+--email <邮箱> --admin` 创建账号，密码从调用终端环境传入。生产设置
+`FASTREAD_PUBLIC_ORIGIN` 和 `FASTREAD_COOKIE_SECURE=true` 并使用 HTTPS。
+
+服务器按版本标签通过 FastDeploy 发布，完整说明见
+[Go / React 部署指南](docs/GO_REACT_RELEASE.md)，数据迁移实测见
+[迁移验证](docs/MIGRATION_VALIDATION.md)。
+
+## 历史桌面版本
+
+以下安装包及 Python 运行时说明适用于历史桌面发行版。
 
 ## Windows 安装包（推荐）
 

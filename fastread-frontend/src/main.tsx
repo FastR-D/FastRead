@@ -1,6 +1,6 @@
 import { start } from './web/sso-bootstrap'
-import '@fastrd/ui-react/styles.css'
 import './web/theme'
+import 'virtual:uno.css'
 
 // Fetch the UI in parallel with authentication, without making authentication
 // wait for React/Markdown to download and execute first.

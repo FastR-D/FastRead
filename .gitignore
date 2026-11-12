@@ -89,6 +89,9 @@ backend/config/*.local.json
 !backend/config/*.example.json
 
 # Build artifacts and generated packages
+/bin/
+/lib/
+web-data/
 fastread-frontend/src-tauri/target/
 fastread-frontend/src-tauri/bin/
 fastread-extension/extension/dist/

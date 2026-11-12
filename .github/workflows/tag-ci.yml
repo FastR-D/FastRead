@@ -20,16 +20,18 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v6
         with:
-          python-version: '3.12'
-          cache: pip
-          cache-dependency-path: backend/requirements-candidate-linux.lock.txt
-      - run: python -m pip install --target vendor -r backend/requirements-candidate-linux.lock.txt -r requirements-fastcas.txt
-      - run: python -m pip install 'pytest>=8,<9'
-      - run: python -m pytest
+          go-version: '1.26.8'
+          cache-dependency-path: backend-go/go.sum
+      - run: sudo apt-get update && sudo apt-get install -y poppler-utils
+      - run: go test -race ./... && go vet ./...
+        working-directory: backend-go
+      - run: mkdir -p ../bin && go build -trimpath -o ../bin/fastread ./cmd/fastread
+        working-directory: backend-go
         env:
-          PYTHONPATH: vendor
+          CGO_ENABLED: '0'
+      - run: bash deploy/web/package-poppler.sh
       - uses: pnpm/action-setup@v4
         with:
           version: 9.15.0
@@ -38,7 +40,7 @@ jobs:
           node-version: 24
           cache: pnpm
           cache-dependency-path: fastread-frontend/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile && pnpm run typecheck && pnpm run build
+      - run: pnpm install --frozen-lockfile && pnpm run lint && pnpm run typecheck && pnpm test && pnpm run build
         working-directory: fastread-frontend
         env:
           VITE_API_BASE_URL: /api
@@ -47,7 +49,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: FastR-D/FastDeploy
-          ref: 9a2c51dcd63f47a0e6c8f6bb07bd22ea589abbd2
+          ref: f26800df4c31534c66691d7d8e9844042321c558
           path: .fastdeploy-tools
           persist-credentials: false
       - name: Package the tested runtime
@@ -62,7 +64,7 @@ jobs:
   deploy:
     needs: validate
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    uses: FastR-D/FastDeploy/.github/workflows/deploy.yml@9a2c51dcd63f47a0e6c8f6bb07bd22ea589abbd2
+    uses: FastR-D/FastDeploy/.github/workflows/deploy.yml@f26800df4c31534c66691d7d8e9844042321c558
     with:
       app: fastread
       artifact-name: release-${{ github.sha }}
@@ -89,6 +91,8 @@ jobs:
         FASTREAD_FASTCAS_ISSUER=https://cas.fastrd.io
         FASTREAD_FASTCAS_REDIRECT_URI=https://read.fastrd.io/api/auth/fastcas/callback
         FASTREAD_PUBLIC_ORIGIN=https://read.fastrd.io
+        FASTREAD_FASTNEWS_URL=http://127.0.0.1:8788
+        FASTREAD_FASTWRITE_URL=http://127.0.0.1:3003
         FASTREAD_WEB_ROOT=/home/dev/fastread-web-shared/data
         FASTRESEARCH_API_URL=http://127.0.0.1:8787
         FASTRESEARCH_PANEL_URL=https://fastrd.io

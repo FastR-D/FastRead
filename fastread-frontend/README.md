@@ -1,6 +1,8 @@
 # FastRead Web Frontend
 
-React 19 + Vite frontend for FastRead.
+React 19 + TypeScript + Vite frontend for the FastRead Go API. UI controls and the
+application shell use FastUI 0.3.0 (`@fastrd/ui-react` and
+`@fastrd/ui-foundation`).
 
 ## Project Entry
 
@@ -27,18 +29,43 @@ http://127.0.0.1:3015/
 
 ## Frontend-Only Development
 
-Use this only when you are intentionally working on frontend code and the backend is already running through the root entry.
+Run the Go API before starting frontend development. `BACKEND_PORT` selects the
+local API port (8483 by default).
 
 ```powershell
 cd fastread-frontend
-corepack enable
-pnpm install
+corepack pnpm install --frozen-lockfile
 $env:VITE_API_BASE_URL="/api"
-pnpm run dev -- --host 0.0.0.0 --port 3015
+corepack pnpm dev --host 127.0.0.1 --port 3015
 ```
 
 ## Build
 
 ```powershell
-pnpm run build
+corepack pnpm typecheck
+corepack pnpm lint
+corepack pnpm test
+corepack pnpm build
+corepack pnpm test:fastui:browser
 ```
+
+The browser suite uses Microsoft Edge and the production build. It covers
+settings and CAS dialogs, light/dark themes, administrator actions, connection
+codes, research directions, and FastWrite handoff. HTTP fixtures isolate UI
+behavior; API integration tests live in the Go backend.
+
+For an end-to-end run against a disposable Go instance, set
+`FASTREAD_TEST_BASE_URL`, `FASTREAD_TEST_EMAIL`, and `FASTREAD_TEST_PASSWORD`, then
+run `corepack pnpm test:go:browser`. This suite creates test users and providers,
+imports a text PDF through the worker, and verifies the desktop and mobile reader.
+
+## FastUI
+
+`uno.config.ts` uses `fastUIContent` and `presetFastUI()`. The Vite plugin generates
+the styles used by imported components; `src/main.tsx` imports `virtual:uno.css`.
+Color mode follows the system or the user's saved `fastread.theme` preference.
+
+Settings contains workspace models and FastWrite/FastNews connection codes. CAS
+authentication opens separately. System administrators can manage users and
+assign shared models from the top navigation. The reading desk retains PDF
+navigation, annotations, conversations, knowledge bases, notes, and reports.
