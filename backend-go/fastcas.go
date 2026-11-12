@@ -79,6 +79,11 @@ func (a *App) RegisterFastCAS() error {
 	}
 	c.cookiePath = c.base + "/api/auth/fastcas"
 	a.ValidateCASSession = c.validateSession
+	if c.sdk != nil {
+		a.workspaceCAS = c.sdk
+	}
+	a.workspaceIssuer = c.config.Issuer
+	a.workspaceClient = c.config.ClientID
 	a.Public("GET /api/auth/fastcas/available", func(w http.ResponseWriter, r *http.Request) error {
 		JSON(w, 200, Row{"enabled": c.sdk != nil, "login_enabled": c.sdk != nil && c.login, "link_enabled": c.sdk != nil && c.link})
 		return nil

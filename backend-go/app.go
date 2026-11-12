@@ -65,9 +65,11 @@ type Principal struct {
 	IsAdmin                                                                               bool
 }
 type App struct {
-	Store              *Store
-	Mux                *http.ServeMux
-	ValidateCASSession func(Row) error
+	Store                            *Store
+	Mux                              *http.ServeMux
+	ValidateCASSession               func(Row) error
+	workspaceCAS                     workspaceProvider
+	workspaceIssuer, workspaceClient string
 }
 
 func NewApp(s *Store) *App {
@@ -76,6 +78,7 @@ func NewApp(s *Store) *App {
 	a.RegisterResearch()
 	a.RegisterCore()
 	a.RegisterAdmin()
+	a.RegisterWorkspaceSummary()
 	return a
 }
 func (a *App) Handle(pattern string, h func(http.ResponseWriter, *http.Request, Principal) error) {

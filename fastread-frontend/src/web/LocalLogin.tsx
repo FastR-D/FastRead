@@ -2,7 +2,7 @@ import { API_BASE } from './urls'
 import { useEffect, useState, type FormEvent } from 'react'
 
 export default function LocalLogin() {
-  const [mode, setMode] = useState<'login' | 'register' | 'recover'>('login')
+  const [mode, setMode] = useState<'login' | 'register' | 'recover'>(() => new URLSearchParams(window.location.search).get('auth') === 'register' ? 'register' : 'login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [token, setToken] = useState('')
