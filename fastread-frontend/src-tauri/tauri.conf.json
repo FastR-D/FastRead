@@ -7,8 +7,8 @@
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:3015",
-    "beforeDevCommand": "corepack pnpm dev",
-    "beforeBuildCommand": "corepack pnpm build --mode tauri"
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build --mode tauri"
   },
   "app": {
     "windows": [

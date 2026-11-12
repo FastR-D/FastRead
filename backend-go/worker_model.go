@@ -19,7 +19,7 @@ import (
 )
 
 func completeModel(ctx context.Context, s *Store, job Row, owner string, payload Row, instruction string, data any) (Row, error) {
-	provider, e := s.Provider(Str(job["workspace_id"]), Str(payload["provider_id"]))
+	provider, e := s.Provider(Str(job["workspace_id"]), Str(job["user_id"]), Str(payload["provider_id"]))
 	if e != nil {
 		return nil, e
 	}

@@ -34,19 +34,20 @@ local API port (8483 by default).
 
 ```powershell
 cd fastread-frontend
-corepack pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile
 $env:VITE_API_BASE_URL="/api"
-corepack pnpm dev --host 127.0.0.1 --port 3015
+pnpm dev --host 127.0.0.1 --port 3015
 ```
 
 ## Build
 
 ```powershell
-corepack pnpm typecheck
-corepack pnpm lint
-corepack pnpm test
-corepack pnpm build
-corepack pnpm test:fastui:browser
+pnpm typecheck
+pnpm lint
+pnpm test
+pnpm build
+pnpm test:fastui:browser
+pnpm test:reader:browser
 ```
 
 The browser suite uses Microsoft Edge and the production build. It covers
@@ -56,7 +57,7 @@ behavior; API integration tests live in the Go backend.
 
 For an end-to-end run against a disposable Go instance, set
 `FASTREAD_TEST_BASE_URL`, `FASTREAD_TEST_EMAIL`, and `FASTREAD_TEST_PASSWORD`, then
-run `corepack pnpm test:go:browser`. This suite creates test users and providers,
+run `pnpm test:go:browser`. This suite creates test users and providers,
 imports a text PDF through the worker, and verifies the desktop and mobile reader.
 
 ## FastUI
@@ -67,5 +68,27 @@ Color mode follows the system or the user's saved `fastread.theme` preference.
 
 Settings contains workspace models and FastWrite/FastNews connection codes. CAS
 authentication opens separately. System administrators can manage users and
-assign shared models from the top navigation. The reading desk retains PDF
-navigation, annotations, conversations, knowledge bases, notes, and reports.
+manage users and shared models in searchable tables from the top navigation.
+Creation and permission changes open in dialogs. Shared models support workspace
+grants and individual user grants; either match grants access. Changes to both
+scopes are saved together, and cancellation preserves existing permissions. The reading desk uses the same FastUI components for PDF navigation, annotations,
+conversations, knowledge bases, notes, reports and neighbor filtering.
+
+All application appearance comes from FastUI components and `fastui-*` native
+classes. `presetWind3()` supplies standard layout utilities for responsive panels;
+there are no application CSS files, custom palettes, product CSS overrides, CSS
+modules, Tailwind pipeline or shadcn configuration. Existing semantic class names
+on the reading desk are browser-test hooks, not stylesheet selectors.
+Sidebars compose `ActivityRail` with grouped explorer lists, following FastWrite.
+Icon tabs use native FastUI tab classes and its keyboard navigation helper;
+spacing and tab height are configured with layout utilities and FastUI tokens.
+
+PDF.js 4.10.38 supplies its official text-layer stylesheet, matching the vendored
+renderer. KaTeX supplies math typesetting. Inline PDF sizes and highlight rectangles
+are calculated document coordinates, not application theme styles.
+
+The reader browser suite renders a real text PDF with HTTP fixtures. It checks
+keyboard tabs, modal focus return, source selection, annotations, notes, quoted
+questions, citation highlights, report display and neighbor filters, then verifies
+scrolling and overflow at 1440/1024/390px in light and dark mode. Screenshots and
+results are written to `test-results/reader/`.

@@ -1,6 +1,5 @@
 import { Switch } from '@/components/ui/switch'
 import { FC } from 'react'
-import styles from './index.module.css'
 import { useNavigate, useParams } from 'react-router-dom'
 import AILogo from '@/components/Form/modelForm/Icons'
 import { useProviderStore } from '@/store/providerStore'
@@ -39,7 +38,7 @@ const ProviderCard: FC<IProviderCardProps> = ({
   return (
     <div
       className={
-        styles.card +
+        'fastui-list-row' +
         ' flex h-14 items-center justify-between rounded border border-[#f3f3f3] p-2' +
         (isActive ? ' bg-[#F0F0F0] font-semibold text-blue-600' : '')
       }

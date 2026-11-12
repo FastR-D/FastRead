@@ -49,7 +49,7 @@ FastCAS 根目录运行 `FASTCAS_PROJECT_CONTRACT=1 go test ./internal/httpapi -
 
 签名绑定/身份状态事件与 back-channel logout 路由现使用 Python SDK 的可选 FastAPI 适配层处理消息类型、大小限制、验签及失败重试响应；本项目 SQLite 事务仍负责事件 ID 去重和仅撤销 FastCAS 来源会话。真实提供方的退出与身份状态投递契约已通过。
 
-网络恢复后在 fastread-frontend 使用 `corepack pnpm install --frozen-lockfile` 安装成功；`corepack pnpm run typecheck`、`corepack pnpm run build` 和 `corepack pnpm run test` 全部通过（18 个文件、71 项测试）。真实浏览器联调发现并修复无会话时启动脚本强制跳转旧 Research 门户的问题；现在本地密码/邀请与 FastCAS 登录入口均可进入。Chrome/真实 FastAPI/SQLite/Go FastCAS/PostgreSQL 契约完成本地登录、显式绑定、独立浏览器 FastCAS 登录、原论文与工作区保持、解绑仅撤销 CAS 会话；race 模式连续三次通过。
+网络恢复后在 fastread-frontend 使用 `pnpm install --frozen-lockfile` 安装成功；`pnpm run typecheck`、`pnpm run build` 和 `pnpm run test` 全部通过（18 个文件、71 项测试）。真实浏览器联调发现并修复无会话时启动脚本强制跳转旧 Research 门户的问题；现在本地密码/邀请与 FastCAS 登录入口均可进入。Chrome/真实 FastAPI/SQLite/Go FastCAS/PostgreSQL 契约完成本地登录、显式绑定、独立浏览器 FastCAS 登录、原论文与工作区保持、解绑仅撤销 CAS 会话；race 模式连续三次通过。
 
 尚待：完整后端应用依赖安装后的全路由回归、正式域名浏览器检查、生产迁移与部署演练；上游退出通知已接入，真实跨进程投递契约已通过。
 

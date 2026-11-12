@@ -95,3 +95,4 @@ CREATE TABLE IF NOT EXISTS fastcas_events(issuer TEXT NOT NULL,id TEXT NOT NULL,
 
 CREATE TABLE IF NOT EXISTS shared_providers(id TEXT PRIMARY KEY,name TEXT NOT NULL,base_url TEXT NOT NULL,secret TEXT NOT NULL,models TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS shared_provider_workspaces(provider_id TEXT NOT NULL REFERENCES shared_providers(id) ON DELETE CASCADE,workspace_id TEXT NOT NULL REFERENCES workspaces(id),PRIMARY KEY(provider_id,workspace_id));
+CREATE TABLE IF NOT EXISTS shared_provider_users(provider_id TEXT NOT NULL REFERENCES shared_providers(id) ON DELETE CASCADE,user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,PRIMARY KEY(provider_id,user_id));

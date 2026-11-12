@@ -1,4 +1,4 @@
 import { initColorMode } from '@fastrd/ui-foundation'
 
-// Settings/account surfaces opt in; PDF and reading surfaces retain their own styles.
+// One FastUI color mode applies to every application surface.
 export const colorMode = initColorMode({ storageKey: 'fastread.theme' })

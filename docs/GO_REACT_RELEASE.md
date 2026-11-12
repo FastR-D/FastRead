@@ -8,10 +8,15 @@ paper discovery, and local / Research / FastCAS authentication. React uses
 `@fastrd/ui-react` and `@fastrd/ui-foundation` 0.3.0.
 
 The application header contains the paper library, user administration, and
-system administration tabs. Account identity, sign out, settings, CAS linking,
+system administration buttons. Account identity, sign out, settings, CAS linking,
 and the theme toggle appear on the right. Settings and CAS open in dialogs.
 Personal providers live in settings; system administrators assign shared
-providers to workspaces.
+providers to workspaces and individual users. Workspace grants cover all members;
+individual grants cover only the named user. Either grant is sufficient. Both
+scopes are edited in one dialog and saved atomically. Existing workspace grants
+remain valid after the additive user-grant table migration. Model listing, model
+selection and worker dispatch all check the submitting account; disabled users
+and removed workspace members cannot dispatch queued model requests.
 
 Research exchange connects reading evidence to FastWrite projects and turns
 selected papers into editable FastNews research interests. Source paper IDs and

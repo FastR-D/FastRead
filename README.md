@@ -126,7 +126,6 @@ Remove-Item Env:FASTREAD_INITIAL_PASSWORD
 
 ```powershell
 cd ..\fastread-frontend
-corepack enable
 pnpm install
 cd ..
 ```
@@ -223,10 +222,10 @@ backend\.venv\Scripts\python.exe -m pytest
 
 # 前端生产构建
 cd fastread-frontend
-corepack pnpm run typecheck
-corepack pnpm run lint
-corepack pnpm run test
-corepack pnpm run build
+pnpm run typecheck
+pnpm run lint
+pnpm run test
+pnpm run build
 
 ```
 

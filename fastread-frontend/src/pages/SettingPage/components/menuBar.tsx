@@ -1,4 +1,3 @@
-import styles from './index.module.css'
 import { JSX } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
@@ -18,7 +17,7 @@ const MenuBar = ({ menuItem }: { menuItem: IMenuProps }): JSX.Element => {
     <Link to={menuItem.path} className="w-full">
       <div
         className={
-          styles.menuBar +
+          'fastui-list-row' +
           ' flex h-12 w-full items-center gap-1 rounded px-2' +
           (isActive ? ' bg-[#F0F0F0] font-semibold text-blue-600' : '')
         }

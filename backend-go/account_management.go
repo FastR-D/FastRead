@@ -58,7 +58,7 @@ func accountAudit(tx *sql.Tx, actor, target, action, reason string) error {
 }
 func (a *App) registerAccountAdmin() {
 	a.Admin("GET /api/admin/users", func(w http.ResponseWriter, r *http.Request, p Principal) error {
-		rows, e := a.Store.All("SELECT id,email,display_name,is_admin,disabled,created FROM users WHERE deleted=0 ORDER BY created DESC")
+		rows, e := a.Store.All("SELECT u.id,u.email,u.display_name,u.is_admin,u.disabled,u.created,m.workspace_id,w.name workspace_name FROM users u LEFT JOIN memberships m ON m.user_id=u.id LEFT JOIN workspaces w ON w.id=m.workspace_id WHERE u.deleted=0 ORDER BY u.created DESC,w.name")
 		if e != nil {
 			return e
 		}

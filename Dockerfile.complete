@@ -6,7 +6,7 @@ COPY backend-go/ ./
 RUN CGO_ENABLED=0 go build -trimpath -o /fastread ./cmd/fastread
 
 FROM node:24-bookworm-slim AS web
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+RUN npm install --global pnpm@9.15.0
 WORKDIR /src
 COPY fastread-frontend/package.json fastread-frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile

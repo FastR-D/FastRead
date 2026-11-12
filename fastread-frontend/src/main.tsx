@@ -8,14 +8,28 @@ const app = Promise.all([import('./web/App'), import('react'), import('react-dom
 void app.catch(() => {})
 void start(async (initialUser, initialHandoff) => {
   let timer: ReturnType<typeof setTimeout> | undefined
-  const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('UI load timeout')), 15000) })
-  const [{ default: App }, { createElement, StrictMode }, { createRoot }] = await Promise.race([app, deadline]).finally(() => clearTimeout(timer))
-  createRoot(document.getElementById('root')!).render(createElement(StrictMode, null, createElement(App, { initialUser, initialHandoff })))
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('UI load timeout')), 15000)
+  })
+  const [{ default: App }, { createElement, StrictMode }, { createRoot }] = await Promise.race([
+    app,
+    deadline,
+  ]).finally(() => clearTimeout(timer))
+  createRoot(document.getElementById('root')!).render(
+    createElement(StrictMode, null, createElement(App, { initialUser, initialHandoff }))
+  )
 }).catch(() => {
   const root = document.getElementById('root')!
   root.replaceChildren()
-  const title = document.createElement('h2'); title.textContent = '连接暂时中断'
-  const detail = document.createElement('p'); detail.textContent = '页面资源或登录服务未能及时响应，请重试。'
-  const retry = document.createElement('button'); retry.textContent = '重新连接'; retry.onclick = () => location.reload()
+  const title = document.createElement('h2')
+  title.textContent = '连接暂时中断'
+  const detail = document.createElement('p')
+  detail.textContent = '页面资源或登录服务未能及时响应，请重试。'
+  root.className = 'fastui-section grid gap-4 p-6 m-6'
+  title.className = 'fastui-heading'
+  const retry = document.createElement('button')
+  retry.className = 'fastui-button fastui-button--primary'
+  retry.textContent = '重新连接'
+  retry.onclick = () => location.reload()
   root.append(title, detail, retry)
 })

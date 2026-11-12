@@ -5,7 +5,7 @@ ARG NGINX_BASE_IMAGE=mirror.gcr.io/library/nginx:1.25-alpine
 FROM ${NODE_BASE_IMAGE} AS builder
 
 # pnpm pin 到 9.x：lockfile 是 v9 生成；pnpm 11 要求 Node 22+ 与 node:20 不兼容
-RUN corepack enable && corepack prepare pnpm@9.15.0 --activate
+RUN npm install --global pnpm@9.15.0
 
 WORKDIR /app
 

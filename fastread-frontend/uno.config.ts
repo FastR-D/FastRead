@@ -1,4 +1,8 @@
-import { defineConfig } from 'unocss'
+import { defineConfig, presetWind3 } from 'unocss'
 import { fastUIContent, presetFastUI } from '@fastrd/ui-foundation/uno'
 
-export default defineConfig({ content: fastUIContent, presets: [presetFastUI()] })
+// FastUI owns appearance; standard utilities only arrange the application panels.
+export default defineConfig({
+  content: fastUIContent,
+  presets: [presetWind3(), presetFastUI()],
+})

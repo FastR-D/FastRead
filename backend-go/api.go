@@ -7,20 +7,42 @@ import (
 	"strings"
 )
 
-func (s *Store) Provider(workspace, id string) (Row, error) {
+func (s *Store) modelUser(workspace, user string) error {
+	_, e := s.One("SELECT u.id FROM users u JOIN memberships m ON m.user_id=u.id WHERE u.id=? AND m.workspace_id=? AND u.disabled=0", user, workspace)
+	return e
+}
+
+// Workspace and individual grants are additive. EXISTS avoids duplicate models
+// when both grants apply to the same user.
+const sharedProviderAccess = `(EXISTS(SELECT 1 FROM shared_provider_workspaces a WHERE a.provider_id=p.id AND a.workspace_id=?) OR EXISTS(SELECT 1 FROM shared_provider_users a WHERE a.provider_id=p.id AND a.user_id=?))`
+
+func (s *Store) Providers(workspace, user string) ([]Row, error) {
+	if e := s.modelUser(workspace, user); e != nil {
+		return nil, e
+	}
+	return s.All("SELECT id,name,base_url,models,0 shared FROM providers WHERE workspace_id=? UNION ALL SELECT p.id,p.name,p.base_url,p.models,1 shared FROM shared_providers p WHERE p.enabled=1 AND "+sharedProviderAccess, workspace, workspace, user)
+}
+
+func (s *Store) Provider(workspace, user, id string) (Row, error) {
+	if e := s.modelUser(workspace, user); e != nil {
+		return nil, e
+	}
 	r, e := s.One("SELECT *,0 shared FROM providers WHERE id=? AND workspace_id=?", id, workspace)
 	if e == nil {
 		return r, nil
 	}
-	return s.One("SELECT p.*,1 shared FROM shared_providers p JOIN shared_provider_workspaces a ON a.provider_id=p.id WHERE p.id=? AND a.workspace_id=? AND p.enabled=1", id, workspace)
+	if e != sql.ErrNoRows {
+		return nil, e
+	}
+	return s.One("SELECT p.*,1 shared FROM shared_providers p WHERE p.id=? AND p.enabled=1 AND "+sharedProviderAccess, id, workspace, user)
 }
 func (a *App) ChooseModel(p Principal, provider, model string) (Row, error) {
 	var r Row
 	var e error
 	if provider != "" {
-		r, e = a.Store.Provider(p.WorkspaceID, provider)
+		r, e = a.Store.Provider(p.WorkspaceID, p.UserID, provider)
 	} else {
-		rows, x := a.Store.All("SELECT id,models FROM providers WHERE workspace_id=? UNION ALL SELECT p.id,p.models FROM shared_providers p JOIN shared_provider_workspaces a ON a.provider_id=p.id WHERE a.workspace_id=? AND p.enabled=1", p.WorkspaceID, p.WorkspaceID)
+		rows, x := a.Store.Providers(p.WorkspaceID, p.UserID)
 		e = x
 		if len(rows) > 0 {
 			r = rows[0]
@@ -45,7 +67,7 @@ func (a *App) ChooseModel(p Principal, provider, model string) (Row, error) {
 			return Row{"provider_id": r["id"], "model": model}, nil
 		}
 	}
-	return nil, Error(400, "所选模型不属于当前工作区")
+	return nil, Error(400, "当前账号无权使用所选模型")
 }
 func (a *App) Decorate(rows []Row) error {
 	for _, r := range rows {
@@ -202,7 +224,7 @@ func (a *App) RegisterCore() {
 		return nil
 	})
 	a.Handle("GET /api/providers", func(w http.ResponseWriter, r *http.Request, p Principal) error {
-		rows, e := a.Store.All("SELECT id,name,base_url,models,0 shared FROM providers WHERE workspace_id=? UNION ALL SELECT p.id,p.name,p.base_url,p.models,1 shared FROM shared_providers p JOIN shared_provider_workspaces a ON a.provider_id=p.id WHERE a.workspace_id=? AND p.enabled=1", p.WorkspaceID, p.WorkspaceID)
+		rows, e := a.Store.Providers(p.WorkspaceID, p.UserID)
 		if e != nil {
 			return e
 		}
@@ -277,6 +299,7 @@ type ProviderInput struct {
 	APIKey       string   `json:"api_key"`
 	Models       []string `json:"models"`
 	WorkspaceIDs []string `json:"workspace_ids"`
+	UserIDs      []string `json:"user_ids"`
 }
 
 func (d *ProviderInput) Validate() error {

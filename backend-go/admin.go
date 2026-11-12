@@ -49,6 +49,15 @@ func (a *App) RegisterAdmin() {
 				ids = append(ids, Str(item["workspace_id"]))
 			}
 			row["workspace_ids"] = ids
+			users, e := a.Store.All("SELECT user_id FROM shared_provider_users WHERE provider_id=? ORDER BY user_id", row["id"])
+			if e != nil {
+				return e
+			}
+			userIDs := []string{}
+			for _, user := range users {
+				userIDs = append(userIDs, Str(user["user_id"]))
+			}
+			row["user_ids"] = userIDs
 		}
 		JSON(w, 200, Row{"items": rows})
 		return nil
@@ -70,7 +79,10 @@ func (a *App) RegisterAdmin() {
 			if _, e := tx.Exec("INSERT INTO shared_providers VALUES(?,?,?,?,?,1,?)", id, d.Name, d.BaseURL, secret, Encode(d.Models), Now()); e != nil {
 				return e
 			}
-			return assignWorkspaces(tx, id, d.WorkspaceIDs)
+			if e := assignWorkspaces(tx, id, d.WorkspaceIDs); e != nil {
+				return e
+			}
+			return assignUsers(tx, id, d.UserIDs)
 		})
 		if e == nil {
 			JSON(w, 201, Row{"id": id, "name": d.Name})
@@ -81,6 +93,7 @@ func (a *App) RegisterAdmin() {
 		var d struct {
 			Enabled      *bool
 			WorkspaceIDs *[]string `json:"workspace_ids"`
+			UserIDs      *[]string `json:"user_ids"`
 		}
 		if e := Decode(r, &d); e != nil {
 			return e
@@ -96,7 +109,12 @@ func (a *App) RegisterAdmin() {
 				}
 			}
 			if d.WorkspaceIDs != nil {
-				return assignWorkspaces(tx, id, *d.WorkspaceIDs)
+				if e := assignWorkspaces(tx, id, *d.WorkspaceIDs); e != nil {
+					return e
+				}
+			}
+			if d.UserIDs != nil {
+				return assignUsers(tx, id, *d.UserIDs)
 			}
 			return nil
 		})
@@ -115,6 +133,21 @@ func assignWorkspaces(tx *sql.Tx, id string, ids []string) error {
 			return Error(422, "工作区不存在")
 		}
 		if _, e := tx.Exec("INSERT OR IGNORE INTO shared_provider_workspaces VALUES(?,?)", id, ws); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
+func assignUsers(tx *sql.Tx, id string, ids []string) error {
+	if _, e := tx.Exec("DELETE FROM shared_provider_users WHERE provider_id=?", id); e != nil {
+		return e
+	}
+	for _, user := range ids {
+		if _, e := One(tx, "SELECT id FROM users WHERE id=?", user); e != nil {
+			return Error(422, "用户不存在")
+		}
+		if _, e := tx.Exec("INSERT OR IGNORE INTO shared_provider_users VALUES(?,?)", id, user); e != nil {
 			return e
 		}
 	}

@@ -1,13 +1,21 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/png" href="/icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FastRead</title>
   </head>
-  <body>
-    <div id="root"><div role="status" style="padding:15vh 8%;color:#225abe;font-family:system-ui,sans-serif"><h1>FastRead</h1><p>正在连接资料库…</p><noscript>请启用 JavaScript 后重新打开页面。</noscript></div></div>
+  <body
+    class="m-0 bg-[var(--fastui-page)] [font-family:var(--fastui-font)] [font-size:var(--fastui-font-size)] [font-weight:var(--fastui-font-weight)] text-[var(--fastui-text)] [color-scheme:var(--fastui-color-scheme)]"
+  >
+    <div id="root">
+      <div role="status" class="grid min-h-dvh content-center justify-items-center gap-4">
+        <h1>FastRead</h1>
+        <p>正在连接资料库…</p>
+        <noscript>请启用 JavaScript 后重新打开页面。</noscript>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

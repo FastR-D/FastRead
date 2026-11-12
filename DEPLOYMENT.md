@@ -62,7 +62,7 @@ http://127.0.0.1:3015/
 第一次启动前如果缺少依赖，按 `README.md` 里的本地依赖步骤先安装：
 
 - 后端：创建 `backend\.venv` 并安装 `backend\requirements.txt`
-- 前端：进入 `fastread-frontend` 后执行 `corepack enable` 和 `pnpm install`
+- 前端：进入 `fastread-frontend` 后执行 `pnpm install`
 
 ### 日常使用
 
@@ -119,7 +119,7 @@ docker run -d --name fastread -p 127.0.0.1:3015:80 -v fastread-data:/var/lib/fas
 
 如果提示找不到 `backend\.venv`，先按 README 创建后端虚拟环境并安装依赖。
 
-如果提示找不到 `fastread-frontend\node_modules`，先进入前端目录执行 `corepack enable` 和 `pnpm install`。
+如果提示找不到 `fastread-frontend\node_modules`，先进入前端目录执行 `pnpm install`。
 
 如果提示端口被占用，默认前端端口是 `3015`，后端端口是 `8483`。可以打开 `.env`，修改 `VITE_FRONTEND_PORT` 或 `BACKEND_PORT`，再重新启动。
 
