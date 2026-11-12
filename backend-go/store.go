@@ -112,7 +112,7 @@ func OpenStore(root string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	for table, columns := range map[string]map[string]string{"users": {"research_key_id": "TEXT", "research_account_id": "TEXT", "display_name": "TEXT", "is_admin": "INTEGER NOT NULL DEFAULT 0", "disabled": "INTEGER NOT NULL DEFAULT 0"}, "sessions": {"auth_source": "TEXT NOT NULL DEFAULT 'legacy'", "authenticated_at": "REAL", "cas_issuer": "TEXT", "cas_sid": "TEXT", "cas_link_id": "TEXT", "cas_link_version": "INTEGER", "cas_checked": "REAL"}, "papers": {"archived": "INTEGER NOT NULL DEFAULT 0"}} {
+	for table, columns := range map[string]map[string]string{"users": {"research_key_id": "TEXT", "research_account_id": "TEXT", "display_name": "TEXT", "is_admin": "INTEGER NOT NULL DEFAULT 0", "disabled": "INTEGER NOT NULL DEFAULT 0", "deleted": "INTEGER NOT NULL DEFAULT 0"}, "sessions": {"auth_source": "TEXT NOT NULL DEFAULT 'legacy'", "authenticated_at": "REAL", "cas_issuer": "TEXT", "cas_sid": "TEXT", "cas_link_id": "TEXT", "cas_link_version": "INTEGER", "cas_checked": "REAL"}, "papers": {"archived": "INTEGER NOT NULL DEFAULT 0"}} {
 		info, e := s.All("PRAGMA table_info(" + table + ")")
 		if e != nil {
 			return nil, e

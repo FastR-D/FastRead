@@ -185,7 +185,7 @@ func (a *App) RegisterAuth() {
 		if panel == "" {
 			panel = "http://127.0.0.1:5173"
 		}
-		JSON(w, 200, Row{"mode": "local", "local": true, "registration": "invite", "panel_url": panel})
+		JSON(w, 200, Row{"mode": "local", "local": true, "registration": false, "panel_url": panel})
 		return nil
 	})
 	a.Public("POST /api/auth/login", func(w http.ResponseWriter, r *http.Request) error {
@@ -247,6 +247,9 @@ func (a *App) RegisterAuth() {
 			path = "recover"
 		}
 		a.Public("POST /api/auth/"+path, func(w http.ResponseWriter, r *http.Request) error {
+			if kind == "invite" {
+				return Error(403, "自主注册已关闭，请使用 FastCAS 或联系管理员")
+			}
 			if e := a.preAuth(r); e != nil {
 				return e
 			}

@@ -78,6 +78,7 @@ func (a *App) RegisterFastCAS() error {
 		}
 	}
 	c.cookiePath = c.base + "/api/auth/fastcas"
+	c.registrationRoutes()
 	a.ValidateCASSession = c.validateSession
 	if c.sdk != nil {
 		a.workspaceCAS = c.sdk
@@ -128,6 +129,11 @@ func (a *App) RegisterFastCAS() error {
 			return e
 		}
 		token, e := c.finish(r)
+		if e == nil && token == registrationRequired {
+			w.Header().Set("Referrer-Policy", "no-referrer")
+			http.Redirect(w, r, c.base+"/?fastcas=register", 302)
+			return nil
+		}
 		c.cookie(w, "", -1)
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		target := c.base + "/?fastcas=failed"
@@ -307,6 +313,9 @@ func (c *casService) finish(r *http.Request) (string, error) {
 	if e != nil {
 		return "", e
 	}
+	if result.Transaction.Purpose == "register" {
+		return c.finishRegistration(r, result)
+	}
 	if result.Transaction.Purpose == "link" {
 		if !c.link {
 			return "", Error(403, "新的认证已关闭")
@@ -329,14 +338,17 @@ func (c *casService) finish(r *http.Request) (string, error) {
 		if e != nil {
 			return "", e
 		}
-		return "", c.accept(l)
+		if e = c.accept(l); e != nil {
+			return "", e
+		}
+		return "", s.Transaction(func(tx *sql.Tx) error { return promoteCASAdmin(tx, l.LocalRef, result.Identity) })
 	}
 	if !c.login || result.Transaction.Purpose != "login" {
 		return "", Error(403, "请使用本地登录")
 	}
 	row, e := s.One("SELECT * FROM fastcas_links WHERE issuer=? AND client_id=? AND subject=? AND state!='revoked'", c.config.Issuer, c.config.ClientID, result.Identity.Subject)
-	if e != nil {
-		return "", Error(409, "请先登录项目并关联 CAS 账号")
+	if e != nil && !errors.Is(e, sql.ErrNoRows) {
+		return "", e
 	}
 	if Str(row["state"]) == "prepared" {
 		if e = c.reconcile(r.Context(), row); e != nil {
@@ -345,13 +357,32 @@ func (c *casService) finish(r *http.Request) (string, error) {
 	}
 	l, e := c.sdk.ResolveLink(r.Context(), result.Identity.Subject)
 	if e != nil {
+		var api *fastcas.APIError
+		if row == nil && c.link && errors.As(e, &api) && (api.Status == 404 || api.Status == 401 && api.Code == "authentication_required") {
+			email := ""
+			if result.Identity.EmailVerified {
+				email = result.Identity.Email
+			}
+			e = s.Transaction(func(tx *sql.Tx) error {
+				if _, e := tx.Exec("DELETE FROM fastcas_signups WHERE expires<=?", Now()); e != nil {
+					return e
+				}
+				_, e := tx.Exec("INSERT OR REPLACE INTO fastcas_signups VALUES(?,?,?,?,?,?,NULL)", TokenHash(Cookie(r, "fastread_fastcas_binding")), c.config.Issuer, result.Identity.Subject, email, result.Identity.Name, Now()+300)
+				return e
+			})
+			return registrationRequired, e
+		}
 		return "", e
 	}
+	return c.issueCAS(l, result)
+}
+func (c *casService) issueCAS(l *fastcas.Link, result *fastcas.LoginResult) (string, error) {
+	s := c.app.Store
 	if l.State != "active" || result.Identity.Issuer != c.config.Issuer || result.Identity.Subject != l.Subject {
 		return "", Error(403, "FastCAS 认证关系无效")
 	}
 	token := Token()
-	e = s.Transaction(func(tx *sql.Tx) error {
+	e := s.Transaction(func(tx *sql.Tx) error {
 		row, e := One(tx, "SELECT * FROM fastcas_links WHERE issuer=? AND id=?", c.config.Issuer, l.ID)
 		if e != nil || !sameLink(row, l) || Str(row["state"]) != "active" || Num(row["version"]) != float64(l.Version) {
 			return Error(403, "认证关系已更改")
@@ -359,6 +390,9 @@ func (c *casService) finish(r *http.Request) (string, error) {
 		member, e := One(tx, "SELECT m.workspace_id FROM memberships m JOIN users u ON u.id=m.user_id WHERE m.user_id=? AND u.disabled=0 ORDER BY workspace_id LIMIT 1", l.LocalRef)
 		if e != nil {
 			return Error(403, "项目账号不可用")
+		}
+		if e = promoteCASAdmin(tx, l.LocalRef, result.Identity); e != nil {
+			return e
 		}
 		_, e = tx.Exec("INSERT INTO sessions(token,user_id,workspace_id,csrf,expires,auth_source,authenticated_at,cas_issuer,cas_sid,cas_link_id,cas_link_version,cas_checked) VALUES(?,?,?,?,?,'fastcas',?,?,?,?,?,?)", TokenHash(token), l.LocalRef, member["workspace_id"], Token(), Now()+7*86400, Now(), c.config.Issuer, result.Identity.SessionID, l.ID, l.Version, Now())
 		return e

@@ -1,5 +1,5 @@
-github.com/FastR-D/FastCAS/sdk/go v0.1.2 h1:ouIcPj5ZXJxCwBI5+iMAYOtZiii+4sM9Mm+s1phPNbA=
-github.com/FastR-D/FastCAS/sdk/go v0.1.2/go.mod h1:ycKZhIg/RA27BeMYvJ2VduqGbwgSnlbotC3TNdOXaDQ=
+github.com/FastR-D/FastCAS/sdk/go v0.1.3 h1:ijZnDyZNuyt1vpkmh+mfYaN3Qnkui8FP2LLK3MaiOA8=
+github.com/FastR-D/FastCAS/sdk/go v0.1.3/go.mod h1:ycKZhIg/RA27BeMYvJ2VduqGbwgSnlbotC3TNdOXaDQ=
 github.com/coreos/go-oidc/v3 v3.21.0 h1:wZo4Q9Pum8dYEj0eMUPrqR+kvuGkeUplbLpNCkBqoWM=
 github.com/coreos/go-oidc/v3 v3.21.0/go.mod h1:DYCf24+ncYi+XkIH97GY1+dqoRlbaSI26KVTCI9SrY4=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=

@@ -3,7 +3,7 @@ module github.com/FastR-D/FastRead/backend-go
 go 1.26.0
 
 require (
-	github.com/FastR-D/FastCAS/sdk/go v0.1.2
+	github.com/FastR-D/FastCAS/sdk/go v0.1.3
 	golang.org/x/crypto v0.40.0
 	golang.org/x/text v0.28.0
 	modernc.org/sqlite v1.34.5

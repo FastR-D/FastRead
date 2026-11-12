@@ -1,5 +1,7 @@
 
 CREATE TABLE IF NOT EXISTS schema_versions(version INTEGER PRIMARY KEY, applied REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS fastcas_signups(binding_hash TEXT PRIMARY KEY,issuer TEXT NOT NULL,subject TEXT NOT NULL,email TEXT NOT NULL,display_name TEXT NOT NULL,expires REAL NOT NULL,prepared TEXT);
+CREATE TABLE IF NOT EXISTS admin_account_audit(id TEXT PRIMARY KEY,actor TEXT,target TEXT,action TEXT NOT NULL,reason TEXT NOT NULL,created REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL,
  password TEXT NOT NULL, created REAL NOT NULL, research_key_id TEXT, display_name TEXT);
 CREATE TABLE IF NOT EXISTS workspaces(id TEXT PRIMARY KEY, name TEXT NOT NULL, daily_limit INTEGER NOT NULL DEFAULT 50);
