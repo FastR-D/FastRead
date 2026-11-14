@@ -237,8 +237,14 @@ func (a *App) RegisterReading() {
 			return e
 		}
 		limit := queryInt(r, "limit", 50, 1, 100)
-		offset := queryInt(r, "offset", 0, 0, 1000000)
-		rows, e := s.All("SELECT * FROM messages WHERE conversation_id=? ORDER BY created,id LIMIT ? OFFSET ?", r.PathValue("cid"), limit, offset)
+		var rows []Row
+		var e error
+		if r.URL.Query().Has("offset") {
+			offset := queryInt(r, "offset", 0, 0, 1000000)
+			rows, e = s.All("SELECT * FROM messages WHERE conversation_id=? ORDER BY created,id LIMIT ? OFFSET ?", r.PathValue("cid"), limit, offset)
+		} else {
+			rows, e = s.All("SELECT * FROM (SELECT * FROM messages WHERE conversation_id=? ORDER BY created DESC,id DESC LIMIT ?) ORDER BY created,id", r.PathValue("cid"), limit)
+		}
 		if e != nil {
 			return e
 		}

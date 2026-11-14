@@ -18,6 +18,55 @@ import (
 
 const evidenceText = "The proposed method reduces memory use while preserving exact page citations. Experiments compare the method against two controlled baselines."
 
+func TestConversationLatestWindowAndExplicitHistory(t *testing.T) {
+	s := testStore(t)
+	p, token := testUser(t, s, "window@example.org", false)
+	_, other := testUser(t, s, "other-window@example.org", false)
+	doc := seedDocument(t, s, p, "Message window")
+	a := readingApp(s)
+	w := call(a, "POST", "/api/papers/"+Str(doc["paper_id"])+"/conversations", token, p.CSRF, nil)
+	if w.Code != 201 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	var conversation Row
+	if err := json.Unmarshal(w.Body.Bytes(), &conversation); err != nil {
+		t.Fatal(err)
+	}
+	cid := Str(conversation["id"])
+	for i := 0; i < 60; i++ {
+		if _, err := s.DB.Exec("INSERT INTO messages VALUES(?,?,?,?,?,?,?)", fmt.Sprintf("message-%03d", i), cid, "assistant", fmt.Sprintf("answer-%d", i), "{}", nil, i); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := "/api/conversations/" + cid + "/messages"
+	for _, tc := range []struct {
+		query        string
+		start, count int
+	}{{"", 10, 50}, {"?limit=10", 50, 10}, {"?offset=0", 0, 50}, {"?offset=50&limit=10", 50, 10}, {"?offset=60", 60, 0}} {
+		w := call(a, "GET", path+tc.query, token, "", nil)
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		var result struct {
+			Items []Row `json:"items"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Items) != tc.count {
+			t.Fatalf("%s count=%d", tc.query, len(result.Items))
+		}
+		for i, row := range result.Items {
+			if row["content"] != fmt.Sprintf("answer-%d", tc.start+i) {
+				t.Fatalf("%s message %d: %v", tc.query, i, row)
+			}
+		}
+	}
+	if w := call(a, "GET", path, other, "", nil); w.Code != 404 {
+		t.Fatalf("foreign access: %d", w.Code)
+	}
+}
+
 func readingApp(s *Store) *App {
 	a := NewApp(s)
 	a.RegisterReading()
