@@ -262,6 +262,7 @@ class Store:
         metadata = {k: v for k, v in document.items() if k not in {"pages", "id"}}
         title = document.get("title") or "未命名论文"
         if existing:
+            db.execute("UPDATE papers SET archived=0 WHERE id=? AND workspace_id=?", (paper_id, workspace))
             old_meta = json.loads(existing["metadata"] or "{}")
             if old_meta.get("source") == "fastnews":
                 for key in ("title", "authors", "year", "venue", "abstract", "url", "external_id"):

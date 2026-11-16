@@ -337,6 +337,34 @@ def test_identity_aliases_and_archive_permissions(setup):
     assert ca.get(f"/api/papers/{pid}").status_code == 200
 
 
+@pytest.mark.parametrize("mode", ["duplicate", "new-version", "verified-metadata"])
+def test_reimport_restores_archived_paper_without_losing_identity(setup, mode):
+    store, a, _, ca, cb = setup
+    initial = document()
+    if mode == "verified-metadata":
+        initial = initial | {"metadata_resolution": {"status": "registry_verified"}}
+    first = store.ingest(a["workspace_id"], initial)
+    paper_id = first["paper_id"]
+    assert ca.delete(f"/api/papers/{paper_id}").status_code == 200
+    assert ca.get(f"/api/papers/{paper_id}").status_code == 404
+    incoming = document("Corrected page evidence for a new document version.") if mode == "new-version" else document()
+    imported = store.ingest(a["workspace_id"], incoming)
+    assert imported["paper_id"] == paper_id
+    assert ca.get(f"/api/papers/{paper_id}").status_code == 200
+    assert cb.get(f"/api/papers/{paper_id}").status_code == 404
+    assert ca.get("/api/papers").json()["total"] == 1
+    assert ca.get("/api/papers?archived=true").json()["total"] == 0
+    active = store.paper(a["workspace_id"], paper_id)
+    assert active["active_version"] == imported["version_id"]
+    if mode == "new-version":
+        assert imported["version_id"] != first["version_id"]
+    else:
+        assert imported["version_id"] == first["version_id"]
+        assert imported["deduplicated"] is True
+    if mode == "verified-metadata":
+        assert store.document(a["workspace_id"], paper_id)[2]["metadata_resolution"]["status"] == "registry_verified"
+
+
 def test_archive_waits_for_conversation_job(setup):
     store, a, _, ca, _ = setup
     p = store.ingest(a['workspace_id'], document())
