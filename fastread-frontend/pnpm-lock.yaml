@@ -27,8 +27,8 @@ importers:
         specifier: ^1.102.0
         version: 1.102.0
       '@lottiefiles/dotlottie-react':
-        specifier: ^0.22.0
-        version: 0.22.0(react@19.3.1)
+        specifier: ^0.22.2
+        version: 0.22.2(react@19.3.1)
       '@radix-ui/react-checkbox':
         specifier: ^1.4.1
         version: 1.4.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -211,8 +211,8 @@ importers:
         specifier: ^17.14.0
         version: 17.14.0
       prettier:
-        specifier: ^3.10.0
-        version: 3.10.0
+        specifier: ^3.10.1
+        version: 3.10.1
       typescript:
         specifier: ~5.7.2
         version: 5.7.3
@@ -708,14 +708,14 @@ packages:
       react: ^19.0.0
       react-dom: ^19.0.0
 
-  '@lottiefiles/dotlottie-react@0.22.0':
-    resolution: {integrity: sha512-Z2aQrPZ4D4E+Bm0ev0+ZnOqhqYcCOa4+UeTWO+zrrcHfUWJn/zn2Df8QYJ+WFAYT/390ZcRZi4RxBpeHUx/cRQ==}
+  '@lottiefiles/dotlottie-react@0.22.2':
+    resolution: {integrity: sha512-X91hm/hGigVt7PFRfcFYO5XeLqUAQSyhcAMfvpCBv7fNjUy8DCEENJdXglRsiUGGJezwqwaV2QoJxfDECoiiyw==}
     engines: {node: '>=18.17.0', npm: '>=9.5.0'}
     peerDependencies:
       react: ^17 || ^18 || ^19
 
-  '@lottiefiles/dotlottie-web@0.83.0':
-    resolution: {integrity: sha512-z4CVlyv0L/ROcG0N3z1ZPLt4x2sbgCJPimmNMCZ98cKQBiMeJj1p3njCK1VtpzNKc3h6BV0xIj7BZtWCjHkOkg==}
+  '@lottiefiles/dotlottie-web@0.83.2':
+    resolution: {integrity: sha512-MMI4RVcFtB5Vjv9mwbP8oWsSqy4N7GO2P+jwHVLo4GjbYAdR4Z7seK3rR7YefpcfayWrsQogaORMBzv6YFWntQ==}
     engines: {node: '>=18.17.0', npm: '>=9.5.0'}
 
   '@mdx-js/mdx@3.1.1':
@@ -3873,8 +3873,8 @@ packages:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
     engines: {node: '>= 0.8.0'}
 
-  prettier@3.10.0:
-    resolution: {integrity: sha512-mBi4765LgjO1PFjlEs7pUeK0nb1bw71c+N4/ItfeUWNdY5cV2pRKaFpbbFRYmDJMO+5ZwzGxHRqHxFZna7iv5w==}
+  prettier@3.10.1:
+    resolution: {integrity: sha512-70vp3ZUYoPlFbF9uiTdXHUUCGEIp7d4+6p+8DYbkm2jP7x/3i/paXVF6dopSI3zd/CEitrZN1rc4i85xWmmXlg==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -5649,12 +5649,12 @@ snapshots:
       - svelte
       - vue
 
-  '@lottiefiles/dotlottie-react@0.22.0(react@19.3.1)':
+  '@lottiefiles/dotlottie-react@0.22.2(react@19.3.1)':
     dependencies:
-      '@lottiefiles/dotlottie-web': 0.83.0
+      '@lottiefiles/dotlottie-web': 0.83.2
       react: 19.3.1
 
-  '@lottiefiles/dotlottie-web@0.83.0': {}
+  '@lottiefiles/dotlottie-web@0.83.2': {}
 
   '@mdx-js/mdx@3.1.1':
     dependencies:
@@ -9219,7 +9219,7 @@ snapshots:
 
   prelude-ls@1.2.1: {}
 
-  prettier@3.10.0: {}
+  prettier@3.10.1: {}
 
   prismjs@1.30.0: {}
 
