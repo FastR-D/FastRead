@@ -43,6 +43,12 @@ updates:
         patterns: ["*"]
   - package-ecosystem: pip
     directory: /backend
+    # fastembed 0.9.1 requires huggingface-hub <2; Celery 5.7 pins dateutil 2.9.0.post0.
+    ignore:
+      - dependency-name: huggingface-hub
+        versions: [">=2"]
+      - dependency-name: python-dateutil
+        versions: [">=3"]
     schedule:
       interval: weekly
     groups:

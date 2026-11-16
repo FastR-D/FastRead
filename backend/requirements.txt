@@ -58,7 +58,7 @@ mpmath==1.4.1
 multidict==7.1.0
 networkx==3.4.2
 numpy==2.2.6
-openai==3.49.0
+openai==3.50.0
 orjson==3.13.0
 packaging==26.3
 pdfkit==1.0.0
