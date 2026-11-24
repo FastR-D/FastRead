@@ -367,7 +367,7 @@ func (c *casService) finish(r *http.Request) (string, error) {
 				if _, e := tx.Exec("DELETE FROM fastcas_signups WHERE expires<=?", Now()); e != nil {
 					return e
 				}
-				_, e := tx.Exec("INSERT OR REPLACE INTO fastcas_signups VALUES(?,?,?,?,?,?,NULL)", TokenHash(Cookie(r, "fastread_fastcas_binding")), c.config.Issuer, result.Identity.Subject, email, result.Identity.Name, Now()+300)
+				_, e := tx.Exec("INSERT INTO fastcas_signups VALUES(?,?,?,?,?,?,NULL) ON CONFLICT(binding_hash) DO UPDATE SET issuer=excluded.issuer, subject=excluded.subject, email=excluded.email, display_name=excluded.display_name, expires=excluded.expires, prepared=excluded.prepared", TokenHash(Cookie(r, "fastread_fastcas_binding")), c.config.Issuer, result.Identity.Subject, email, result.Identity.Name, Now()+300)
 				return e
 			})
 			return registrationRequired, e

@@ -42,10 +42,10 @@ func SearchPublic(ctx context.Context, s *Store, query string, limit int) Row {
 				status["reason"] = "upstream_error"
 				if strings.Contains(e.Error(), "429") {
 					status["reason"] = "rate_limited"
-					s.DB.Exec("INSERT OR REPLACE INTO provider_cooldown VALUES(?,?)", name, Now()+120)
+					s.DB.Exec("INSERT INTO provider_cooldown VALUES(?,?) ON CONFLICT(provider) DO UPDATE SET until=excluded.until", name, Now()+120)
 				}
 			} else {
-				s.DB.Exec("INSERT OR REPLACE INTO provider_cache VALUES(?,?,?)", key, Encode(Row{"papers": papers, "status": status}), Now()+600)
+				s.DB.Exec("INSERT INTO provider_cache VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET content=excluded.content, expires=excluded.expires", key, Encode(Row{"papers": papers, "status": status}), Now()+600)
 			}
 			results <- searchSourceResult{name, papers, status}
 		}(name)

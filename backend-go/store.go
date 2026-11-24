@@ -13,15 +13,26 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/FastR-D/FastDeploy/pgstore"
 )
 
 //go:embed schema.sql
 var schema string
 
+const legacyIntegrationSchema = `
+CREATE TABLE IF NOT EXISTS integration_connections(
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), service TEXT NOT NULL, secret TEXT NOT NULL,
+ created DOUBLE PRECISION NOT NULL, PRIMARY KEY(workspace_id,service));
+CREATE TABLE IF NOT EXISTS integration_receipts(
+ workspace_id TEXT NOT NULL REFERENCES workspaces(id), service TEXT NOT NULL, resource TEXT NOT NULL,
+ content TEXT NOT NULL, updated DOUBLE PRECISION NOT NULL, PRIMARY KEY(workspace_id,service,resource));`
+
 type Row = map[string]any
 type Store struct {
-	DB   *sql.DB
-	Root string
+	DB       *sql.DB
+	Root     string
+	postgres bool
 }
 type Queryer interface {
 	Query(string, ...any) (*sql.Rows, error)
@@ -89,6 +100,12 @@ func Num(v any) float64 {
 	return 0
 }
 func OpenStore(root string) (*Store, error) {
+	return openStore(root, "")
+}
+func OpenPostgres(root, dsn string) (*Store, error) {
+	return openStore(root, dsn)
+}
+func openStore(root, dsn string) (*Store, error) {
 	if root == "" {
 		root = os.Getenv("FASTREAD_WEB_ROOT")
 	}
@@ -102,19 +119,43 @@ func OpenStore(root string) (*Store, error) {
 	if err = os.MkdirAll(filepath.Join(root, "files"), 0700); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", filepath.Join(root, "fastread-web.sqlite3")+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(30000)")
+	var db *sql.DB
+	ddl := "PRAGMA journal_mode=WAL;" + schema
+	if dsn == "" {
+		db, err = sql.Open("sqlite", filepath.Join(root, "fastread-web.sqlite3")+"?_pragma=foreign_keys(1)&_pragma=busy_timeout(30000)")
+	} else {
+		db, err = pgstore.Open(dsn)
+		// PDF extraction can produce U+0000. Store the original UTF-8 bytes.
+		ddl = strings.NewReplacer(" REAL", " DOUBLE PRECISION", " INTEGER", " BIGINT", " text TEXT NOT NULL", " text BYTEA NOT NULL").Replace(schema) + legacyIntegrationSchema
+	}
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(1)
-	s := &Store{DB: db, Root: root}
-	if _, err = db.Exec("PRAGMA journal_mode=WAL;" + schema); err != nil {
-		db.Close()
+	defer func() {
+		if err != nil {
+			_ = db.Close()
+		}
+	}()
+	if dsn == "" {
+		db.SetMaxOpenConns(1)
+	}
+	s := &Store{DB: db, Root: root, postgres: dsn != ""}
+	if _, err = db.Exec(ddl); err != nil {
 		return nil, err
 	}
 	for table, columns := range map[string]map[string]string{"users": {"research_key_id": "TEXT", "research_account_id": "TEXT", "display_name": "TEXT", "is_admin": "INTEGER NOT NULL DEFAULT 0", "disabled": "INTEGER NOT NULL DEFAULT 0", "deleted": "INTEGER NOT NULL DEFAULT 0"}, "sessions": {"auth_source": "TEXT NOT NULL DEFAULT 'legacy'", "authenticated_at": "REAL", "cas_issuer": "TEXT", "cas_sid": "TEXT", "cas_link_id": "TEXT", "cas_link_version": "INTEGER", "cas_checked": "REAL"}, "papers": {"archived": "INTEGER NOT NULL DEFAULT 0"}} {
+		if dsn != "" {
+			for name, def := range columns {
+				def = strings.NewReplacer("REAL", "DOUBLE PRECISION", "INTEGER", "BIGINT").Replace(def)
+				if _, err = db.Exec("ALTER TABLE " + table + " ADD COLUMN IF NOT EXISTS " + name + " " + def); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
 		info, e := s.All("PRAGMA table_info(" + table + ")")
 		if e != nil {
+			_ = db.Close()
 			return nil, e
 		}
 		present := map[string]bool{}
@@ -124,21 +165,22 @@ func OpenStore(root string) (*Store, error) {
 		for name, def := range columns {
 			if !present[name] {
 				if _, e = db.Exec("ALTER TABLE " + table + " ADD COLUMN " + name + " " + def); e != nil {
+					_ = db.Close()
 					return nil, e
 				}
 			}
 		}
 	}
-	_, err = db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS users_research_account_id ON users(research_account_id) WHERE research_account_id IS NOT NULL; CREATE UNIQUE INDEX IF NOT EXISTS users_research_key_id ON users(research_key_id) WHERE research_key_id IS NOT NULL AND research_key_id!=''; INSERT OR IGNORE INTO schema_versions VALUES(1,?);", Now())
+	_, err = db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS users_research_account_id ON users(research_account_id) WHERE research_account_id IS NOT NULL; CREATE UNIQUE INDEX IF NOT EXISTS users_research_key_id ON users(research_key_id) WHERE research_key_id IS NOT NULL AND research_key_id!=''; INSERT INTO schema_versions VALUES(1,?) ON CONFLICT DO NOTHING;", Now())
 	if err != nil {
 		return nil, err
 	}
 	if _, e := s.One("SELECT name FROM knowledge_migrations WHERE name='legacy-topics-v1'"); errors.Is(e, sql.ErrNoRows) {
 		err = s.Transaction(func(tx *sql.Tx) error {
-			if _, e := tx.Exec("INSERT OR IGNORE INTO knowledge_bases SELECT id,workspace_id,question,scope,created FROM topics"); e != nil {
+			if _, e := tx.Exec("INSERT INTO knowledge_bases SELECT id,workspace_id,question,scope,created FROM topics WHERE true ON CONFLICT DO NOTHING"); e != nil {
 				return e
 			}
-			if _, e := tx.Exec("INSERT OR IGNORE INTO knowledge_papers SELECT DISTINCT e.topic_id,e.paper_id,'manual',? FROM topic_evidence e JOIN topics t ON t.id=e.topic_id JOIN papers p ON p.id=e.paper_id AND p.workspace_id=t.workspace_id", Now()); e != nil {
+			if _, e := tx.Exec("INSERT INTO knowledge_papers SELECT DISTINCT e.topic_id,e.paper_id,'manual',CAST(? AS DOUBLE PRECISION) FROM topic_evidence e JOIN topics t ON t.id=e.topic_id JOIN papers p ON p.id=e.paper_id AND p.workspace_id=t.workspace_id WHERE true ON CONFLICT DO NOTHING", Now()); e != nil {
 				return e
 			}
 			_, e := tx.Exec("INSERT INTO knowledge_migrations VALUES('legacy-topics-v1',?)", Now())
@@ -148,8 +190,16 @@ func OpenStore(root string) (*Store, error) {
 			return nil, err
 		}
 	}
-	_ = os.Chmod(filepath.Join(root, "fastread-web.sqlite3"), 0600)
+	if dsn == "" {
+		_ = os.Chmod(filepath.Join(root, "fastread-web.sqlite3"), 0600)
+	}
 	return s, nil
+}
+func (s *Store) documentText(text string) any {
+	if s.postgres {
+		return []byte(text)
+	}
+	return text
 }
 func Rows(q Queryer, query string, args ...any) ([]Row, error) {
 	rows, err := q.Query(query, args...)
@@ -266,7 +316,11 @@ func EnqueueTx(tx *sql.Tx, user Principal, kind string, payload Row, key, resour
 		return nil, Error(429, "workspace_queue_full")
 	}
 	id := UID()
-	_, e = tx.Exec("INSERT INTO jobs(id,workspace_id,user_id,kind,resource_id,version_id,dedupe_key,payload,state,available,billable,created,updated) VALUES(?,?,?,?,?,?,?,?,'queued',?,?,?,?)", id, user.WorkspaceID, user.UserID, kind, Null(resource), Null(version), key, Encode(payload), Now(), billable, Now(), Now())
+	billableFlag := 0
+	if billable {
+		billableFlag = 1
+	}
+	_, e = tx.Exec("INSERT INTO jobs(id,workspace_id,user_id,kind,resource_id,version_id,dedupe_key,payload,state,available,billable,created,updated) VALUES(?,?,?,?,?,?,?,?,'queued',?,?,?,?)", id, user.WorkspaceID, user.UserID, kind, Null(resource), Null(version), key, Encode(payload), Now(), billableFlag, Now(), Now())
 	if e != nil {
 		return nil, e
 	}

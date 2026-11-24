@@ -132,7 +132,7 @@ func assignWorkspaces(tx *sql.Tx, id string, ids []string) error {
 		if _, e := One(tx, "SELECT id FROM workspaces WHERE id=?", ws); e != nil {
 			return Error(422, "工作区不存在")
 		}
-		if _, e := tx.Exec("INSERT OR IGNORE INTO shared_provider_workspaces VALUES(?,?)", id, ws); e != nil {
+		if _, e := tx.Exec("INSERT INTO shared_provider_workspaces VALUES(?,?) ON CONFLICT DO NOTHING", id, ws); e != nil {
 			return e
 		}
 	}
@@ -147,7 +147,7 @@ func assignUsers(tx *sql.Tx, id string, ids []string) error {
 		if _, e := One(tx, "SELECT id FROM users WHERE id=?", user); e != nil {
 			return Error(422, "用户不存在")
 		}
-		if _, e := tx.Exec("INSERT OR IGNORE INTO shared_provider_users VALUES(?,?)", id, user); e != nil {
+		if _, e := tx.Exec("INSERT INTO shared_provider_users VALUES(?,?) ON CONFLICT DO NOTHING", id, user); e != nil {
 			return e
 		}
 	}

@@ -465,7 +465,7 @@ func (a *App) askPaper(w http.ResponseWriter, r *http.Request, p Principal) erro
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec("INSERT OR IGNORE INTO messages VALUES(?,?,?,?,?,?,?)", UID(), conversation["id"], "user", content, "{}", job["id"], Now())
+		_, err = tx.Exec("INSERT INTO messages VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING", UID(), conversation["id"], "user", content, "{}", job["id"], Now())
 		return err
 	})
 	return jobResponse(w, job, e)

@@ -182,7 +182,7 @@ func (s *Store) IntakeFastNews(workspace string, body Row) (Row, error) {
 		if err != nil {
 			return err
 		}
-		if _, err = tx.Exec("INSERT OR IGNORE INTO paper_identities VALUES(?,?,?)", workspace, identity, id); err != nil {
+		if _, err = tx.Exec("INSERT INTO paper_identities VALUES(?,?,?) ON CONFLICT DO NOTHING", workspace, identity, id); err != nil {
 			return err
 		}
 		result = Row{"id": id, "title": title, "awaiting_file": awaiting, "created": existing == nil}

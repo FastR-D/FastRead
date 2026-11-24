@@ -195,7 +195,7 @@ func ExecuteJob(ctx context.Context, s *Store, job Row, owner string) error {
 			count := 0
 			for _, page := range pages {
 				for i, text := range chunkText(Str(page["text"]), 1600) {
-					if _, e := tx.Exec("INSERT INTO evidence_chunks VALUES(?,?,?,?,?)", fmt.Sprintf("%s:p%v:c%d", Str(job["version_id"]), page["page"], i), job["version_id"], page["page"], i, text); e != nil {
+					if _, e := tx.Exec("INSERT INTO evidence_chunks VALUES(?,?,?,?,?)", fmt.Sprintf("%s:p%v:c%d", Str(job["version_id"]), page["page"], i), job["version_id"], page["page"], i, s.documentText(text)); e != nil {
 						return e
 					}
 					count++

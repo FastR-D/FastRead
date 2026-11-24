@@ -103,7 +103,7 @@ func (a *App) RegisterKnowledge() {
 		if e != nil {
 			return e
 		}
-		_, e = s.DB.Exec("INSERT OR IGNORE INTO knowledge_bases VALUES(?,?,?,?,?)", UID(), p.WorkspaceID, name, description, Now())
+		_, e = s.DB.Exec("INSERT INTO knowledge_bases VALUES(?,?,?,?,?) ON CONFLICT DO NOTHING", UID(), p.WorkspaceID, name, description, Now())
 		if e != nil {
 			return e
 		}
@@ -488,7 +488,7 @@ func (a *App) createNotebookNote(w http.ResponseWriter, r *http.Request, p Princ
 		return Error(422, "笔记内容不能为空")
 	}
 	nid := UID()
-	_, e = a.Store.DB.Exec("INSERT OR IGNORE INTO notebook_notes VALUES(?,?,?,?,?,?,?,?,?,?)", nid, p.WorkspaceID, scope, id, title, content, evidence, Null(source), Now(), Now())
+	_, e = a.Store.DB.Exec("INSERT INTO notebook_notes VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING", nid, p.WorkspaceID, scope, id, title, content, evidence, Null(source), Now(), Now())
 	if e != nil {
 		return e
 	}

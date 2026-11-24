@@ -79,7 +79,7 @@ func seedDocument(t *testing.T, s *Store, p Principal, title string) Row {
 	var result Row
 	e := s.Transaction(func(tx *sql.Tx) error {
 		var e error
-		result, e = ingestDocument(tx, p.WorkspaceID, Row{"title": title, "authors": []string{"A. Author"}, "year": 2026, "page_count": 2}, []Row{{"page": 1, "text": evidenceText}, {"page": 2, "text": "The experiment evaluates multiple datasets and reports measured memory consumption and accuracy."}}, "files/sample.pdf", "")
+		result, e = s.ingestDocument(tx, p.WorkspaceID, Row{"title": title, "authors": []string{"A. Author"}, "year": 2026, "page_count": 2}, []Row{{"page": 1, "text": evidenceText}, {"page": 2, "text": "The experiment evaluates multiple datasets and reports measured memory consumption and accuracy."}}, "files/sample.pdf", "")
 		return e
 	})
 	if e != nil {
@@ -165,7 +165,7 @@ func TestDocumentReimportAndImmutableVersions(t *testing.T) {
 	var revised Row
 	e := s.Transaction(func(tx *sql.Tx) error {
 		var err error
-		revised, err = ingestDocument(tx, p.WorkspaceID, Row{"title": "Revised", "page_count": 1}, []Row{{"page": 1, "text": evidenceText + " Revised content."}}, "files/revised.pdf", Str(doc["paper_id"]))
+		revised, err = s.ingestDocument(tx, p.WorkspaceID, Row{"title": "Revised", "page_count": 1}, []Row{{"page": 1, "text": evidenceText + " Revised content."}}, "files/revised.pdf", Str(doc["paper_id"]))
 		return err
 	})
 	if e != nil {
@@ -259,7 +259,7 @@ func TestReportKeepsBalancedPagesAndCompleteMarkdown(t *testing.T) {
 	var document Row
 	if e := s.Transaction(func(tx *sql.Tx) error {
 		var err error
-		document, err = ingestDocument(tx, p.WorkspaceID, Row{"title": "Balanced report", "page_count": 30}, pages, "files/report.pdf", "")
+		document, err = s.ingestDocument(tx, p.WorkspaceID, Row{"title": "Balanced report", "page_count": 30}, pages, "files/report.pdf", "")
 		return err
 	}); e != nil {
 		t.Fatal(e)
@@ -406,7 +406,7 @@ func TestFastNewsIntakeAttachesExistingMetadata(t *testing.T) {
 	var imported Row
 	e = s.Transaction(func(tx *sql.Tx) error {
 		var err error
-		imported, err = ingestDocument(tx, p.WorkspaceID, Row{"title": "PDF metadata title", "page_count": 1}, []Row{{"page": 1, "text": evidenceText}}, "files/source.pdf", Str(first["id"]))
+		imported, err = s.ingestDocument(tx, p.WorkspaceID, Row{"title": "PDF metadata title", "page_count": 1}, []Row{{"page": 1, "text": evidenceText}}, "files/source.pdf", Str(first["id"]))
 		return err
 	})
 	if e != nil || imported["paper_id"] != first["id"] {

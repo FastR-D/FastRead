@@ -51,12 +51,23 @@ func run() error {
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
-	s, err := fastread.OpenStore(*root)
+	dsn := os.Getenv("FASTREAD_DATABASE_URL")
+	var s *fastread.Store
+	var err error
+	if dsn != "" {
+		s, err = fastread.OpenPostgres(*root, dsn)
+	} else if command == "migrate-postgres" {
+		return errors.New("FASTREAD_DATABASE_URL is required")
+	} else {
+		s, err = fastread.OpenStore(*root)
+	}
 	if err != nil {
 		return err
 	}
 	defer s.DB.Close()
 	switch command {
+	case "migrate-postgres":
+		return nil
 	case "user-create":
 		password := os.Getenv("FASTREAD_INITIAL_PASSWORD")
 		if password == "" {

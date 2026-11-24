@@ -161,7 +161,7 @@ func (s *Store) RateLimit(action, peer string) error {
 			failures = int(Num(row["failures"])) + 1
 			until = Num(row["until"])
 		}
-		_, e := tx.Exec("INSERT OR REPLACE INTO login_attempts VALUES(?,?,?)", key, failures, until)
+		_, e := tx.Exec("INSERT INTO login_attempts VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET failures=excluded.failures, until=excluded.until", key, failures, until)
 		limited = failures > 12
 		return e
 	})
@@ -208,7 +208,7 @@ func (a *App) RegisterAuth() {
 			if Num(attempt["until"]) > Now() {
 				fail += int(Num(attempt["failures"]))
 			}
-			_, _ = a.Store.DB.Exec("INSERT OR REPLACE INTO login_attempts VALUES(?,?,?)", key, fail, Now()+900)
+			_, _ = a.Store.DB.Exec("INSERT INTO login_attempts VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET failures=excluded.failures, until=excluded.until", key, fail, Now()+900)
 			return Error(401, "邮箱或密码错误")
 		}
 		m, e := a.Store.One("SELECT workspace_id FROM memberships WHERE user_id=? ORDER BY workspace_id LIMIT 1", u["id"])

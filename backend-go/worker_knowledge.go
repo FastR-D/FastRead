@@ -138,17 +138,17 @@ func executeKnowledge(ctx context.Context, s *Store, job Row, owner string, payl
 			if Str(payload["knowledge_id"]) != "" {
 				origin = "manual"
 			}
-			if _, e = tx.Exec("INSERT OR IGNORE INTO knowledge_papers VALUES(?,?,?,?)", bid, job["resource_id"], origin, Now()); e != nil {
+			if _, e = tx.Exec("INSERT INTO knowledge_papers VALUES(?,?,?,?) ON CONFLICT DO NOTHING", bid, job["resource_id"], origin, Now()); e != nil {
 				return e
 			}
-			if _, e = tx.Exec("INSERT OR REPLACE INTO paper_insights VALUES(?,?,?,?,?)", job["resource_id"], job["version_id"], principle, Encode(evidence), Now()); e != nil {
+			if _, e = tx.Exec("INSERT INTO paper_insights VALUES(?,?,?,?,?) ON CONFLICT(paper_id) DO UPDATE SET version_id=excluded.version_id, principle=excluded.principle, evidence=excluded.evidence, created=excluded.created", job["resource_id"], job["version_id"], principle, Encode(evidence), Now()); e != nil {
 				return e
 			}
 			if _, e = tx.Exec("DELETE FROM paper_tags WHERE paper_id=? AND origin='ai'", job["resource_id"]); e != nil {
 				return e
 			}
 			for _, tag := range tags {
-				if _, e = tx.Exec("INSERT OR IGNORE INTO paper_tags VALUES(?,?,'ai')", job["resource_id"], tag); e != nil {
+				if _, e = tx.Exec("INSERT INTO paper_tags VALUES(?,?,'ai') ON CONFLICT DO NOTHING", job["resource_id"], tag); e != nil {
 					return e
 				}
 			}

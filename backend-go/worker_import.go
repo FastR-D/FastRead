@@ -259,7 +259,7 @@ func executeImport(ctx context.Context, s *Store, job Row, owner string, payload
 			return e
 		}
 		var e error
-		result, e = ingestDocument(tx, principal.WorkspaceID, metadata, pages, relative, Str(payload["paper_id"]))
+		result, e = s.ingestDocument(tx, principal.WorkspaceID, metadata, pages, relative, Str(payload["paper_id"]))
 		if e != nil {
 			return e
 		}
@@ -270,7 +270,7 @@ func executeImport(ctx context.Context, s *Store, job Row, owner string, payload
 			if _, e = One(tx, "SELECT id FROM knowledge_bases WHERE id=? AND workspace_id=?", bid, principal.WorkspaceID); e != nil {
 				return e
 			}
-			if _, e = tx.Exec("INSERT OR IGNORE INTO knowledge_papers VALUES(?,?,'manual',?)", bid, result["paper_id"], Now()); e != nil {
+			if _, e = tx.Exec("INSERT INTO knowledge_papers VALUES(?,?,'manual',?) ON CONFLICT DO NOTHING", bid, result["paper_id"], Now()); e != nil {
 				return e
 			}
 		}
@@ -299,7 +299,7 @@ func executeImport(ctx context.Context, s *Store, job Row, owner string, payload
 	return e
 }
 
-func ingestDocument(tx *sql.Tx, workspace string, metadata Row, pages []Row, file, paperID string) (Row, error) {
+func (s *Store) ingestDocument(tx *sql.Tx, workspace string, metadata Row, pages []Row, file, paperID string) (Row, error) {
 	if len(pages) == 0 {
 		return nil, errors.New("document has no pages")
 	}
@@ -377,7 +377,7 @@ func ingestDocument(tx *sql.Tx, workspace string, metadata Row, pages []Row, fil
 		}
 	}
 	for _, key := range identities {
-		if _, e = tx.Exec("INSERT OR IGNORE INTO paper_identities VALUES(?,?,?)", workspace, key, paperID); e != nil {
+		if _, e = tx.Exec("INSERT INTO paper_identities VALUES(?,?,?) ON CONFLICT DO NOTHING", workspace, key, paperID); e != nil {
 			return nil, e
 		}
 	}
@@ -394,11 +394,11 @@ func ingestDocument(tx *sql.Tx, workspace string, metadata Row, pages []Row, fil
 			return nil, e
 		}
 		for _, page := range pages {
-			if _, e = tx.Exec("INSERT INTO pages VALUES(?,?,?)", version, page["page"], page["text"]); e != nil {
+			if _, e = tx.Exec("INSERT INTO pages VALUES(?,?,?)", version, page["page"], s.documentText(Str(page["text"]))); e != nil {
 				return nil, e
 			}
 			for ordinal, text := range chunkText(Str(page["text"]), 1600) {
-				if _, e = tx.Exec("INSERT INTO evidence_chunks VALUES(?,?,?,?,?)", fmt.Sprintf("%s:p%v:c%d", version, page["page"], ordinal), version, page["page"], ordinal, text); e != nil {
+				if _, e = tx.Exec("INSERT INTO evidence_chunks VALUES(?,?,?,?,?)", fmt.Sprintf("%s:p%v:c%d", version, page["page"], ordinal), version, page["page"], ordinal, s.documentText(text)); e != nil {
 					return nil, e
 				}
 			}
