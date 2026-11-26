@@ -20,10 +20,14 @@
     "test:reader:browser": "node scripts/reader-browser.mjs",
     "test:reading-studio:browser": "node scripts/reading-studio-browser.mjs",
     "test:design:browser": "node scripts/design-preview.mjs",
-    "test:cas-entry:browser": "node scripts/cas-entry-browser.mjs"
+    "test:cas-entry:browser": "node scripts/cas-entry-browser.mjs",
+    "test:search:browser": "node scripts/search-browser.mjs",
+    "test:spacing:browser": "node scripts/spacing-browser.mjs",
+    "test:continuous-reader:browser": "node scripts/continuous-reader-browser.mjs"
   },
   "dependencies": {
     "@ant-design/x": "1.6.1",
+    "@assistant-ui/react": "^0.15.36",
     "@fastrd/ui-foundation": "0.4.0",
     "@fastrd/ui-react": "0.4.0",
     "@hookform/resolvers": "^7.0.6",

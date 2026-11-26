@@ -18,12 +18,21 @@ import FastCASAccount from './FastCASAccount'
 import Knowledge from './Knowledge'
 import { OrganizeProvider, type Job } from './Organize'
 import NotebookDesk from './NotebookDesk'
-import { AppDialog, AppHeader, WorkbenchSidebar, type MainSection } from './Chrome'
+import PaperSearch from './PaperSearch'
+import Jobs from './Jobs'
+import {
+  AppDialog,
+  AppHeader,
+  WorkbenchSidebar,
+  SideTabWorkspace,
+  type MainSection,
+} from './Chrome'
 import {
   Archive,
   Files,
-  Search,
-  Upload,
+  Palette,
+  SlidersHorizontal,
+  Link2,
   ListTodo,
   FileText,
   FolderOpen,
@@ -144,24 +153,19 @@ export default function WebApp({
   const [providerId, setProviderId] = useState('')
   const [model, setModel] = useState('')
   const [metadataModel, setMetadataModel] = useState('')
-  const [searchResults, setSearchResults] = useState<Row | null>(null)
-  const [searching, setSearching] = useState(false)
+  const [searchReturn, setSearchReturn] = useState<Row | null>(null)
   const [section, setSection] = useState<MainSection>(
     arrival.get('section') === 'settings' ? 'settings' : 'library'
   )
-  const settings = section === 'settings'
+  const [libraryPage, setLibraryPage] = useState<'papers' | 'jobs' | 'search'>('papers')
   const [libraryEpoch, setLibraryEpoch] = useState(0)
   const [themeMode, setThemeMode] = useState(colorMode.mode)
   const [accountSettings, setAccountSettings] = useState(false)
   const [books, setBooks] = useState<Row[]>([])
-  const [libraryDialog, setLibraryDialog] = useState<'import' | 'search' | 'jobs' | null>(null)
+  const [libraryDialog, setLibraryDialog] = useState<'import' | null>(null)
   const [importBook, setImportBook] = useState('')
   const [importUrl, setImportUrl] = useState(handoffBody?.url || arrival.get('url') || '')
   useEffect(() => colorMode.subscribe(() => setThemeMode(colorMode.mode)), [])
-  useEffect(() => {
-    if (libraryDialog === 'search')
-      document.querySelector<HTMLInputElement>('#library-search input')?.focus()
-  }, [libraryDialog])
   useEffect(() => {
     if (handoff || arrival.has('url') || arrival.has('pending')) setLibraryDialog('import')
   }, [arrival, handoff])
@@ -213,16 +217,15 @@ export default function WebApp({
     }
   }, [])
   const openPaper = useCallback(async (id: string, page?: number, version?: string) => {
-    setSearchResults(null)
     setDeskTarget({ paper_id: id, page, version })
     window.history.replaceState(null, '', APP_BASE + '?paper=' + encodeURIComponent(id))
   }, [])
   function home() {
+    setLibraryPage('papers')
     setArchived(false)
     setOffset(0)
     setLibraryEpoch(n => n + 1)
     setDeskTarget(null)
-    setSearchResults(null)
     window.history.replaceState(null, '', APP_BASE)
     void action(loadLibrary)
   }
@@ -367,33 +370,6 @@ export default function WebApp({
         </AppDialog>
 
         <AppDialog
-          open={libraryDialog === 'search'}
-          onClose={() => setLibraryDialog(null)}
-          title="搜索论文"
-        >
-          <form
-            id="library-search"
-            className="grid gap-4"
-            onSubmit={e => {
-              e.preventDefault()
-              const query = String(new FormData(e.currentTarget).get('query'))
-              setSearching(true)
-              void action(async () => {
-                setSearchResults(await api('/search', 'POST', { query }))
-                setLibraryDialog(null)
-              }).finally(() => setSearching(false))
-            }}
-          >
-            <label className="fastui-field">
-              搜索公开论文
-              <TextField name="query" placeholder="论文标题、DOI 或关键词" required autoFocus />
-            </label>
-            <Button type="submit" loading={searching}>
-              搜索
-            </Button>
-          </form>
-        </AppDialog>
-        <AppDialog
           open={libraryDialog === 'import'}
           onClose={() => setLibraryDialog(null)}
           title="导入论文"
@@ -474,124 +450,140 @@ export default function WebApp({
             </label>
           </div>
         </AppDialog>
-        <AppDialog
-          open={libraryDialog === 'jobs'}
-          onClose={() => setLibraryDialog(null)}
-          title="后台任务"
-        >
-          <div className="job-list">
-            {' '}
-            {!jobs.length && <span>暂无任务</span>}
-            {jobs.slice(0, 10).map(job => (
-              <StatusBar key={job.id}>
-                {job.kind} ·{' '}
-                {(
-                  {
-                    queued: '排队中',
-                    running: '处理中',
-                    succeeded: '已完成',
-                    failed: '失败',
-                    needs_attention: '需要处理',
-                    cancelled: '已取消',
-                  } as Record<string, string>
-                )[job.state] || job.state}
-              </StatusBar>
-            ))}
-          </div>
-        </AppDialog>
         {section !== 'library' ? (
           <main
             className="min-h-0 flex-1 overflow-auto"
-            role="tabpanel"
+            role={section === 'settings' ? 'region' : 'tabpanel'}
             id={`main-${section}`}
-            aria-labelledby={section}
+            aria-label={section === 'settings' ? '设置' : undefined}
+            aria-labelledby={section === 'settings' ? undefined : section}
           >
             {section === 'settings' ? (
-              <Section className="settings-page app-flat-section">
-                <h1>设置</h1>
-                <Section className="app-flat-section grid gap-4" aria-label="模型设置">
-                  <h2 className="fastui-heading m-0 text-base">工作区模型</h2>
-                  <label className="fastui-field">
-                    颜色模式
-                    <Select
-                      value={themeMode}
-                      onChange={e =>
-                        colorMode.setMode(e.target.value as 'light' | 'dark' | 'system')
-                      }
-                    >
-                      <option value="system">跟随系统</option>
-                      <option value="light">浅色</option>
-                      <option value="dark">深色</option>
-                    </Select>
-                  </label>
-                  <label className="fastui-field">
-                    当前使用的模型
-                    <Select
-                      aria-label="当前使用的模型"
-                      value={`${providerId}|${model}`}
-                      onChange={e => {
-                        const [p, m] = e.target.value.split('|')
-                        setProviderId(p)
-                        setModel(m)
-                      }}
-                    >
-                      <option value="|">请选择模型</option>
-                      {modelOptions}
-                    </Select>
-                  </label>
-                  <p className="m-0">密钥仅存服务器 · 每日上限 {user.workspace?.daily_limit}</p>
-                  {error && <Alert tone="danger">{error}</Alert>}
-                  {notice && <Alert tone="success">{notice}</Alert>}
-                  {user.role === 'owner' && (
-                    <form
-                      className="grid gap-3"
-                      onSubmit={e => {
-                        e.preventDefault()
-                        const f = e.currentTarget
-                        const data = Object.fromEntries(new FormData(f))
-                        void action(async () => {
-                          await api('/providers', 'POST', {
-                            ...data,
-                            models: String(data.models)
-                              .split(/[,，]/)
-                              .map(v => v.trim())
-                              .filter(Boolean),
-                          })
-                          f.reset()
-                          await loadProviders({ providerId, model })
-                          setNotice('供应商已保存')
-                        })
-                      }}
-                    >
-                      <label className="fastui-field">
-                        名称
-                        <TextField name="name" required />
-                      </label>
-                      <label className="fastui-field">
-                        API 地址
-                        <TextField
-                          name="base_url"
-                          type="url"
-                          placeholder="https://api.example.com/v1"
-                          required
-                        />
-                      </label>
-                      <label className="fastui-field">
-                        API 密钥
-                        <TextField name="api_key" type="password" autoComplete="off" required />
-                      </label>
-                      <label className="fastui-field">
-                        模型 ID（逗号分隔）
-                        <TextField name="models" defaultValue="qwen3.8-27b,glm-5.2" required />
-                      </label>
-                      <Button type="submit" className="justify-self-start">
-                        保存供应商
-                      </Button>
-                    </form>
-                  )}
-                  {settings && <IntegrationStatus api={api} />}
-                </Section>
-              </Section>
+              <SideTabWorkspace
+                label="设置"
+                keepMounted
+                tabs={[
+                  {
+                    id: 'models-settings',
+                    label: '工作区模型',
+                    icon: <SlidersHorizontal size={18} />,
+                  },
+                  { id: 'appearance', label: '外观', icon: <Palette size={18} /> },
+                  { id: 'connections', label: '应用联动', icon: <Link2 size={18} /> },
+                ]}
+              >
+                {tab => (
+                  <Section className="settings-page app-page">
+                    <PanelHeader className="app-page-heading">
+                      <h1>
+                        {tab === 'appearance'
+                          ? '外观'
+                          : tab === 'connections'
+                            ? '应用联动'
+                            : '工作区模型'}
+                      </h1>
+                    </PanelHeader>
+                    {tab === 'appearance' ? (
+                      <Section className="app-flat-section grid gap-4">
+                        <label className="fastui-field">
+                          颜色模式
+                          <Select
+                            value={themeMode}
+                            onChange={e =>
+                              colorMode.setMode(e.target.value as 'light' | 'dark' | 'system')
+                            }
+                          >
+                            <option value="system">跟随系统</option>
+                            <option value="light">浅色</option>
+                            <option value="dark">深色</option>
+                          </Select>
+                        </label>
+                      </Section>
+                    ) : tab === 'connections' ? (
+                      <IntegrationStatus api={api} />
+                    ) : (
+                      <Section className="app-flat-section grid gap-4" aria-label="模型设置">
+                        <label className="fastui-field">
+                          当前使用的模型
+                          <Select
+                            aria-label="当前使用的模型"
+                            value={`${providerId}|${model}`}
+                            onChange={e => {
+                              const [p, m] = e.target.value.split('|')
+                              setProviderId(p)
+                              setModel(m)
+                            }}
+                          >
+                            <option value="|">请选择模型</option>
+                            {modelOptions}
+                          </Select>
+                        </label>
+                        <p className="m-0">
+                          密钥仅存服务器 · 每日上限 {user.workspace?.daily_limit}
+                        </p>
+                        {error && <Alert tone="danger">{error}</Alert>}
+                        {notice && <Alert tone="success">{notice}</Alert>}
+                        {user.role === 'owner' && (
+                          <form
+                            className="grid gap-3"
+                            onSubmit={e => {
+                              e.preventDefault()
+                              const f = e.currentTarget
+                              const data = Object.fromEntries(new FormData(f))
+                              void action(async () => {
+                                await api('/providers', 'POST', {
+                                  ...data,
+                                  models: String(data.models)
+                                    .split(/[,，]/)
+                                    .map(v => v.trim())
+                                    .filter(Boolean),
+                                })
+                                f.reset()
+                                await loadProviders({ providerId, model })
+                                setNotice('供应商已保存')
+                              })
+                            }}
+                          >
+                            <label className="fastui-field">
+                              名称
+                              <TextField name="name" required />
+                            </label>
+                            <label className="fastui-field">
+                              API 地址
+                              <TextField
+                                name="base_url"
+                                type="url"
+                                placeholder="https://api.example.com/v1"
+                                required
+                              />
+                            </label>
+                            <label className="fastui-field">
+                              API 密钥
+                              <TextField
+                                name="api_key"
+                                type="password"
+                                autoComplete="off"
+                                required
+                              />
+                            </label>
+                            <label className="fastui-field">
+                              模型 ID（逗号分隔）
+                              <TextField
+                                name="models"
+                                defaultValue="qwen3.8-27b,glm-5.2"
+                                required
+                              />
+                            </label>
+                            <Button type="submit" className="justify-self-start">
+                              保存供应商
+                            </Button>
+                          </form>
+                        )}
+                      </Section>
+                    )}
+                  </Section>
+                )}
+              </SideTabWorkspace>
             ) : user.is_admin || user.role === 'admin' ? (
               <Administration api={api} currentUser={user} />
             ) : null}
@@ -617,6 +609,12 @@ export default function WebApp({
                 providerId={providerId}
                 model={model}
                 onHome={home}
+                onSearch={() => {
+                  setImportBook(deskTarget.book_id || '')
+                  setSearchReturn(deskTarget)
+                  setDeskTarget(null)
+                  setLibraryPage('search')
+                }}
                 onExternal={(id: string) => void openPaper(id)}
               />
             ) : (
@@ -633,32 +631,25 @@ export default function WebApp({
                         setOffset(0)
                         home()
                       },
-                      active: !archived,
-                    },
-                    {
-                      label: '搜索论文',
-                      icon: <Search size={18} />,
-                      onClick: () => setLibraryDialog('search'),
-                    },
-                    {
-                      label: '导入论文',
-                      icon: <Upload size={18} />,
-                      onClick: () => setLibraryDialog('import'),
+                      active: !archived && libraryPage === 'papers',
                     },
                     {
                       label: '归档论文',
                       icon: <Archive size={18} />,
                       onClick: () => {
-                        setSearchResults(null)
+                        setLibraryPage('papers')
                         setArchived(!archived)
                         setOffset(0)
                       },
-                      active: archived,
+                      active: archived && libraryPage === 'papers',
                     },
                     {
                       label: '后台任务',
                       icon: <ListTodo size={18} />,
-                      onClick: () => setLibraryDialog('jobs'),
+                      onClick: () => {
+                        setLibraryPage('jobs')
+                      },
+                      active: libraryPage === 'jobs',
                     },
                   ]}
                 >
@@ -738,69 +729,26 @@ export default function WebApp({
                     )}
                   </div>
                 </WorkbenchSidebar>
-                <div className="library-content min-w-0 p-5 sm:p-8 lg:overflow-auto">
-                  {searchResults ? (
-                    <Section className="app-flat-section grid gap-4">
-                      <PanelHeader>
-                        <h1 className="fastui-heading m-0 text-xl">搜索结果</h1>
-                        <Button variant="quiet" onClick={() => setSearchResults(null)}>
-                          返回阅读
-                        </Button>
-                      </PanelHeader>
-                      <StatusBar>
-                        公开来源：
-                        {Object.entries(searchResults.sources || {})
-                          .map(
-                            ([name, status]) =>
-                              `${name} ${(status as Row).available ? '可用' : (status as Row).reason || '暂不可用'}`
-                          )
-                          .join(' · ')}
-                      </StatusBar>
-                      {searchResults.papers.map((p: Row, i: number) => (
-                        <Section className="grid gap-4 p-5" key={p.id || i}>
-                          <h2 className="fastui-heading m-0 text-base">{p.title}</h2>
-                          <p className="m-0">
-                            {p.authors?.join(', ')} · {p.year || '年份待核实'}
-                          </p>
-                          <small>
-                            {(p.discovery_sources || []).join(' / ')}
-                            {p.doi ? ` · DOI: ${p.doi}` : ''}
-                          </small>
-                          {p.identity_warning && <Alert tone="warning">{p.identity_warning}</Alert>}
-                          <p className="m-0">{p.abstract?.slice(0, 500)}</p>
-                          <Toolbar label="搜索结果操作">
-                            {(p.pdf_url || p.url || p.source_url) && (
-                              <a
-                                className="fastui-link"
-                                href={p.pdf_url || p.url || p.source_url}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                查看来源
-                              </a>
-                            )}
-                            <Button
-                              onClick={() =>
-                                void action(() =>
-                                  submitJob('/imports/url', {
-                                    url:
-                                      p.pdf_url ||
-                                      p.url ||
-                                      p.source_url ||
-                                      `https://doi.org/${p.doi}`,
-                                  })
-                                )
-                              }
-                            >
-                              导入这篇论文
-                            </Button>
-                          </Toolbar>
-                        </Section>
-                      ))}
-                    </Section>
+                <div className="library-content min-w-0 lg:overflow-auto">
+                  {libraryPage === 'jobs' ? (
+                    <Jobs jobs={jobs} onRefresh={async () => setJobs((await api('/jobs')).items)} />
+                  ) : libraryPage === 'search' ? (
+                    <PaperSearch
+                      api={api}
+                      submit={submitJob}
+                      jobs={jobs}
+                      books={books}
+                      target={importBook}
+                      onTarget={setImportBook}
+                      onBack={() => {
+                        setLibraryPage('papers')
+                        setDeskTarget(searchReturn)
+                      }}
+                      onJobs={() => setLibraryPage('jobs')}
+                    />
                   ) : archived ? (
-                    <Section className="knowledge-home archive-view">
-                      <div className="knowledge-hero">
+                    <Section className="knowledge-home archive-view app-page">
+                      <div className="knowledge-hero app-page-heading">
                         <div>
                           <span className="library-breadcrumb">我的空间 / 归档</span>
                           <h1>归档论文</h1>
@@ -853,6 +801,11 @@ export default function WebApp({
                   ) : (
                     <Knowledge
                       key={libraryEpoch}
+                      onSearch={() => {
+                        setImportBook('')
+                        setSearchReturn(null)
+                        setLibraryPage('search')
+                      }}
                       onImport={() => setLibraryDialog('import')}
                       onOpenBook={(id: string) => {
                         setDeskTarget({ book_id: id })

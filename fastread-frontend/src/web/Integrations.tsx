@@ -41,12 +41,11 @@ export function IntegrationStatus({ api }: { api: Api }) {
     }
   }
   return (
-    <Section className="integration-status grid gap-4">
-      <h2 className="fastui-heading m-0 text-base">应用联动</h2>
+    <Section className="integration-status app-flat-section grid gap-4">
       {error && <Alert tone="danger">{error}</Alert>}
       {status
         ? ['fastwrite', 'fastnews'].map(key => (
-            <Section className="integration-connection grid gap-4 p-5" key={key}>
+            <Section className="integration-connection app-flat-section grid gap-4" key={key}>
               <PanelHeader className="section-heading">
                 <strong>{key === 'fastwrite' ? 'FastWrite 写作' : 'FastNews 科研动态'}</strong>
                 <Badge tone={status[key]?.connected ? 'success' : 'warning'}>

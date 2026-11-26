@@ -422,7 +422,7 @@ try {
         `${mode} ${width}: page overflow`
       )
       const navigation = page.getByRole('group', { name: '主导航 controls', exact: true })
-      for (const name of ['论文库', '管理', '设置']) {
+      for (const name of ['论文库', '管理']) {
         await expect(navigation.getByRole('tab', { name, exact: true })).toBeInViewport()
       }
       const geometry = await page.locator('.app-topbar-inner').evaluate(el => {
@@ -444,9 +444,9 @@ try {
       await expect(active.locator('..')).toHaveCSS('border-top-width', '0px')
       await active.focus()
       await page.keyboard.press('End')
-      await expect(navigation.getByRole('tab', { name: '设置', exact: true })).toBeFocused()
+      await expect(navigation.getByRole('tab', { name: '管理', exact: true })).toBeFocused()
       await page.keyboard.press('Enter')
-      await expect(page.getByRole('tabpanel', { name: '设置' })).toBeVisible()
+      await expect(page.getByRole('tabpanel', { name: '管理', exact: true })).toBeVisible()
       await navigation.getByRole('tab', { name: '论文库', exact: true }).click()
       await page.screenshot({
         animations: 'disabled',
@@ -457,13 +457,36 @@ try {
   await page.getByRole('button', { name: '切换浅色模式' }).click()
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.screenshot({ animations: 'disabled', path: `${artifacts}/library-light.png` })
+  const sidebar = page.locator('#library-sidebar')
+  await expect(sidebar.getByRole('button', { name: '导入论文', exact: true })).toHaveCount(0)
+  await expect(sidebar.getByRole('button', { name: '搜索论文', exact: true })).toHaveCount(0)
+  await page
+    .getByRole('group', { name: '论文库操作' })
+    .getByRole('button', { name: '搜索论文' })
+    .click()
+  await expect(page.getByRole('region', { name: '搜索论文', exact: true })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '搜索论文' })).toHaveCount(0)
+  await page.screenshot({ animations: 'disabled', path: `${artifacts}/search-light.png` })
+  await sidebar.getByRole('button', { name: '后台任务' }).click()
+  await expect(page.getByRole('heading', { name: '后台任务' })).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '后台任务' })).toHaveCount(0)
+  await page.screenshot({ animations: 'disabled', path: `${artifacts}/jobs-light.png` })
+  await page.getByRole('button', { name: 'FastRead 论文库' }).click()
+  await page.getByRole('button', { name: '账号菜单' }).hover()
+  await expect(page.getByRole('menu', { name: '账号菜单' })).toBeVisible()
+  await page.screenshot({ animations: 'disabled', path: `${artifacts}/account-menu.png` })
+  await page.getByRole('button', { name: '账号菜单' }).focus()
+  await page.keyboard.press('Escape')
+
   await page.getByRole('tab', { name: '管理', exact: true }).click()
   const adminNavigation = page.getByRole('tablist', { name: '管理分类' })
   for (const width of [1440, 768, 390, 360]) {
     await page.setViewportSize({ width, height: 1000 })
+    if (width <= 900 && (await page.getByRole('button', { name: '展开导航' }).count()))
+      await page.getByRole('button', { name: '展开导航' }).click()
     await expect(adminNavigation).toHaveAttribute(
       'aria-orientation',
-      width <= 760 ? 'horizontal' : 'vertical'
+      width <= 900 ? 'horizontal' : 'vertical'
     )
     for (const [name, key] of [
       ['运行概览', 'overview'],
@@ -485,14 +508,35 @@ try {
       })
     }
     await adminNavigation.getByRole('tab', { name: '运行概览' }).focus()
-    await page.keyboard.press(width <= 760 ? 'ArrowRight' : 'ArrowDown')
+    await page.keyboard.press(width <= 900 ? 'ArrowRight' : 'ArrowDown')
     await expect(adminNavigation.getByRole('tab', { name: '用户管理' })).toBeFocused()
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
 
-  await page.getByRole('tab', { name: '设置', exact: true }).click()
-  await expect(page.getByRole('tabpanel', { name: '设置' })).toBeVisible()
+  await page.getByRole('button', { name: '账号菜单', exact: true }).click()
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click()
+  await expect(page.getByRole('region', { name: '设置', exact: true })).toBeVisible()
   await page.screenshot({ animations: 'disabled', path: `${artifacts}/settings-light.png` })
+  await expect(page.getByRole('tab', { name: '设置', exact: true })).toHaveCount(0)
+  const sidebarStyle = () => page.locator('.workbench-sidebar').evaluate(el => {
+    const button = el.querySelector('.sidebar-navigation .fastui-button')
+    const css = getComputedStyle(button)
+    return { width: el.getBoundingClientRect().width, height: button.getBoundingClientRect().height, radius: css.borderRadius, padding: css.padding, fontWeight: css.fontWeight, background: css.backgroundColor }
+  })
+  const settingsSidebar = await sidebarStyle()
+  await page.getByRole('tab', { name: '应用联动', exact: true }).click()
+  for (const selector of ['.settings-page', '.integration-status', '.integration-connection']) {
+    for (const box of await page.locator(selector).all()) {
+      if (await box.isVisible()) { await expect(box).toHaveCSS('border-top-width', '0px'); await expect(box).toHaveCSS('box-shadow', 'none') }
+    }
+  }
+  await page.screenshot({ animations: 'disabled', path: `${artifacts}/connections-light.png` })
+  await page.getByRole('tab', { name: '管理', exact: true }).click()
+  assert.deepEqual(await sidebarStyle(), settingsSidebar, 'management and settings must use identical sidebar geometry and selection')
+  await page.getByRole('tab', { name: '论文库', exact: true }).click()
+  assert.deepEqual(await sidebarStyle(), settingsSidebar, 'library and settings must use identical sidebar geometry and selection')
+  scenarios.push('equal sidebar width, spacing and selection; settings menu entry and border-free integrations')
+
   await page.getByRole('tab', { name: '论文库', exact: true }).click()
 
   await page.getByRole('button', { name: '导入论文', exact: true }).last().click()
@@ -551,8 +595,9 @@ try {
   await page.setViewportSize({ width: 360, height: 844 })
   await page.goto(base)
   await expect(page.locator('.knowledge-paper')).toHaveCount(6)
-  await page.getByRole('tab', { name: '设置', exact: true }).click()
-  await expect(page.getByRole('tabpanel', { name: '设置' })).toBeVisible()
+  await page.getByRole('button', { name: '账号菜单', exact: true }).click()
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click()
+  await expect(page.getByRole('region', { name: '设置', exact: true })).toBeVisible()
   assert.ok(
     await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
     'font fallback overflow'

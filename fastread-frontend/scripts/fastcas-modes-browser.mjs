@@ -55,8 +55,9 @@ try {
       await page.getByLabel('邮箱', { exact: true }).fill('reader@example.test')
       await page.getByLabel('密码', { exact: true }).fill('fixture-password-1234')
       await page.getByRole('button', { name: '确认', exact: true }).click()
-      await page.getByRole('button', { name: '账号设置', exact: true }).click()
-      const account = page.getByRole('region', { name: '账号设置' })
+      await page.getByRole('button', { name: '账号菜单', exact: true }).click()
+      await page.getByRole('menuitem', { name: 'CAS 认证', exact: true }).click()
+      const account = page.getByRole('dialog', { name: 'CAS 认证', exact: true })
       const status = await (await context.request.get(base + '/api/auth/fastcas/status')).json()
       assert.equal(status.link_enabled, mode.link)
       if (!mode.enabled) {

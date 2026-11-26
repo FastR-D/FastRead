@@ -1,4 +1,4 @@
-import { Alert, Button, InspectorSection, Loading, Section, TextField } from '@fastrd/ui-react'
+import { Alert, Button, Loading, Section, TextField } from '@fastrd/ui-react'
 import { useCallback, useEffect, useState } from 'react'
 
 type Status = {
@@ -64,68 +64,71 @@ export default function FastCASAccount({
     }
   }
   return (
-    <Section className="fastread-settings grid gap-4" aria-label="账号设置">
-      <h2 className="fastui-heading m-0 text-base">FastCAS 账号认证</h2>
-      {error && <Alert tone="danger">{error}</Alert>}
-      {!status ? (
-        <Loading label="正在读取账号状态…" />
-      ) : !status.enabled ? (
-        <p className="m-0 leading-relaxed break-words">未启用 FastCAS。</p>
-      ) : (
-        <>
-          <p className="m-0 leading-relaxed break-words">
-            {!status.link
-              ? '尚未认证'
-              : status.link.state === 'active'
-                ? '已通过 FastCAS 认证'
-                : '认证待完成'}
-          </p>
-          {status.link_enabled === false && !status.link && (
-            <p className="m-0 leading-relaxed break-words">暂不开放认证。</p>
-          )}
-          <p className="m-0 leading-relaxed break-words">解除认证后可用本地密码登录。</p>
-          <label className="fastui-field">
-            当前账号密码
-            <TextField
-              type="password"
-              autoComplete="current-password"
-              maxLength={256}
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-            />
-          </label>
-          {!status.link ? (
-            <Button
-              loading={busy}
-              disabled={status.link_enabled === false || !password}
-              onClick={() => void act('link')}
-            >
-              认证当前账号
-            </Button>
-          ) : (
-            <>
-              {status.link.state === 'prepared' && (
-                <Button
-                  loading={busy}
-                  disabled={status.link_enabled === false}
-                  onClick={() => void act('reconcile')}
-                >
-                  重试完成认证
-                </Button>
-              )}
+    <Section className="fastread-settings app-flat-section" aria-label="账号设置">
+      <div className="rd-account-section">
+        <h2 className="fastui-heading m-0 text-base">FastCAS 认证</h2>
+        {error && <Alert tone="danger">{error}</Alert>}
+        {!status ? (
+          <Loading label="正在读取账号状态…" />
+        ) : !status.enabled ? (
+          <p className="m-0 leading-relaxed break-words">未启用 FastCAS。</p>
+        ) : (
+          <>
+            <p className={status.link ? 'rd-account-banner' : 'm-0'} role="status">
+              {!status.link
+                ? '尚未认证'
+                : status.link.state === 'active'
+                  ? '已通过 FastCAS 认证'
+                  : '认证待完成'}
+            </p>
+            {status.link_enabled === false && !status.link && (
+              <p className="m-0 leading-relaxed break-words">暂不开放认证。</p>
+            )}
+            <p className="m-0 leading-relaxed break-words">解除认证后可用本地密码登录。</p>
+            <label className="fastui-field">
+              当前账号密码
+              <TextField
+                type="password"
+                autoComplete="current-password"
+                maxLength={256}
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+              />
+            </label>
+            {!status.link ? (
               <Button
-                variant="danger"
                 loading={busy}
-                disabled={!password}
-                onClick={() => void act('revoke')}
+                disabled={status.link_enabled === false || !password}
+                onClick={() => void act('link')}
               >
-                解除认证
+                认证当前账号
               </Button>
-            </>
-          )}
-        </>
-      )}
-      <InspectorSection label="设置本地登录邮箱和密码">
+            ) : (
+              <>
+                {status.link.state === 'prepared' && (
+                  <Button
+                    loading={busy}
+                    disabled={status.link_enabled === false}
+                    onClick={() => void act('reconcile')}
+                  >
+                    重试完成认证
+                  </Button>
+                )}
+                <Button
+                  variant="danger"
+                  loading={busy}
+                  disabled={!password}
+                  onClick={() => void act('revoke')}
+                >
+                  解除认证
+                </Button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+      <div className="rd-account-section">
+        <h2>修改信息</h2>
         <p className="m-0 leading-relaxed break-words">
           已有密码时请验证原密码。Research
           账号请先从原入口重新登录，并在五分钟内设置；账号和资料库保持不变。
@@ -174,7 +177,7 @@ export default function FastCASAccount({
             保存本地登录方式
           </Button>
         </form>
-      </InspectorSection>
+      </div>
     </Section>
   )
 }

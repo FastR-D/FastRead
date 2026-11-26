@@ -9,10 +9,27 @@ import {
   TextArea,
   TextField,
   Toolbar,
+  SegmentedControl,
 } from '@fastrd/ui-react'
 import { API_BASE, assetUrl } from './urls'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { mergeHighlightRects } from './highlightRects'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import PdfPage from './PdfPage'
+import { pdfEngine } from './pdfEngine'
+import { usePdfNavigation } from './usePdfNavigation'
+import {
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  ListTree,
+  Minus,
+  Plus,
+  Highlighter,
+  X,
+  StickyNote,
+  Pencil,
+  Trash2,
+  FileDown,
+} from 'lucide-react'
 type Row = Record<string, any>
 type Props = {
   paper: Row
@@ -32,21 +49,10 @@ type Props = {
   notebookNotes?: ReactNode
   panelId?: string
   labelledBy?: string
+  notesOpen?: boolean
+  onNotesOpen?: (open: boolean) => void
 }
-let engine: Promise<any> | undefined
 let worker: any
-function pdfEngine() {
-  const url = new URL(assetUrl('/vendor/pdfjs/pdf.js?v=4.10.38'), window.location.origin).href
-  return (engine ||= import(/* @vite-ignore */ url)
-    .then(pdf => {
-      pdf.GlobalWorkerOptions.workerSrc = assetUrl('/vendor/pdfjs/pdf.worker.js?v=4.10.38')
-      return pdf
-    })
-    .catch(error => {
-      engine = undefined
-      throw error
-    }))
-}
 export default function PdfReader({
   paper,
   version,
@@ -65,31 +71,52 @@ export default function PdfReader({
   notebookNotes,
   panelId,
   labelledBy,
+  notesOpen = true,
+  onNotesOpen = () => {},
 }: Props) {
-  const surface = useRef<HTMLDivElement>(null)
   const host = useRef<HTMLDivElement>(null)
-  const canvas = useRef<HTMLCanvasElement>(null)
-  const text = useRef<HTMLDivElement>(null)
   const [document, setDocument] = useState<any>(null)
   const [width, setWidth] = useState(800)
   const [zoom, setZoom] = useState(1)
-  const [size, setSize] = useState({ width: 1, height: 1 })
-  const [ready, setReady] = useState(false)
-  const [citationRects, setCitationRects] = useState<Row[]>([])
-  const [citationMissing, setCitationMissing] = useState(false)
+  const [fitPage, setFitPage] = useState(false)
+  const [height, setHeight] = useState(600)
+  const [aspect, setAspect] = useState(842 / 595)
+  const [noteView, setNoteView] = useState('annotations')
+  const [noteFilter, setNoteFilter] = useState('')
+  const [highlightMode, setHighlightMode] = useState(false)
+  const navigation = usePdfNavigation(document, setPage)
+  const renderZoom = fitPage ? Math.min(1, (height - 32) / (width * aspect)) : zoom
+  useEffect(() => {
+    let dead = false
+    if (document)
+      void document
+        .getPage(page)
+        .then((p: any) => {
+          const viewport = p.getViewport({ scale: 1 })
+          if (!dead) setAspect(viewport.height / viewport.width)
+        })
+        .catch(() => {})
+    return () => {
+      dead = true
+    }
+  }, [document, page])
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [annotations, setAnnotations] = useState<Row[]>([])
   const [selection, setSelection] = useState<Row | null>(null)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
-  const [notesOpen, setNotesOpen] = useState(true)
   const [editing, setEditing] = useState('')
   const [editText, setEditText] = useState('')
   const summarySaved = useRef(paper.summary || '')
   const draftKey = `notes:${paper.id}`
   const annotationDraftKey = `annotation:${paper.id}:${version}:${page}`
   const [recovered, setRecovered] = useState(() => localStorage.getItem(draftKey) || '')
+  useEffect(() => {
+    if (!status) return
+    const timer = window.setTimeout(() => setStatus(''), 3500)
+    return () => window.clearTimeout(timer)
+  }, [status])
   const base = `/papers/${paper.id}/annotations`
   const file = `${API_BASE}/papers/${paper.id}/file?version=${encodeURIComponent(version)}`
   async function reload() {
@@ -107,9 +134,10 @@ export default function PdfReader({
     }
   }
   useEffect(() => {
-    const observer = new ResizeObserver(entries =>
+    const observer = new ResizeObserver(entries => {
       setWidth(Math.max(200, entries[0].contentRect.width - 32))
-    )
+      setHeight(entries[0].contentRect.height)
+    })
     if (host.current) observer.observe(host.current)
     return () => observer.disconnect()
   }, [])
@@ -117,7 +145,6 @@ export default function PdfReader({
     let dead = false,
       task: any
     setDocument(null)
-    setReady(false)
     setError('')
     setAnnotations([])
     pdfEngine()
@@ -175,51 +202,6 @@ export default function PdfReader({
     localStorage.setItem(annotationDraftKey, JSON.stringify({ note }))
   }
   useEffect(() => {
-    if (!document) return
-    let dead = false,
-      render: any,
-      layer: any
-    setReady(false)
-    Promise.all([document.getPage(page), pdfEngine()])
-      .then(async ([p, pdf]) => {
-        if (dead || !canvas.current || !text.current) return
-        const scale = (width / p.getViewport({ scale: 1 }).width) * zoom
-        const viewport = p.getViewport({ scale })
-        setSize({ width: viewport.width, height: viewport.height })
-        const ratio = window.devicePixelRatio || 1
-        const element = canvas.current
-        element.width = Math.floor(viewport.width * ratio)
-        element.height = Math.floor(viewport.height * ratio)
-        element.style.width = `${viewport.width}px`
-        element.style.height = `${viewport.height}px`
-        text.current.replaceChildren()
-        text.current.style.setProperty('--scale-factor', String(scale))
-        render = p.render({
-          canvasContext: element.getContext('2d'),
-          viewport,
-          transform: [ratio, 0, 0, ratio, 0, 0],
-        })
-        await render.promise
-        if (dead) return
-        layer = new pdf.TextLayer({
-          textContentSource: p.streamTextContent(),
-          container: text.current,
-          viewport,
-        })
-        await layer.render()
-        if (!dead) setReady(true)
-      })
-      .catch(e => {
-        if (!dead && e.name !== 'RenderingCancelledException')
-          setError(`页面渲染失败：${e.message}`)
-      })
-    return () => {
-      dead = true
-      render?.cancel()
-      layer?.cancel()
-    }
-  }, [document, page, width, zoom])
-  useEffect(() => {
     if (summary !== summarySaved.current) localStorage.setItem(draftKey, summary)
     const warn = (e: BeforeUnloadEvent) => {
       if (summary !== summarySaved.current) {
@@ -230,152 +212,316 @@ export default function PdfReader({
     window.addEventListener('beforeunload', warn)
     return () => window.removeEventListener('beforeunload', warn)
   }, [summary, draftKey])
+  const viewportAnchor = useRef({ page, fraction: 0 })
+  const reportedPage = useRef<number | null>(null)
+  const pendingJump = useRef<number | null>(page)
+  const [forcedPage, setForcedPage] = useState(page)
+  const [citationTarget, setCitationTarget] = useState(page)
+  const lastCitation = useRef<Row | null | undefined>(undefined)
   useEffect(() => {
-    setCitationRects([])
-    setCitationMissing(false)
-    if (!ready || !citation?.quote || !text.current || !surface.current) return
-    const walker = window.document.createTreeWalker(text.current, NodeFilter.SHOW_TEXT)
-    const positions: {
-      node: Node
-      offset: number
-    }[] = []
-    let normalized = ''
-    let node: Node | null
-    while ((node = walker.nextNode())) {
-      const value = node.textContent || ''
-      for (let i = 0; i < value.length; i++)
-        if (!/\s/.test(value[i])) {
-          normalized += value[i].toLowerCase()
-          positions.push({ node, offset: i })
-        }
+    if (lastCitation.current !== citation) {
+      setCitationTarget(page)
+      lastCitation.current = citation
     }
-    const needle = String(citation.quote).replace(/\s/g, '').toLowerCase()
-    const start = normalized.indexOf(needle)
-    if (start < 0 || !needle) {
-      setCitationMissing(true)
+  }, [citation, page]) // A citation remains on its original page while scrolling.
+  const jump = useCallback((number: number) => {
+    const sheet = host.current?.querySelector<HTMLElement>(`[data-page="${number}"]`)
+    if (sheet && host.current) {
+      viewportAnchor.current = { page: number, fraction: -16 / sheet.offsetHeight }
+      host.current.scrollTop = Math.max(0, sheet.offsetTop - 16)
+    }
+  }, [])
+  useEffect(() => {
+    if (!document) return
+    const bounded = Math.max(1, Math.min(document.numPages, page))
+    if (bounded !== page) {
+      reportedPage.current = null
+      setPage(bounded)
       return
     }
-    const range = window.document.createRange(),
-      first = positions[start],
-      last = positions[start + needle.length - 1]
-    range.setStart(first.node, first.offset)
-    range.setEnd(last.node, last.offset + 1)
-    const bounds = surface.current.getBoundingClientRect()
-    const rects = Array.from(range.getClientRects())
-      .filter(r => r.width > 0 && r.height > 0)
-      .map(r => ({
-        x: (r.left - bounds.left) / bounds.width,
-        y: (r.top - bounds.top) / bounds.height,
-        width: r.width / bounds.width,
-        height: r.height / bounds.height,
-      }))
-    setCitationRects(rects)
-    if (host.current && rects[0])
-      host.current.scrollTop = Math.max(0, rects[0].y * bounds.height - 80)
-  }, [ready, citation, page, size.width])
-  function capture() {
-    const s = window.getSelection()
-    if (
-      !ready ||
-      !s?.rangeCount ||
-      s.isCollapsed ||
-      !text.current?.contains(s.anchorNode) ||
-      !text.current?.contains(s.focusNode)
-    )
+    if (reportedPage.current === page) {
+      reportedPage.current = null
       return
-    const quote = s.toString().trim()
-    if (!quote || !surface.current) return
-    const bounds = surface.current.getBoundingClientRect()
-    const rects = Array.from(s.getRangeAt(0).getClientRects())
-      .filter(r => r.width > 1 && r.height > 1)
-      .slice(0, 200)
-      .map(r => {
-        const x = Math.max(0, (r.left - bounds.left) / bounds.width),
-          y = Math.max(0, (r.top - bounds.top) / bounds.height)
-        return {
-          x,
-          y,
-          width: Math.min(1 - x, r.width / bounds.width),
-          height: Math.min(1 - y, r.height / bounds.height),
-        }
-      })
-      .filter(r => r.width > 0 && r.height > 0)
-    const picked = { quote, rects: mergeHighlightRects(rects), page }
+    }
+    pendingJump.current = page
+    setForcedPage(page)
+    jump(page)
+    const sheet = host.current?.querySelector<HTMLElement>(`[data-page="${page}"]`)
+    if (sheet?.dataset.ready === 'true') pendingJump.current = null
+  }, [document, page, jump, setPage])
+  const pageReady = useCallback(
+    (number: number) => {
+      if (pendingJump.current === number) {
+        jump(number)
+        pendingJump.current = null
+      }
+    },
+    [jump]
+  )
+  const restoreAnchor = useCallback(() => {
+    if (pendingJump.current !== null || !host.current) return
+    const anchor = viewportAnchor.current
+    const sheet = host.current.querySelector<HTMLElement>(`[data-page="${anchor.page}"]`)
+    if (sheet)
+      host.current.scrollTop = Math.max(0, sheet.offsetTop + anchor.fraction * sheet.offsetHeight)
+  }, [])
+  useLayoutEffect(() => {
+    restoreAnchor()
+  }, [width, renderZoom, restoreAnchor])
+  function trackPage() {
+    if (!host.current || pendingJump.current !== null) return
+    const top =
+      host.current.getBoundingClientRect().top + Math.min(160, host.current.clientHeight / 3)
+    const sheets = Array.from(host.current.querySelectorAll<HTMLElement>('[data-page]'))
+    const current = sheets.find(el => el.getBoundingClientRect().bottom > top)
+    const number = Number(current?.dataset.page)
+    if (current && number)
+      viewportAnchor.current = {
+        page: number,
+        fraction: (host.current.scrollTop - current.offsetTop) / current.offsetHeight,
+      }
+    if (number && number !== page) {
+      reportedPage.current = number
+      setForcedPage(number)
+      setPage(number)
+    }
+  }
+  function capture(picked: Row) {
+    if (highlightMode) {
+      if (!busy)
+        void perform(async () => {
+          await api(base, 'POST', {
+            version_id: version,
+            page: picked.page,
+            quote: picked.quote,
+            rects: picked.rects,
+            note: '',
+          })
+          window.getSelection()?.removeAllRanges()
+          await reload()
+          setStatus('高亮已保存')
+        })
+      return
+    }
+    let draftNote = note
+    const key = `annotation:${paper.id}:${version}:${picked.page}`
+    if (picked.page !== page) {
+      try {
+        draftNote = JSON.parse(localStorage.getItem(key) || '{}').note || ''
+      } catch {
+        draftNote = ''
+      }
+      reportedPage.current = picked.page
+      setForcedPage(picked.page)
+      setPage(picked.page)
+      setNote(draftNote)
+    }
     setSelection(picked)
-    setNotesOpen(true)
-    localStorage.setItem(annotationDraftKey, JSON.stringify({ note, selection: picked }))
+    setNoteView('annotations')
+    onNotesOpen(true)
+    localStorage.setItem(key, JSON.stringify({ note: draftNote, selection: picked }))
   }
   return (
     <div
+      onKeyDown={e => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') {
+          e.preventDefault()
+          navigation.setTool('find')
+        }
+      }}
       className={`pdf-workspace grid min-h-0 min-w-0 flex-1 grid-cols-1 gap-3 xl:grid-rows-[minmax(0,1fr)] ${notesOpen ? 'xl:grid-cols-[minmax(0,1fr)_22rem]' : 'notes-hidden'}`}
     >
       <div className="pdf-column fastui-section flex min-h-0 min-w-0 flex-col overflow-hidden">
         <Toolbar label="PDF 阅读工具" className="pdf-toolbar shrink-0">
           <Button
-            className="quiet"
+            variant="quiet"
+            aria-label="文档目录"
+            title="文档目录"
+            aria-pressed={navigation.tool === 'outline'}
+            onClick={() => navigation.setTool(navigation.tool === 'outline' ? null : 'outline')}
+          >
+            <ListTree size={16} />
+          </Button>
+          <Button
+            variant="quiet"
+            aria-label="文内查找"
+            title="文内查找 (Ctrl / ⌘ F)"
+            aria-pressed={navigation.tool === 'find'}
+            onClick={() => navigation.setTool(navigation.tool === 'find' ? null : 'find')}
+          >
+            <Search size={16} />
+          </Button>
+          <span className="pdf-tool-divider" />
+          <Button
+            variant="quiet"
+            aria-label="上一页"
+            title="上一页"
             disabled={page <= 1}
             onClick={() => setPage(page - 1)}
-            type="button"
-            variant="quiet"
           >
-            上一页
+            <ChevronLeft size={16} />
           </Button>
-          <label className="fastui-field">
-            页码
-            <TextField
-              htmlSize={3}
-              aria-label="PDF 页码"
-              type="number"
-              min={1}
-              max={document?.numPages || 1}
-              value={page}
-              onChange={e =>
-                setPage(Math.max(1, Math.min(document?.numPages || 1, Number(e.target.value) || 1)))
-              }
-              className="w-16"
-            />
-          </label>
-          <span>/ {document?.numPages || '…'}</span>
+          <TextField
+            htmlSize={3}
+            aria-label="PDF 页码"
+            type="number"
+            min={1}
+            max={document?.numPages || 1}
+            value={page}
+            onChange={e =>
+              setPage(Math.max(1, Math.min(document?.numPages || 1, Number(e.target.value) || 1)))
+            }
+          />
+          <span className="pdf-page-count">/ {document?.numPages || '…'}</span>
           <Button
-            className="quiet"
+            variant="quiet"
+            aria-label="下一页"
+            title="下一页"
             disabled={!document || page >= document.numPages}
             onClick={() => setPage(page + 1)}
-            type="button"
-            variant="quiet"
           >
-            下一页
+            <ChevronRight size={16} />
+          </Button>
+          <span className="pdf-tool-divider" />
+          <Button
+            variant="quiet"
+            aria-label="缩小"
+            title="缩小"
+            disabled={renderZoom <= 0.25}
+            onClick={() => {
+              setFitPage(false)
+              setZoom(Math.max(0.25, renderZoom - 0.25))
+            }}
+          >
+            <Minus size={16} />
           </Button>
           <Select
             aria-label="PDF 缩放"
-            value={zoom}
-            onChange={e => setZoom(Number(e.target.value))}
-            className="w-auto"
+            value={fitPage ? 'page' : zoom}
+            onChange={e => {
+              setFitPage(e.target.value === 'page')
+              if (e.target.value !== 'page') setZoom(Number(e.target.value))
+            }}
           >
-            <option value={1}>适合宽度</option>
-            <option value={1.25}>125%</option>
-            <option value={1.5}>150%</option>
-            <option value={2}>200%</option>
+            <option value="page">适合页面</option>
+            {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3].includes(zoom) ? null : (
+              <option value={zoom}>{Math.round(zoom * 100)}%</option>
+            )}
+            {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3].map(z => (
+              <option key={z} value={z}>
+                {z === 1 ? '适合宽度' : `${z * 100}%`}
+              </option>
+            ))}
           </Select>
           <Button
-            className="quiet"
-            aria-expanded={notesOpen}
-            onClick={() => setNotesOpen(!notesOpen)}
-            type="button"
             variant="quiet"
+            aria-label="放大"
+            title="放大"
+            disabled={renderZoom >= 3}
+            onClick={() => {
+              setFitPage(false)
+              setZoom(Math.min(3, renderZoom + 0.25))
+            }}
           >
-            {notesOpen ? '收起右侧' : '展开右侧'}
+            <Plus size={16} />
           </Button>
-          <a href={file} target="_blank" rel="noreferrer" className="fastui-link break-words">
-            原文件
-          </a>
+          <span className="pdf-tool-divider" />
+          <Button
+            variant="quiet"
+            aria-label="高亮文本"
+            title="高亮文本：选文即保存"
+            aria-pressed={highlightMode}
+            onClick={() => setHighlightMode(!highlightMode)}
+          >
+            <Highlighter size={16} />
+          </Button>
+          <Button
+            variant="quiet"
+            aria-label="查看批注"
+            title="查看批注"
+            onClick={() => {
+              setNoteView('annotations')
+              onPane?.('notes')
+              onNotesOpen(true)
+            }}
+          >
+            <StickyNote size={16} />
+          </Button>
         </Toolbar>
+        {navigation.tool === 'find' && (
+          <div className="pdf-findbar" role="search" aria-label="文内查找">
+            <TextField
+              autoFocus
+              aria-label="查找文档内容"
+              placeholder="在文档中查找"
+              value={navigation.query}
+              onChange={e => navigation.setQuery(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  navigation.move(e.shiftKey ? -1 : 1)
+                }
+                if (e.key === 'Escape') navigation.setTool(null)
+              }}
+            />
+            <span role="status">
+              {navigation.searching
+                ? '查找中…'
+                : navigation.query
+                  ? `${navigation.active + 1} / ${navigation.matches.length}`
+                  : ''}
+            </span>
+            <Button
+              variant="quiet"
+              aria-label="上一个匹配"
+              disabled={!navigation.matches.length}
+              onClick={() => navigation.move(-1)}
+            >
+              <ChevronLeft size={15} />
+            </Button>
+            <Button
+              variant="quiet"
+              aria-label="下一个匹配"
+              disabled={!navigation.matches.length}
+              onClick={() => navigation.move(1)}
+            >
+              <ChevronRight size={15} />
+            </Button>
+            <Button variant="quiet" aria-label="关闭查找" onClick={() => navigation.setTool(null)}>
+              <X size={15} />
+            </Button>
+            {navigation.error && <span role="alert">{navigation.error}</span>}
+          </div>
+        )}
+        {navigation.tool === 'outline' && (
+          <nav className="pdf-outline" aria-label="文档目录">
+            {navigation.outline.length ? (
+              navigation.outline.map((item, i) => (
+                <Button
+                  key={i}
+                  variant="quiet"
+                  style={{ paddingLeft: 12 + item.depth * 12 }}
+                  onClick={() => {
+                    setPage(item.page)
+                    navigation.setTool(null)
+                  }}
+                >
+                  <span>{item.title}</span>
+                  <small>{item.page}</small>
+                </Button>
+              ))
+            ) : (
+              <p>{navigation.error || '此文档没有内嵌目录，可通过页码跳转。'}</p>
+            )}
+          </nav>
+        )}
         {selection && onQuote && (
           <Toolbar label="选文操作" className="selection-actions shrink-0">
             <span>已选原文</span>
             <Button
               onClick={() => {
                 onQuote({ ...selection, paper_id: paper.id, version_id: version })
-                setNotesOpen(true)
+                onNotesOpen(true)
               }}
               type="button"
               variant="primary"
@@ -385,8 +531,9 @@ export default function PdfReader({
             <Button
               className="quiet"
               onClick={() => {
+                setNoteView('annotations')
                 onPane?.('notes')
-                setNotesOpen(true)
+                onNotesOpen(true)
               }}
               type="button"
               variant="quiet"
@@ -398,11 +545,6 @@ export default function PdfReader({
             </Button>
           </Toolbar>
         )}
-        {citationMissing && (
-          <Alert tone="warning" className="shrink-0">
-            已定位到第 {page} 页，当前版面未能逐字高亮。请对照右侧引文。
-          </Alert>
-        )}
         <CanvasSurface
           grid={false}
           role="region"
@@ -410,62 +552,39 @@ export default function PdfReader({
           tabIndex={0}
           className="pdf-scroll relative h-[60dvh] min-w-0 overflow-auto p-4 xl:h-auto xl:min-h-0 xl:flex-1"
           ref={host}
+          onScroll={trackPage}
         >
-          {!ready && <Loading label={document ? `正在显示第 ${page} 页…` : '正在载入 PDF…'} />}
-          <div
-            className="pdf-sheet relative mx-auto shrink-0"
-            ref={surface}
-            style={{
-              width: size.width,
-              height: size.height,
-              visibility: ready ? 'visible' : 'hidden',
-            }}
-            onMouseUp={capture}
-            onTouchEnd={() => window.setTimeout(capture, 100)}
-          >
-            <canvas className="block" ref={canvas} aria-label={`PDF 第 ${page} 页`} />
-            <div ref={text} className="textLayer" />
-            <div className="citation-highlights pointer-events-none absolute inset-0 z-1">
-              {citationRects.map((r, i) => (
-                <mark
-                  className="absolute bg-[var(--fastui-selected)] outline outline-1 outline-[var(--fastui-focus)]"
-                  key={i}
-                  style={{
-                    left: `${r.x * 100}%`,
-                    top: `${r.y * 100}%`,
-                    width: `${r.width * 100}%`,
-                    height: `${r.height * 100}%`,
-                  }}
-                />
-              ))}
-            </div>
-            <div className="annotation-highlights pointer-events-none absolute inset-0 z-1 opacity-30 mix-blend-multiply">
-              {annotations
-                .filter(a => a.page === page)
-                .flatMap(a =>
-                  mergeHighlightRects(a.rects).map((r, i) => (
-                    <mark
-                      className="absolute bg-[var(--fastui-warning)]"
-                      key={`${a.id}:${i}`}
-                      title={a.note || a.quote}
-                      style={{
-                        left: `${r.x * 100}%`,
-                        top: `${r.y * 100}%`,
-                        width: `${r.width * 100}%`,
-                        height: `${r.height * 100}%`,
-                      }}
-                    />
-                  ))
-                )}
-            </div>
-          </div>
+          {!document && <Loading label="正在载入 PDF…" />}
+          {document &&
+            Array.from({ length: document.numPages }, (_, index) => (
+              <PdfPage
+                key={`${version}:${index + 1}`}
+                document={document}
+                page={index + 1}
+                width={width}
+                zoom={renderZoom}
+                host={host}
+                annotations={annotations}
+                citation={
+                  navigation.tool === 'find' && navigation.hit?.page === index + 1
+                    ? navigation.hit
+                    : citationTarget === index + 1
+                      ? citation
+                      : null
+                }
+                onCapture={capture}
+                onReady={pageReady}
+                onMeasure={restoreAnchor}
+                force={forcedPage === index + 1}
+              />
+            ))}
         </CanvasSurface>
       </div>
       {notesOpen && (
         <div className="reading-notes fastui-section min-h-0 min-w-0 xl:overflow-auto">
           {companionHeader}
           <div
-            className="grid content-start gap-5 p-5"
+            className="research-panel"
             id={panelId}
             role={panelId ? 'tabpanel' : undefined}
             aria-labelledby={labelledBy}
@@ -474,209 +593,274 @@ export default function PdfReader({
               companion
             ) : (
               <>
-                <PanelHeader className="section-heading">
-                  <h2 className="fastui-heading m-0 text-base">批注</h2>
-                  <span>第 {page} 页</span>
+                <PanelHeader className="research-panel-heading">
+                  <h2 className="fastui-heading m-0 text-base">笔记</h2>
+                  <span>{annotations.length} 条批注</span>
                 </PanelHeader>
-                <form
-                  onSubmit={e => {
-                    e.preventDefault()
-                    void perform(async () => {
-                      await api(base, 'POST', {
-                        version_id: version,
-                        page: selection?.page || page,
-                        quote: selection?.quote || '',
-                        rects: selection?.rects || [],
-                        note,
-                      })
-                      setSelection(null)
-                      window.getSelection()?.removeAllRanges()
-                      setNote('')
-                      localStorage.removeItem(annotationDraftKey)
-                      await reload()
-                      setStatus('批注已保存')
-                    })
-                  }}
-                  className="grid min-w-0 gap-4"
-                >
-                  {selection && (
-                    <div className="annotation-selection fastui-section grid gap-3 p-3">
-                      <div className="annotation-selection-header flex flex-wrap items-center justify-between gap-2">
-                        <span>选中原文 · 第 {selection.page} 页</span>
-                        <Button
-                          type="button"
-                          className="quiet"
-                          onClick={clearSelection}
-                          variant="quiet"
-                        >
-                          取消选文
-                        </Button>
-                      </div>
-                      <blockquote className="fastui-section m-0 max-h-48 overflow-auto p-3 break-words">
-                        {selection.quote}
-                      </blockquote>
-                    </div>
-                  )}
-                  <label className="fastui-field">
-                    当前页批注
-                    <TextArea
-                      aria-label="当前页批注"
-                      value={note}
-                      onChange={e => changeNote(e.target.value)}
-                      maxLength={10000}
-                      rows={3}
-                      placeholder="记录批注…"
-                      className="w-full"
-                    />
-                  </label>
-                  <Button
-                    disabled={busy || (!note.trim() && !selection)}
-                    type="submit"
-                    variant="primary"
-                  >
-                    保存批注
-                  </Button>
-                </form>
-                <div className="annotation-list grid gap-3">
-                  {annotations.map(a => (
-                    <article key={a.id} className={a.page === page ? 'current-page-note' : ''}>
+                <SegmentedControl
+                  className="note-sections"
+                  label="笔记分类"
+                  value={noteView}
+                  onChange={setNoteView}
+                  options={[
+                    { value: 'annotations', label: '批注' },
+                    { value: 'summary', label: '阅读笔记' },
+                    { value: 'saved', label: '收藏' },
+                  ]}
+                />
+                {noteView === 'annotations' && (
+                  <div className="notes-annotations">
+                    <form
+                      onSubmit={e => {
+                        e.preventDefault()
+                        void perform(async () => {
+                          await api(base, 'POST', {
+                            version_id: version,
+                            page: selection?.page || page,
+                            quote: selection?.quote || '',
+                            rects: selection?.rects || [],
+                            note,
+                          })
+                          setSelection(null)
+                          window.getSelection()?.removeAllRanges()
+                          setNote('')
+                          localStorage.removeItem(annotationDraftKey)
+                          await reload()
+                          setStatus('批注已保存')
+                        })
+                      }}
+                      className="annotation-composer"
+                    >
+                      {selection && (
+                        <div className="annotation-selection fastui-section grid gap-3 p-3">
+                          <div className="annotation-selection-header flex flex-wrap items-center justify-between gap-2">
+                            <span>选中原文 · 第 {selection.page} 页</span>
+                            <Button
+                              type="button"
+                              className="quiet"
+                              onClick={clearSelection}
+                              variant="quiet"
+                            >
+                              取消选文
+                            </Button>
+                          </div>
+                          <blockquote className="fastui-section m-0 max-h-48 overflow-auto p-3 break-words">
+                            {selection.quote}
+                          </blockquote>
+                        </div>
+                      )}
+                      <label className="fastui-field">
+                        <span>第 {page} 页 · 新批注</span>
+                        <TextArea
+                          aria-label="当前页批注"
+                          value={note}
+                          onChange={e => changeNote(e.target.value)}
+                          maxLength={10000}
+                          rows={3}
+                          placeholder="记录批注…"
+                          className="w-full"
+                        />
+                      </label>
                       <Button
-                        className="page-link"
-                        onClick={() => setPage(a.page)}
+                        disabled={busy || (!note.trim() && !selection)}
+                        type="submit"
+                        variant="primary"
+                      >
+                        保存批注
+                      </Button>
+                    </form>
+                    {!!annotations.length && (
+                      <TextField
+                        aria-label="筛选批注"
+                        placeholder="筛选批注…"
+                        value={noteFilter}
+                        onChange={e => setNoteFilter(e.target.value)}
+                      />
+                    )}
+                    {!annotations.length && (
+                      <div className="notes-empty">
+                        <Highlighter size={24} />
+                        <p>选中原文，留下第一条批注</p>
+                      </div>
+                    )}
+                    <div className="annotation-list">
+                      {annotations
+                        .filter(a =>
+                          `${a.note} ${a.quote}`.toLowerCase().includes(noteFilter.toLowerCase())
+                        )
+                        .sort((a, b) => a.page - b.page)
+                        .map(a => (
+                          <article
+                            key={a.id}
+                            className={a.page === page ? 'current-page-note' : ''}
+                          >
+                            <Button
+                              className="page-link"
+                              onClick={() => setPage(a.page)}
+                              type="button"
+                              variant="quiet"
+                            >
+                              第 {a.page} 页
+                            </Button>
+                            {a.quote && (
+                              <blockquote className="fastui-section m-0 max-h-48 overflow-auto p-3 break-words">
+                                {a.quote}
+                              </blockquote>
+                            )}
+                            {editing === a.id ? (
+                              <>
+                                <TextArea
+                                  aria-label="编辑批注"
+                                  value={editText}
+                                  onChange={e => setEditText(e.target.value)}
+                                  maxLength={10000}
+                                  className="w-full"
+                                />
+                                <Button
+                                  disabled={busy}
+                                  onClick={() =>
+                                    void perform(async () => {
+                                      await api(`${base}/${a.id}`, 'PATCH', { note: editText })
+                                      setEditing('')
+                                      await reload()
+                                    })
+                                  }
+                                  type="button"
+                                  variant="primary"
+                                >
+                                  保存修改
+                                </Button>
+                                <Button
+                                  className="quiet"
+                                  onClick={() => setEditing('')}
+                                  type="button"
+                                  variant="quiet"
+                                >
+                                  取消
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <p className="m-0 leading-relaxed break-words">{a.note}</p>
+                                <Button
+                                  className="quiet"
+                                  onClick={() => {
+                                    setEditing(a.id)
+                                    setEditText(a.note)
+                                  }}
+                                  type="button"
+                                  variant="quiet"
+                                >
+                                  <Pencil size={13} /> 编辑
+                                </Button>
+                                <Button
+                                  className="quiet"
+                                  disabled={busy}
+                                  onClick={() => {
+                                    if (window.confirm('删除这条批注？'))
+                                      void perform(async () => {
+                                        await api(`${base}/${a.id}`, 'DELETE')
+                                        await reload()
+                                      })
+                                  }}
+                                  type="button"
+                                  variant="quiet"
+                                >
+                                  <Trash2 size={13} /> 删除
+                                </Button>
+                              </>
+                            )}
+                          </article>
+                        ))}
+                    </div>
+                    {!!annotations.length && (
+                      <Button
+                        variant="quiet"
+                        className="notes-export"
+                        onClick={() => {
+                          const content = annotations
+                            .map(
+                              a =>
+                                `> ${(a.quote || '').replace(/\n/g, '\n> ')}\n\n${a.note || ''}\n\n— 第 ${a.page} 页`
+                            )
+                            .join('\n\n---\n\n')
+                          const next = [summary.trim(), content].filter(Boolean).join('\n\n---\n\n')
+                          if (next.length > 10000) {
+                            setError('笔记超过 10000 字，请先整理后再汇总')
+                            return
+                          }
+                          setSummary(next)
+                          setNoteView('summary')
+                        }}
+                      >
+                        <FileDown size={14} /> 汇总批注到阅读笔记
+                      </Button>
+                    )}
+                  </div>
+                )}
+                {noteView === 'saved' && notebookNotes}
+                {noteView === 'summary' && (
+                  <div className="reading-summary note-document">
+                    <div className="note-document-heading">
+                      <StickyNote size={16} />
+                      <strong>阅读笔记</strong>
+                      <span>{summary.length} / 10000</span>
+                    </div>
+                    {recovered && recovered !== summary && (
+                      <Button
+                        className="quiet"
+                        onClick={() => {
+                          setSummary(recovered)
+                          setRecovered('')
+                        }}
                         type="button"
                         variant="quiet"
                       >
-                        第 {a.page} 页
+                        恢复未保存的笔记草稿
                       </Button>
-                      {a.quote && (
-                        <blockquote className="fastui-section m-0 max-h-48 overflow-auto p-3 break-words">
-                          {a.quote}
-                        </blockquote>
-                      )}
-                      {editing === a.id ? (
-                        <>
-                          <TextArea
-                            aria-label="编辑批注"
-                            value={editText}
-                            onChange={e => setEditText(e.target.value)}
-                            maxLength={10000}
-                            className="w-full"
-                          />
-                          <Button
-                            disabled={busy}
-                            onClick={() =>
-                              void perform(async () => {
-                                await api(`${base}/${a.id}`, 'PATCH', { note: editText })
-                                setEditing('')
-                                await reload()
-                              })
-                            }
-                            type="button"
-                            variant="primary"
-                          >
-                            保存修改
-                          </Button>
-                          <Button
-                            className="quiet"
-                            onClick={() => setEditing('')}
-                            type="button"
-                            variant="quiet"
-                          >
-                            取消
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <p className="m-0 leading-relaxed break-words">{a.note}</p>
-                          <Button
-                            className="quiet"
-                            onClick={() => {
-                              setEditing(a.id)
-                              setEditText(a.note)
-                            }}
-                            type="button"
-                            variant="quiet"
-                          >
-                            编辑
-                          </Button>
-                          <Button
-                            className="quiet"
-                            disabled={busy}
-                            onClick={() => {
-                              if (window.confirm('删除这条批注？'))
-                                void perform(async () => {
-                                  await api(`${base}/${a.id}`, 'DELETE')
-                                  await reload()
-                                })
-                            }}
-                            type="button"
-                            variant="quiet"
-                          >
-                            删除
-                          </Button>
-                        </>
-                      )}
-                    </article>
-                  ))}
-                </div>
-                {notebookNotes}
-                <div className="reading-summary grid gap-3">
-                  <h2 className="fastui-heading m-0 text-base">阅读笔记</h2>
-                  {recovered && recovered !== summary && (
+                    )}
+                    <label className="fastui-field">
+                      <TextArea
+                        aria-label="阅读笔记"
+                        value={summary}
+                        onChange={e => setSummary(e.target.value)}
+                        maxLength={10000}
+                        rows={14}
+                        placeholder="记录阅读笔记…"
+                        className="w-full"
+                      />
+                    </label>
                     <Button
-                      className="quiet"
-                      onClick={() => {
-                        setSummary(recovered)
-                        setRecovered('')
-                      }}
+                      disabled={busy}
+                      onClick={() =>
+                        void perform(async () => {
+                          await api(`/papers/${paper.id}/summary`, 'PUT', { content: summary })
+                          summarySaved.current = summary
+                          onSaved(summary)
+                          localStorage.removeItem(draftKey)
+                          setRecovered('')
+                          setStatus('阅读笔记已保存')
+                        })
+                      }
                       type="button"
-                      variant="quiet"
+                      variant="primary"
                     >
-                      恢复未保存的笔记草稿
+                      保存笔记
                     </Button>
-                  )}
-                  <label className="fastui-field">
-                    笔记内容
-                    <TextArea
-                      aria-label="阅读笔记"
-                      value={summary}
-                      onChange={e => setSummary(e.target.value)}
-                      maxLength={10000}
-                      rows={8}
-                      placeholder="记录阅读笔记…"
-                      className="w-full"
-                    />
-                  </label>
-                  <Button
-                    disabled={busy}
-                    onClick={() =>
-                      void perform(async () => {
-                        await api(`/papers/${paper.id}/summary`, 'PUT', { content: summary })
-                        summarySaved.current = summary
-                        onSaved(summary)
-                        localStorage.removeItem(draftKey)
-                        setRecovered('')
-                        setStatus('阅读笔记已保存')
-                      })
-                    }
-                    type="button"
-                    variant="primary"
-                  >
-                    保存笔记
-                  </Button>
-                </div>
+                  </div>
+                )}
               </>
             )}
           </div>
         </div>
       )}
       {error && (
-        <Alert tone="danger" className="reader-feedback col-span-full">
+        <Alert tone="danger" className="reader-feedback">
           {error}
         </Alert>
       )}
       {status && (
-        <Alert tone="success" className="reader-feedback col-span-full">
+        <Alert tone="success" className="reader-feedback">
           {status}
         </Alert>
       )}

@@ -1,5 +1,7 @@
 import {
   ActivityRail,
+  Alert,
+  EmptyState,
   Card,
   Button,
   Checkbox,
@@ -29,8 +31,15 @@ import {
   Files,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
+  Download,
+  Upload,
+  PanelRightClose,
+  PanelRightOpen,
 } from 'lucide-react'
 import PdfReader from './PdfReader'
+import ResearchChat, { ResearchMessages } from './ResearchChat'
+import { ComposerPrimitive, ThreadPrimitive } from '@assistant-ui/react'
 import ReadingStudio from './ReadingStudio'
 import type { Evidence, ReadingMode, RepositoryRequest } from './readingModel'
 import Neighbors from './Neighbors'
@@ -46,11 +55,15 @@ export default function NotebookDesk({
   model,
   onHome,
   onExternal,
+  onSearch,
 }: Row) {
   const scope = target.book_id ? 'book' : 'paper',
     scopeId = target.book_id || target.paper_id
   const { paper_id: targetPaperId, page: targetPage, version: targetVersion } = target
   const [sourcesOpen, setSourcesOpen] = useState(true)
+  const [notesOpen, setNotesOpen] = useState(true)
+  const uploadInput = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
   const [readingView, setReadingView] = useState('source')
   const [reportHistory, setReportHistory] = useState<Row[]>([])
   const [selectedReportId, setSelectedReportId] = useState('')
@@ -305,6 +318,7 @@ export default function NotebookDesk({
   function capture(value: Row) {
     setReadingView('source')
     setQuote({ ...value, title: paper?.title })
+    if (!question.trim()) setQuestion('请解释这段内容。')
     setPane('chat')
     setChecked(ids => (ids.includes(value.paper_id) ? ids : [...ids, value.paper_id]))
     window.setTimeout(
@@ -312,7 +326,7 @@ export default function NotebookDesk({
       0
     )
   }
-  async function send() {
+  async function send(input = question) {
     if (!messagePath || busy || pending || !checked.length) return
     if (version !== paper?.active_version) {
       setNotice('历史版本可阅读与摘录；请切换到当前文档版本后继续模型对话。')
@@ -320,8 +334,8 @@ export default function NotebookDesk({
     }
     setBusy(true)
     const content = quote
-      ? `${question || '请解释这段内容。'}\n\n选中的原文（${String(quote.title || paper?.title).slice(0, 160)}，第 ${quote.page} 页）：\n${String(quote.quote).slice(0, 1500)}`
-      : question
+      ? `${input || '请解释这段内容。'}\n\n选中的原文（${String(quote.title || paper?.title).slice(0, 160)}，第 ${quote.page} 页）：\n${String(quote.quote).slice(0, 1500)}`
+      : input
     try {
       await submit(messagePath, {
         content,
@@ -332,6 +346,8 @@ export default function NotebookDesk({
       setQuestion('')
       setQuote(null)
       setMessages((await api(messagePath)).items)
+      setNotice('')
+      return true
     } finally {
       setBusy(false)
     }
@@ -371,6 +387,7 @@ export default function NotebookDesk({
     }
   }
   function askFromReading(content: string, ev?: Evidence) {
+    setNotesOpen(true)
     setReadingView('source')
     setPane('chat')
     setQuestion(content.slice(0, ev ? 3000 : 5000))
@@ -387,7 +404,7 @@ export default function NotebookDesk({
     if (paperId) setChecked(ids => (ids.includes(paperId) ? ids : [...ids, paperId]))
   }
   const notebookNotes = (
-    <Section className="desk-saved-notes grid gap-3">
+    <Section className="desk-saved-notes research-section">
       <PanelHeader className="section-heading">
         <h2 className="fastui-heading m-0 text-base">
           {scope === 'book' ? '知识库笔记' : '保存的笔记'}
@@ -500,12 +517,70 @@ export default function NotebookDesk({
     </Section>
   )
   const chat = (
-    <div className="desk-chat flex min-h-0 flex-col gap-4">
-      <div className="chat-history grid min-w-0 gap-3">
+    <ResearchChat
+      messages={messages}
+      running={busy || !!pending}
+      disabled={!providerId || !checked.length || version !== paper?.active_version}
+      question={question}
+      onSend={text => action(() => send(text))}
+      renderMessage={m => (
+        <Card
+          role="article"
+          className={`desk-message grid min-w-0 gap-3 p-4 break-words ${m.role}`}
+          key={m.id}
+        >
+          <b>{m.role === 'user' ? '你' : 'FastRead'}</b>
+          {markdown(m.content, m.evidence)}
+          <div className="citation-list flex flex-wrap gap-2">{references(m.evidence)}</div>
+          {m.role === 'assistant' && (
+            <div className="reading-answer-actions">
+              <Button
+                variant="quiet"
+                onClick={event => {
+                  const selection = window.getSelection()
+                  const article = event.currentTarget.closest('[role="article"]')
+                  const selected = selection?.toString().trim()
+                  setExcerpt(
+                    selected &&
+                      article?.contains(selection?.anchorNode || null) &&
+                      article?.contains(selection?.focusNode || null)
+                      ? selected
+                      : m.content
+                  )
+                }}
+              >
+                <StickyNote size={14} />
+                摘录到主笔记
+              </Button>
+              <Button
+                className="save-answer quiet"
+                onClick={() => void action(() => saveAnswer(m))}
+                type="button"
+                variant="quiet"
+              >
+                {notes.some(n => n.source_message_id === m.id) ? (
+                  <>
+                    <Check size={14} /> 已存入笔记
+                  </>
+                ) : (
+                  <>
+                    <StickyNote size={14} /> 保存为笔记
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+        </Card>
+      )}
+    >
+      <PanelHeader className="research-panel-heading">
+        <h2>对话</h2>
+        <span>参考 {checked.length} 篇资料</span>
+      </PanelHeader>
+      <ThreadPrimitive.Viewport className="chat-history" autoScroll>
         {!messages.length && (
           <div className="chat-welcome grid gap-3">
-            <MessageSquare size={28} />
-            <h2 className="fastui-heading m-0 text-base">向资料提问</h2>
+            <p className="research-empty-copy">选择一个问题，或输入你的研究问题。</p>
             <div className="suggested-questions grid gap-2">
               {[
                 '概括核心问题',
@@ -525,55 +600,7 @@ export default function NotebookDesk({
             </div>
           </div>
         )}
-        {messages.map(m => (
-          <Card
-            role="article"
-            className={`desk-message grid min-w-0 gap-3 p-4 break-words ${m.role}`}
-            key={m.id}
-          >
-            <b>{m.role === 'user' ? '你' : 'FastRead'}</b>
-            {markdown(m.content, m.evidence)}
-            <div className="citation-list flex flex-wrap gap-2">{references(m.evidence)}</div>
-            {m.role === 'assistant' && (
-              <div className="reading-answer-actions">
-                <Button
-                  variant="quiet"
-                  onClick={event => {
-                    const selection = window.getSelection()
-                    const article = event.currentTarget.closest('[role="article"]')
-                    const selected = selection?.toString().trim()
-                    setExcerpt(
-                      selected &&
-                        article?.contains(selection?.anchorNode || null) &&
-                        article?.contains(selection?.focusNode || null)
-                        ? selected
-                        : m.content
-                    )
-                  }}
-                >
-                  <StickyNote size={14} />
-                  摘录到主笔记
-                </Button>
-                <Button
-                  className="save-answer quiet"
-                  onClick={() => void action(() => saveAnswer(m))}
-                  type="button"
-                  variant="quiet"
-                >
-                  {notes.some(n => n.source_message_id === m.id) ? (
-                    <>
-                      <Check size={14} /> 已存入笔记
-                    </>
-                  ) : (
-                    <>
-                      <StickyNote size={14} /> 保存为笔记
-                    </>
-                  )}
-                </Button>
-              </div>
-            )}
-          </Card>
-        ))}
+        <ResearchMessages />
         {(busy || pending) && <StatusBar>正在结合所选资料回答…</StatusBar>}
         {lastFailure && !pending && (
           <InspectorSection className="answer-failure" label="有一条回答未完成">
@@ -591,14 +618,8 @@ export default function NotebookDesk({
             </Button>
           </InspectorSection>
         )}
-      </div>
-      <form
-        onSubmit={e => {
-          e.preventDefault()
-          void action(send)
-        }}
-        className="desk-composer grid min-w-0 gap-3"
-      >
+      </ThreadPrimitive.Viewport>
+      <ComposerPrimitive.Root className="desk-composer">
         {quote && (
           <blockquote className="fastui-section m-0 max-h-48 overflow-auto p-3 break-words">
             <span>选文 · 第 {quote.page} 页</span>
@@ -608,41 +629,137 @@ export default function NotebookDesk({
             </Button>
           </blockquote>
         )}
-        <TextArea
-          aria-label="向所选资料提问"
-          value={question}
-          onChange={e => setQuestion(e.target.value)}
-          placeholder={checked.length ? '输入问题，或在 PDF 上选中一段文字…' : '请先勾选左侧资料'}
-          maxLength={quote ? 3000 : 5000}
-          rows={3}
-          className="w-full"
-        />
+        <ComposerPrimitive.Input asChild submitMode="enter" unstable_insertNewlineOnTouchEnter>
+          <TextArea
+            aria-label="向所选资料提问"
+            onChange={e => setQuestion(e.target.value)}
+            placeholder={checked.length ? '输入问题，或在 PDF 上选中一段文字…' : '请先勾选左侧资料'}
+            maxLength={quote ? 3000 : 5000}
+            rows={3}
+            className="w-full"
+          />
+        </ComposerPrimitive.Input>
         <div className="composer-footer flex flex-wrap items-center justify-between gap-2">
           <span>
             {version !== paper?.active_version
               ? '历史版本 · 切换当前版本后可提问'
               : `参考 ${checked.length} 篇资料`}
           </span>
-          <Button
-            disabled={
-              !providerId ||
-              !checked.length ||
-              busy ||
-              !!pending ||
-              version !== paper?.active_version ||
-              (!question.trim() && !quote)
-            }
-            type="submit"
-            variant="primary"
-          >
-            发送
-          </Button>
+          <ComposerPrimitive.Send asChild>
+            <Button
+              disabled={
+                !providerId ||
+                !checked.length ||
+                busy ||
+                !!pending ||
+                version !== paper?.active_version ||
+                (!question.trim() && !quote)
+              }
+              type="submit"
+              variant="primary"
+            >
+              发送
+            </Button>
+          </ComposerPrimitive.Send>
         </div>
-      </form>
-    </div>
+      </ComposerPrimitive.Root>
+    </ResearchChat>
+  )
+  const readingHistory = !!reportHistory.length && (
+    <label className="reading-history-label">
+      阅读记录
+      <Select
+        aria-label="阅读记录"
+        value={report?.id || ''}
+        onChange={e => setSelectedReportId(e.target.value)}
+      >
+        {reportHistory.map((r, i) => (
+          <option key={r.id} value={r.id}>
+            {i === 0 ? '最新 · ' : ''}
+            {r.created
+              ? new Date(r.created * 1000).toLocaleString()
+              : `记录 ${reportHistory.length - i}`}
+          </option>
+        ))}
+      </Select>
+    </label>
   )
   const reportPanel = (
-    <Section className="desk-report grid gap-4 p-4">
+    <Section className="desk-report research-tool">
+      <PanelHeader className="research-panel-heading">
+        <h2>阅读报告</h2>
+        <Button
+          loading={!!reportPending}
+          disabled={
+            version !== paper?.active_version ||
+            !paper ||
+            !providerId ||
+            jobs.some(
+              (j: Row) =>
+                j.kind === 'report' &&
+                j.resource_id === paper?.id &&
+                ['queued', 'running'].includes(j.state)
+            )
+          }
+          onClick={() => void action(() => generateReading('deep'))}
+          type="button"
+          variant="primary"
+        >
+          {reportPending ? '生成中…' : report ? '重新生成报告' : '生成阅读报告'}
+        </Button>
+      </PanelHeader>
+      {readingHistory}
+      {reportPending && <StatusBar>正在生成阅读报告…</StatusBar>}
+      {currentReportJob?.state === 'failed' && (
+        <Alert tone="danger">{currentReportJob.error || '报告生成失败，请重试。'}</Alert>
+      )}
+      {!report && !reportPending && (
+        <EmptyState title="暂无阅读报告">生成后可查看关键问题、方法与原文依据。</EmptyState>
+      )}
+      {report && (
+        <>
+          {['key_questions', 'process', 'contributions']
+            .filter(k => report.content[k]?.length)
+            .map(k => (
+              <div key={k}>
+                <h3 className="fastui-heading m-0 text-sm">
+                  {{ key_questions: '关键问题', process: '方法过程', contributions: '主要贡献' }[k]}
+                </h3>
+                {report.content[k]?.map((r: Row, i: number) => (
+                  <Card role="article" key={i} className="research-item">
+                    <b>{r.question || r.step || r.title}</b>
+                    <ReactMarkdown>{r.answer || r.description || ''}</ReactMarkdown>
+                    {r.evidence?.map((ev: Row, j: number) => (
+                      <Button
+                        key={j}
+                        className="citation-chip h-auto text-left whitespace-normal"
+                        title={ev.exact_quote}
+                        onClick={() =>
+                          void action(() => locate({ ...ev, version_id: report.version_id }))
+                        }
+                        type="button"
+                        variant="quiet"
+                      >
+                        第 {ev.page_start || ev.page} 页 · 查看依据
+                      </Button>
+                    ))}
+                  </Card>
+                ))}
+              </div>
+            ))}
+          <a
+            href={`${API_BASE}/papers/${paper?.id}/export`}
+            download
+            className="fastui-link break-words"
+          >
+            导出报告
+          </a>
+        </>
+      )}
+      <Button onClick={() => setReadingView('reading')} variant="quiet">
+        <BookOpen size={16} /> 打开阅读导览
+      </Button>
+
       {paper && (
         <InspectorSection label="标签、原理与知识库归属">
           <PaperTools
@@ -668,9 +785,6 @@ export default function NotebookDesk({
       )}
       {paper && (
         <Toolbar label="论文操作">
-          <a className="fastui-link" href={`${API_BASE}/papers/${paper.id}/export`} download>
-            导出 Markdown
-          </a>
           <Button
             variant="danger"
             onClick={() => {
@@ -684,66 +798,6 @@ export default function NotebookDesk({
             归档论文
           </Button>
         </Toolbar>
-      )}
-      <Button onClick={() => setReadingView('reading')} variant="primary">
-        <BookOpen size={16} /> 打开阅读导览
-      </Button>
-      <h2 className="fastui-heading m-0 text-base">阅读报告</h2>
-
-      <Button
-        disabled={
-          !paper ||
-          !providerId ||
-          jobs.some(
-            (j: Row) =>
-              j.kind === 'report' &&
-              j.resource_id === paper?.id &&
-              ['queued', 'running'].includes(j.state)
-          )
-        }
-        onClick={() => void action(() => generateReading('deep'))}
-        type="button"
-        variant="primary"
-      >
-        {report ? '重新生成报告' : '生成阅读报告'}
-      </Button>
-      {report && (
-        <>
-          {['key_questions', 'process', 'contributions'].map(k => (
-            <div key={k}>
-              <h3 className="fastui-heading m-0 text-sm">
-                {{ key_questions: '关键问题', process: '方法过程', contributions: '主要贡献' }[k]}
-              </h3>
-              {report.content[k]?.map((r: Row, i: number) => (
-                <Card role="article" key={i} className="fastui-section min-w-0 p-5">
-                  <b>{r.question || r.step || r.title}</b>
-                  <ReactMarkdown>{r.answer || r.description || ''}</ReactMarkdown>
-                  {r.evidence?.map((ev: Row, j: number) => (
-                    <Button
-                      key={j}
-                      className="citation-chip h-auto text-left whitespace-normal"
-                      title={ev.exact_quote}
-                      onClick={() =>
-                        void action(() => locate({ ...ev, version_id: report.version_id }))
-                      }
-                      type="button"
-                      variant="quiet"
-                    >
-                      第 {ev.page_start || ev.page} 页 · 查看依据
-                    </Button>
-                  ))}
-                </Card>
-              ))}
-            </div>
-          ))}
-          <a
-            href={`${API_BASE}/papers/${paper?.id}/export`}
-            download
-            className="fastui-link break-words"
-          >
-            导出报告
-          </a>
-        </>
       )}
     </Section>
   )
@@ -798,6 +852,7 @@ export default function NotebookDesk({
         id="desk-sources"
         label="阅读工作区工具"
         tools={[
+          { label: '所有知识库', icon: <ArrowLeft size={20} />, onClick: onHome },
           {
             label: '资料',
             icon: <Files size={20} />,
@@ -805,17 +860,7 @@ export default function NotebookDesk({
             onClick: () =>
               document.querySelector<HTMLInputElement>('#desk-sources input[placeholder]')?.focus(),
           },
-          {
-            label: '添加资料',
-            icon: <Plus size={20} />,
-            onClick: () =>
-              void action(async () => {
-                setAdding(true)
-                setLibrary((await api('/papers?limit=100')).items)
-              }),
-          },
           { label: '查看关系矩阵', icon: <Network size={20} />, onClick: () => setMatrix(true) },
-          { label: '所有知识库', icon: <ArrowLeft size={20} />, onClick: onHome },
         ]}
       >
         <div className="desk-sources grid min-w-0 content-start gap-5 p-4">
@@ -878,7 +923,6 @@ export default function NotebookDesk({
                     type="button"
                     variant="navigation"
                   >
-                    <FileText className="shrink-0" size={16} />
                     <span>{p.title}</span>
                   </Button>
                 </ListRow>
@@ -903,30 +947,6 @@ export default function NotebookDesk({
             </span>
             <h2 className="fastui-heading m-0 text-base">{paper?.title || '添加资料，开始阅读'}</h2>
           </div>
-          {paper && (
-            <InspectorSection label="文档版本">
-              <Select
-                aria-label="文档版本"
-                value={version}
-                onChange={e => {
-                  setVersion(e.target.value)
-                  setReport(null)
-                  setReportHistory([])
-                  setSelectedReportId('')
-                  setPage(1)
-                  setCitation(null)
-                }}
-                className="w-full"
-              >
-                {paper.versions.map((v: Row) => (
-                  <option key={v.id} value={v.id}>
-                    {new Date(v.created * 1000).toLocaleDateString()}
-                    {v.id === paper.active_version ? '（当前）' : ''}
-                  </option>
-                ))}
-              </Select>
-            </InspectorSection>
-          )}
         </div>
         {paper && (
           <Toolbar label="阅读工作区视图" className="reading-view-toolbar">
@@ -940,24 +960,63 @@ export default function NotebookDesk({
               ]}
             />
 
-            {!!reportHistory.length && (
-              <label className="reading-history-label">
-                阅读记录
+            <Button variant="quiet" onClick={onSearch}>
+              <Search size={16} />
+              搜索论文
+            </Button>
+            {paper && (
+              <label className="document-version-label">
+                <span>文档版本</span>
                 <Select
-                  aria-label="阅读记录"
-                  value={report?.id || ''}
-                  onChange={e => setSelectedReportId(e.target.value)}
+                  aria-label="文档版本"
+                  value={version}
+                  onChange={e => {
+                    setVersion(e.target.value)
+                    setReport(null)
+                    setReportHistory([])
+                    setSelectedReportId('')
+                    setPage(1)
+                    setCitation(null)
+                  }}
+                  className="document-version-select"
                 >
-                  {reportHistory.map((r, i) => (
-                    <option key={r.id} value={r.id}>
-                      {i === 0 ? '最新 · ' : ''}
-                      {r.created
-                        ? new Date(r.created * 1000).toLocaleString()
-                        : `记录 ${reportHistory.length - i}`}
+                  {paper.versions.map((v: Row) => (
+                    <option key={v.id} value={v.id}>
+                      {new Date(v.created * 1000).toLocaleDateString()}
+                      {v.id === paper.active_version ? '（当前）' : ''}
                     </option>
                   ))}
                 </Select>
               </label>
+            )}
+            {paper && (
+              <Button
+                variant="icon"
+                className="document-download"
+                aria-label="下载当前文档"
+                title="下载当前文档"
+                onClick={() => {
+                  const link = document.createElement('a')
+                  link.href = `${API_BASE}/papers/${paper.id}/file?version=${encodeURIComponent(version)}`
+                  link.download = `${paper.title}.pdf`
+                  link.click()
+                }}
+              >
+                <Download size={17} />
+              </Button>
+            )}
+            {readingView === 'reading' && readingHistory}
+            {readingView === 'source' && (
+              <Button
+                variant="icon"
+                className="research-panel-toggle"
+                aria-label={notesOpen ? '收起右侧' : '展开右侧'}
+                title={notesOpen ? '收起右侧' : '展开右侧'}
+                aria-expanded={notesOpen}
+                onClick={() => setNotesOpen(!notesOpen)}
+              >
+                {notesOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
+              </Button>
             )}
           </Toolbar>
         )}
@@ -998,6 +1057,8 @@ export default function NotebookDesk({
             panelId={`research-panel-${scopeId}`}
             labelledBy={paneId}
             notebookNotes={notebookNotes}
+            notesOpen={notesOpen}
+            onNotesOpen={setNotesOpen}
           />
         ) : (
           <div className="desk-empty grid gap-4 p-6">
@@ -1114,7 +1175,7 @@ export default function NotebookDesk({
           </table>
         </div>
       </AppDialog>
-      <AppDialog open={adding} onClose={() => setAdding(false)} title="添加资料">
+      <AppDialog open={adding} onClose={() => setAdding(false)} title="添加资料" size="md">
         <form
           onSubmit={e => {
             e.preventDefault()
@@ -1141,27 +1202,45 @@ export default function NotebookDesk({
             导入链接
           </Button>
         </form>
-        <label className="file-button fastui-field">
-          上传 PDF
+        <Section className="source-upload-section">
+          <h3 className="fastui-heading m-0 text-sm">上传 PDF</h3>
+          <p>选择本地 PDF 文件，添加到当前资料库。</p>
           <TextField
+            ref={uploadInput}
+            className="source-file-input"
             aria-label="上传资料 PDF"
             type="file"
-            accept="application/pdf"
+            accept="application/pdf,.pdf"
+            disabled={uploading}
             onChange={e => {
               const file = e.target.files?.[0]
-              if (file)
-                void action(async () => {
+              e.target.value = ''
+              if (!file) return
+              void action(async () => {
+                setUploading(true)
+                try {
                   const data = new FormData()
                   data.set('file', file)
                   data.set('knowledge_id', target.book_id || '')
                   await submit('/imports/pdf', data)
                   setAdding(false)
-                })
+                } finally {
+                  setUploading(false)
+                }
+              })
             }}
-            className="w-full"
           />
-        </label>
-        {scope === 'book' && (
+          <Button
+            variant="secondary"
+            loading={uploading}
+            disabled={uploading}
+            onClick={() => uploadInput.current?.click()}
+          >
+            <Upload size={16} />
+            选择 PDF 文件
+          </Button>
+        </Section>
+        {scope === 'book' && library.some(p => !sources.some(s => s.id === p.id)) && (
           <>
             <h3 className="fastui-heading m-0 text-sm">从资料库添加</h3>
             {library

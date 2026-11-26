@@ -163,12 +163,12 @@ try {
   ).toBeVisible()
   await page.getByRole('button', { name: '后台任务', exact: true }).click()
   await expect(page.getByText('暂无任务', { exact: true })).toBeVisible()
-  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'FastRead 论文库', exact: true }).click()
   await page.getByRole('button', { name: '搜索论文', exact: true }).click()
   await expect(page.locator('#library-search input')).toBeFocused()
-  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: '返回阅读', exact: true }).click()
   await page
-    .getByRole('navigation', { name: '资料库工具' })
+    .getByRole('group', { name: '论文库操作' })
     .getByRole('button', { name: '导入论文', exact: true })
     .click()
   await expect(page.getByLabel('上传 PDF', { exact: true })).toBeVisible()
@@ -235,7 +235,9 @@ try {
   await expect(page.getByText('What is studied?', { exact: true })).toBeVisible()
   await tabs.click()
   const readsBeforeTyping = reads.length
+  await page.getByRole('button', { name: '阅读笔记', exact: true }).click()
   await page.getByLabel('阅读笔记', { exact: true }).fill('A saved reading summary')
+  await page.getByRole('button', { name: '批注', exact: true }).click()
   await page.getByLabel('当前页批注', { exact: true }).fill('A page annotation')
   await page.evaluate(
     () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
@@ -248,8 +250,10 @@ try {
 
   await page.getByRole('button', { name: '保存批注', exact: true }).click()
   await expect(page.getByText('A page annotation', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '阅读笔记', exact: true }).click()
   await page.getByLabel('阅读笔记', { exact: true }).fill('A saved reading summary')
   await page.getByRole('button', { name: '保存笔记', exact: true }).click()
+  await page.getByRole('button', { name: '收藏', exact: true }).click()
   await page.getByRole('button', { name: '新建', exact: true }).click()
   await page.getByLabel('笔记标题').fill('Research note')
   await page.getByLabel('笔记正文').fill('Saved notebook content')
@@ -298,6 +302,7 @@ try {
       await expect(page.locator('.pdf-sheet canvas')).toBeVisible()
       await expect(page.locator('html')).toHaveAttribute('data-fastui-theme', mode)
       await page.getByRole('tab', { name: '笔记', exact: true }).click()
+      await page.getByRole('button', { name: '阅读笔记', exact: true }).click()
       await expect(page.getByLabel('阅读笔记', { exact: true })).toHaveValue(
         'A saved reading summary'
       )

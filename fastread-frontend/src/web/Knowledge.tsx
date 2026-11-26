@@ -177,6 +177,7 @@ export default function Knowledge(
     initialTag?: string
     onOpenBook?: (id: string) => void
     onImport?: () => void
+    onSearch?: () => void
   }
 ) {
   const { api, action, openPaper, submitJob, providerId, model, revision } = props
@@ -275,12 +276,16 @@ export default function Knowledge(
     )
   const columns = [...new Set(papers.flatMap(p => p.tags || []))].slice(0, 16) as string[]
   return (
-    <Section className="knowledge-home grid gap-6 p-5 sm:p-6">
-      <PanelHeader className="knowledge-hero flex flex-wrap items-center justify-between gap-4">
+    <Section className="knowledge-home app-page">
+      <PanelHeader className="knowledge-hero app-page-heading">
         <div>
           <h1 className="fastui-heading m-0 text-xl">论文库</h1>
         </div>
         <Toolbar label="论文库操作" className="library-heading-actions">
+          <Button variant="quiet" onClick={props.onSearch}>
+            <Search size={16} />
+            搜索论文
+          </Button>
           <Button onClick={() => setCreating(!creating)} type="button" variant="secondary">
             <Plus size={16} /> 新建知识库
           </Button>

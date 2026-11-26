@@ -1,5 +1,4 @@
 import {
-  ActivityRail,
   Alert,
   Badge,
   Button,
@@ -14,8 +13,6 @@ import {
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   Building2,
-  ChevronLeft,
-  ChevronRight,
   KeyRound,
   LayoutDashboard,
   Pencil,
@@ -26,7 +23,8 @@ import {
   UserRound,
   Users,
 } from 'lucide-react'
-import { AppDialog } from './Chrome'
+import { AppDialog, SideTabWorkspace } from './Chrome'
+import { ListTable as AdminTable, ListFooter, PageHeading, pageSize } from './ListPage'
 
 type Row = Record<string, any>
 type Api = (path: string, method?: string, body?: unknown) => Promise<any>
@@ -50,7 +48,6 @@ type Provider = {
 }
 type Workspace = { id: string; name: string }
 type Grants = { workspace_ids: string[]; user_ids: string[] }
-const pageSize = 20
 const secondary = 'text-[var(--fastui-secondary)]'
 
 // Membership rows belong to a single account in both user and grant lists.
@@ -65,85 +62,7 @@ function uniqueUsers(rows: Row[]): User[] {
   }
   return [...users.values()]
 }
-function PageHeading({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <header className="flex flex-wrap items-center justify-between gap-4">
-      <h1 className="fastui-heading m-0 text-2xl">{title}</h1>
-      <div className="flex items-center gap-2">{children}</div>
-    </header>
-  )
-}
-function AdminTable({
-  label,
-  columns,
-  children,
-}: {
-  label: string
-  columns: string[]
-  children: ReactNode
-}) {
-  return (
-    <Section>
-      <div className="fastui-table-scroll" role="region" aria-label={label} tabIndex={0}>
-        <table className="fastui-table w-full min-w-[48rem]">
-          <thead>
-            <tr>
-              {columns.map(column => (
-                <th key={column} className="sticky top-0 whitespace-nowrap">
-                  {column}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>{children}</tbody>
-        </table>
-      </div>
-    </Section>
-  )
-}
-function ListFooter({
-  count,
-  page,
-  onPage,
-  unit,
-}: {
-  count: number
-  page: number
-  onPage: (page: number) => void
-  unit: string
-}) {
-  const pages = Math.max(1, Math.ceil(count / pageSize))
-  return (
-    <div className={`flex flex-wrap items-center justify-between gap-3 ${secondary}`}>
-      <span>
-        {count} {unit}
-      </span>
-      {pages > 1 && (
-        <nav className="flex items-center gap-3" aria-label={`${unit}分页`}>
-          <Button
-            variant="quiet"
-            aria-label="上一页"
-            disabled={page <= 1}
-            onClick={() => onPage(page - 1)}
-          >
-            <ChevronLeft size={15} />
-          </Button>
-          <span>
-            {page} / {pages}
-          </span>
-          <Button
-            variant="quiet"
-            aria-label="下一页"
-            disabled={page >= pages}
-            onClick={() => onPage(page + 1)}
-          >
-            <ChevronRight size={15} />
-          </Button>
-        </nav>
-      )}
-    </div>
-  )
-}
+
 function Identity({ user, current }: { user: User; current?: boolean }) {
   return (
     <div className="flex items-center gap-3">
@@ -213,10 +132,7 @@ export function UserManagement({ api, currentUser }: { api: Api; currentUser: Ro
     }
   }
   return (
-    <section
-      className="admin-page mx-auto box-border grid w-full max-w-7xl content-start gap-6 p-5 sm:p-8"
-      aria-label="用户管理"
-    >
+    <section className="admin-page app-page" aria-label="用户管理">
       <PageHeading title="用户管理">
         <Button variant="primary" onClick={() => setDialog({})}>
           <Plus size={15} />
@@ -485,78 +401,21 @@ const adminTabs = [
 ] as const
 
 export function Administration({ api, currentUser }: { api: Api; currentUser: Row }) {
-  const [tab, setTab] = useState<(typeof adminTabs)[number]['id']>('overview')
-  const [compact, setCompact] = useState(() => matchMedia('(max-width: 760px)').matches)
-  useEffect(() => {
-    const media = matchMedia('(max-width: 760px)')
-    const update = () => setCompact(media.matches)
-    media.addEventListener('change', update)
-    return () => media.removeEventListener('change', update)
-  }, [])
   return (
-    <Section className="admin-workbench app-flat-section">
-      <Section
-        role="complementary"
-        aria-label="管理导航"
-        className="admin-sidebar app-flat-section"
-      >
-        <ActivityRail
-          label="管理分类"
-          role="tablist"
-          aria-orientation={compact ? 'horizontal' : 'vertical'}
-          className="admin-navigation"
-        >
-          {adminTabs.map((item, index) => (
-            <Button
-              key={item.id}
-              id={`admin-tab-${item.id}`}
-              role="tab"
-              variant="navigation"
-              aria-selected={tab === item.id}
-              aria-controls={`admin-panel-${item.id}`}
-              tabIndex={tab === item.id ? 0 : -1}
-              onClick={() => setTab(item.id)}
-              onKeyDown={event => {
-                if (event.nativeEvent.isComposing) return
-                const previous = compact ? 'ArrowLeft' : 'ArrowUp'
-                const next = compact ? 'ArrowRight' : 'ArrowDown'
-                const target =
-                  event.key === 'Home'
-                    ? 0
-                    : event.key === 'End'
-                      ? adminTabs.length - 1
-                      : event.key === previous
-                        ? (index + adminTabs.length - 1) % adminTabs.length
-                        : event.key === next
-                          ? (index + 1) % adminTabs.length
-                          : -1
-                if (target < 0) return
-                event.preventDefault()
-                setTab(adminTabs[target].id)
-                document.getElementById(`admin-tab-${adminTabs[target].id}`)?.focus()
-              }}
-            >
-              <item.icon size={18} />
-              {item.label}
-            </Button>
-          ))}
-        </ActivityRail>
-      </Section>
-      <Section
-        className="admin-content app-flat-section"
-        role="tabpanel"
-        id={`admin-panel-${tab}`}
-        aria-labelledby={`admin-tab-${tab}`}
-      >
-        {tab === 'overview' ? (
+    <SideTabWorkspace
+      label="管理"
+      tabs={adminTabs.map(item => ({ ...item, icon: <item.icon size={18} /> }))}
+    >
+      {tab =>
+        tab === 'overview' ? (
           <AdminOverview api={api} />
         ) : tab === 'users' ? (
           <UserManagement api={api} currentUser={currentUser} />
         ) : (
           <ModelManagement api={api} />
-        )}
-      </Section>
-    </Section>
+        )
+      }
+    </SideTabWorkspace>
   )
 }
 
@@ -579,7 +438,7 @@ function AdminOverview({ api }: { api: Api }) {
     void load()
   }, [load])
   return (
-    <Section className="admin-page app-flat-section grid content-start gap-6 p-5 sm:p-8">
+    <Section className="admin-page app-page">
       <PageHeading title="运行概览">
         <Button variant="quiet" loading={loading} onClick={() => void load()}>
           <RefreshCw size={15} />
@@ -674,10 +533,7 @@ function ModelManagement({ api }: { api: Api }) {
     }
   }
   return (
-    <section
-      className="admin-page mx-auto box-border grid w-full max-w-7xl content-start gap-6 p-5 sm:p-8"
-      aria-label="共享模型"
-    >
+    <section className="admin-page app-page" aria-label="共享模型">
       <PageHeading title="共享模型">
         <Button variant="primary" onClick={() => setDialog({})}>
           <Plus size={15} />

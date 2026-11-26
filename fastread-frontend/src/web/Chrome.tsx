@@ -1,7 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import {
   ActivityRail,
-  Avatar,
   Button,
   CardBody,
   Dialog,
@@ -10,7 +9,8 @@ import {
   TabBar,
   Toolbar,
 } from '@fastrd/ui-react'
-import { BookOpen, LogOut, Moon, ShieldCheck, Sun, X, PanelLeft } from 'lucide-react'
+import { BookOpen, LogOut, Moon, ShieldCheck, Sun, X, PanelLeft, Settings } from 'lucide-react'
+import { AccountMenu } from './AccountMenu'
 import { colorMode } from './theme'
 import { safeIdentityLabel } from './identity'
 
@@ -36,7 +36,6 @@ export function AppHeader({
   const tabs = [
     { id: 'library', label: '论文库', controls: 'main-library' },
     ...(admin ? [{ id: 'admin', label: '管理', controls: 'main-admin' }] : []),
-    { id: 'settings', label: '设置', controls: 'main-settings' },
   ]
   return (
     <Section role="banner" className="app-topbar min-w-0 shrink-0">
@@ -55,20 +54,28 @@ export function AppHeader({
           onSelect={id => onSection(id as MainSection)}
         />
         <Toolbar label="账号操作" className="app-account-actions">
-          <Button variant="quiet" onClick={onAccount} title={label} aria-label="账号设置">
-            <Avatar name={label} size="sm" />
-            <span className="app-account-name">{label}</span>
-          </Button>
-          {!user.public && (
-            <Button variant="icon" onClick={onLogout} aria-label="退出登录" title="退出登录">
-              <LogOut size={17} />
-            </Button>
-          )}
-
-          <Button variant="quiet" onClick={onAccount} aria-label="CAS 认证">
-            <ShieldCheck size={17} />
-            <span className="sr-only">CAS 认证</span>
-          </Button>
+          <AccountMenu
+            name={label}
+            detail={user.email}
+            actions={[
+              { label: 'CAS 认证', icon: <ShieldCheck size={17} />, onSelect: onAccount },
+              {
+                label: '设置',
+                icon: <Settings size={17} />,
+                onSelect: () => onSection('settings'),
+              },
+              ...(!user.public
+                ? [
+                    {
+                      label: '退出登录',
+                      icon: <LogOut size={17} />,
+                      danger: true,
+                      onSelect: onLogout,
+                    },
+                  ]
+                : []),
+            ]}
+          />
           <Button
             variant="icon"
             onClick={() => colorMode.setMode(dark ? 'light' : 'dark')}
@@ -88,14 +95,16 @@ export function AppDialog({
   onClose,
   title,
   children,
+  size = 'lg',
 }: {
   open: boolean
   onClose: () => void
   title: string
   children: ReactNode
+  size?: 'md' | 'lg' | 'xl'
 }) {
   return (
-    <Dialog open={open} onClose={onClose} label={title} size="lg">
+    <Dialog open={open} onClose={onClose} label={title} size={size}>
       <PanelHeader className="app-dialog-heading flex items-center justify-between gap-3">
         <h2 className="fastui-heading m-0 text-base">{title}</h2>
         <Button variant="icon" onClick={onClose} aria-label={`关闭${title}`}>
@@ -137,9 +146,11 @@ export function WorkbenchSidebar({
   label,
   tools,
   children,
+  navigation,
 }: {
   id: string
   label: string
+  navigation?: ReactNode
   tools: { label: string; icon: ReactNode; onClick: () => void; active?: boolean }[]
   children: ReactNode
 }) {
@@ -163,23 +174,116 @@ export function WorkbenchSidebar({
         </Button>
       </PanelHeader>
       <div id={`${id}-body`} className="sidebar-body">
-        <ActivityRail label={label} className="sidebar-navigation">
-          {tools.map(tool => (
-            <Button
-              key={tool.label}
-              variant="navigation"
-              aria-label={tool.label}
-              title={tool.label}
-              aria-pressed={tool.active}
-              onClick={tool.onClick}
-            >
-              {tool.icon}
-              <span>{tool.label === '资料库概览' ? '全部论文' : tool.label}</span>
-            </Button>
-          ))}
-        </ActivityRail>
+        {navigation || (
+          <ActivityRail label={label} className="sidebar-navigation">
+            {tools.map(tool => (
+              <Button
+                key={tool.label}
+                variant="navigation"
+                aria-label={tool.label}
+                title={tool.label}
+                aria-pressed={tool.active}
+                onClick={tool.onClick}
+              >
+                {tool.icon}
+                <span>{tool.label === '资料库概览' ? '全部论文' : tool.label}</span>
+              </Button>
+            ))}
+          </ActivityRail>
+        )}
         <CardBody className="sidebar-content">{children}</CardBody>
       </div>
+    </Section>
+  )
+}
+
+export function SideTabWorkspace({
+  label,
+  tabs,
+  children,
+  keepMounted = false,
+}: {
+  label: string
+  tabs: { id: string; label: string; icon: ReactNode }[]
+  children: (id: string) => ReactNode
+  keepMounted?: boolean
+}) {
+  const [selected, setSelected] = useState(tabs[0].id)
+  const [compact, setCompact] = useState(() => matchMedia('(max-width: 900px)').matches)
+  useEffect(() => {
+    const media = matchMedia('(max-width: 900px)')
+    const update = () => setCompact(media.matches)
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  return (
+    <Section className="side-workspace app-flat-section">
+      <WorkbenchSidebar
+        id={`workspace-sidebar-${tabs[0].id}`}
+        label={`${label}导航`}
+        tools={[]}
+        navigation={
+          <ActivityRail
+            label={`${label}分类`}
+            role="tablist"
+            aria-orientation={compact ? 'horizontal' : 'vertical'}
+            className="sidebar-navigation side-workspace-navigation"
+          >
+            {tabs.map((item, index) => (
+              <Button
+                key={item.id}
+                id={`side-tab-${item.id}`}
+                role="tab"
+                variant="navigation"
+                aria-selected={selected === item.id}
+                aria-controls={`side-panel-${item.id}`}
+                tabIndex={selected === item.id ? 0 : -1}
+                onClick={() => setSelected(item.id)}
+                onKeyDown={event => {
+                  if (event.nativeEvent.isComposing) return
+                  const previous = compact ? 'ArrowLeft' : 'ArrowUp',
+                    next = compact ? 'ArrowRight' : 'ArrowDown'
+                  const target =
+                    event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? tabs.length - 1
+                        : event.key === previous
+                          ? (index + tabs.length - 1) % tabs.length
+                          : event.key === next
+                            ? (index + 1) % tabs.length
+                            : -1
+                  if (target < 0) return
+                  event.preventDefault()
+                  setSelected(tabs[target].id)
+                  document.getElementById(`side-tab-${tabs[target].id}`)?.focus()
+                }}
+              >
+                {item.icon}
+                {item.label}
+              </Button>
+            ))}
+          </ActivityRail>
+        }
+      >
+        {null}
+      </WorkbenchSidebar>
+      <Section className="side-workspace-content app-flat-section">
+        {tabs
+          .filter(item => keepMounted || item.id === selected)
+          .map(item => (
+            <Section
+              key={item.id}
+              hidden={selected !== item.id}
+              className="side-workspace-panel app-flat-section"
+              role="tabpanel"
+              id={`side-panel-${item.id}`}
+              aria-labelledby={`side-tab-${item.id}`}
+            >
+              {children(item.id)}
+            </Section>
+          ))}
+      </Section>
     </Section>
   )
 }

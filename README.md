@@ -108,52 +108,35 @@ FastRead 明确区分三种边界：
 
 ### 从源码启动（开发者）
 
-#### 1. 准备后端
+需要 Go 1.26.8、Node.js、pnpm，以及 PATH 中的 Poppler `pdftotext` / `pdfinfo`。Linux 还需要 Bash、curl、flock、setsid；Windows 需要 PowerShell 7（`pwsh`）。脚本会构建 Go 服务和 FastUI 前端，启动 API 与后台任务 worker。
 
-```powershell
-cd backend-go
-go mod download
-go test ./...
+Linux：
+
+```bash
+./run.sh check
+./run.sh init-admin    # 输入至少 12 字符的密码，默认账号 admin@fastread.local
+./run.sh start --no-open
+./run.sh status
+./run.sh restart --no-open
+./run.sh stop
 ```
 
-需要 Go 1.26.8、PowerShell 7，以及 PATH 中的 Poppler `pdftotext` / `pdfinfo`。
-首次本地运行前创建管理员：
+Windows：
 
 ```powershell
-$env:FASTREAD_WEB_ROOT = "$PWD/../.runtime/web-data"
-$env:FASTREAD_INITIAL_PASSWORD = Read-Host "管理员密码（至少 12 字符）" -MaskInput
-go run ./cmd/fastread user-create --email admin@example.org --name 管理员 --admin
-Remove-Item Env:FASTREAD_INITIAL_PASSWORD
-```
-
-#### 2. 准备前端
-
-```powershell
-cd ..\fastread-frontend
-pnpm install
-cd ..
-```
-
-#### 3. 启动 FastRead
-
-```powershell
+.\run.bat --check
+.\run.bat --init-admin
 .\run.bat --no-open
+.\run.bat --status
+.\run.bat --restart --no-open
+.\run.bat --stop
 ```
 
-| 服务 | 默认地址 |
-| --- | --- |
-| Web 工作台 | `http://127.0.0.1:3015/` |
-| 后端 API | `http://127.0.0.1:8483/api/` |
-| 健康检查 | `http://127.0.0.1:8483/api/sys_check` |
+默认地址为 `http://127.0.0.1:3015/`，API 为同端口的 `/api/`，健康检查为 `/api/health`。`--no-open` 禁止自动打开浏览器；`--no-build`（或 `--quick`）复用已有构建。首次启动会自动安装缺失的前端依赖。更新代码后不使用 `--no-build`，以便重新构建。
 
-Windows 根目录脚本还支持：
+可在根目录 `.env` 中配置 `FASTREAD_PORT`、`FASTREAD_HOST`、`FASTREAD_PUBLIC_ORIGIN`、`FASTREAD_WEB_ROOT`、`FASTREAD_RUNTIME_DIR`、`FASTREAD_ADMIN_EMAIL` 和 `FASTREAD_WORKER_CONCURRENCY`。路径建议使用绝对路径；跨平台共用的 `.env` 使用简单 `KEY=value` 格式。默认仅监听本机，使用本地 SQLite；设置 `FASTREAD_DATABASE_URL` 可使用 PostgreSQL。
 
-```text
-run.bat           启动后端与前端
-run.bat --status  查看运行状态
-run.bat --stop    停止本地进程
-run.bat --check   检查本地依赖
-```
+默认运行资料保存在 `.runtime/web-data`，进程记录与日志保存在 `.runtime/go-web`。停止和重启保留数据库、论文和配置；脚本只停止自己记录并核验的进程。`init-admin` 在服务停止时运行，可通过 `FASTREAD_ADMIN_EMAIL` 指定邮箱。Linux 使用 `nohup`，关闭终端后服务继续运行；需要停止时使用 `./run.sh stop`。
 
 Docker Compose 是可选部署路径，不是本地开发的前置条件：
 

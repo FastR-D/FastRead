@@ -1,45 +1,103 @@
-param([string]$Action = 'start', [switch]$NoOpen)
+param(
+    [ValidateSet('start','stop','restart','status','check','init-admin')][string]$Action = 'start',
+    [switch]$NoOpen,
+    [switch]$NoBuild
+)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
-$runtimeDirectory = Join-Path $projectRoot '.runtime/go-web'
-$statePath = Join-Path $runtimeDirectory 'processes.json'
-New-Item -ItemType Directory -Force -Path $runtimeDirectory | Out-Null
-if ($Action -in @('status', 'stop')) {
-    if (!(Test-Path -LiteralPath $statePath)) { Write-Output 'FastRead is stopped.'; exit 0 }
-    foreach ($entry in (Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json)) {
-        $process = Get-Process -Id $entry.id -ErrorAction SilentlyContinue
-        if ($process -and $process.StartTime.ToUniversalTime().ToString('O') -eq $entry.started) {
-            if ($Action -eq 'stop') { & taskkill.exe /PID $process.Id /T /F | Out-Null; Write-Output "Stopped $($entry.name)" }
-            else { Write-Output "$($entry.name): running ($($process.Id))" }
-        } else { Write-Output "$($entry.name): stopped" }
+$envFile = if ($env:FASTREAD_ENV_FILE) { $env:FASTREAD_ENV_FILE } else { Join-Path $projectRoot '.env' }
+if (Test-Path -LiteralPath $envFile) {
+    foreach ($line in Get-Content -LiteralPath $envFile) {
+        if ($line -match '^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$') {
+            $key = $Matches[1]; $value = $Matches[2].Trim()
+            if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) { $value = $value.Substring(1, $value.Length - 2) }
+            [Environment]::SetEnvironmentVariable($key, $value, 'Process')
+        }
     }
-    if ($Action -eq 'stop') { Remove-Item -LiteralPath $statePath }
-    exit 0
 }
-$go = (Get-Command go -ErrorAction Stop).Source
-$pnpm = (Get-Command pnpm.cmd -ErrorAction Stop).Source
-if ($Action -eq 'check') { & $go version; & $pnpm --version; Get-Command pdftotext,pdfinfo -ErrorAction Stop | Select-Object Name,Source; exit 0 }
-if ($Action -ne 'start') { throw "Unknown action: $Action" }
-if (Test-Path -LiteralPath $statePath) {
-    $state = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
-    if ($state | Where-Object { Get-Process -Id $_.id -ErrorAction SilentlyContinue }) { throw 'FastRead is already running. Use run.bat --status or --stop.' }
+$runtimeDirectory = if ($env:FASTREAD_RUNTIME_DIR) { $env:FASTREAD_RUNTIME_DIR } else { Join-Path $projectRoot '.runtime/go-web' }
+New-Item -ItemType Directory -Force -Path $runtimeDirectory | Out-Null
+$statePath = Join-Path $runtimeDirectory 'processes.json'
+$binary = Join-Path $runtimeDirectory 'fastread.exe'
+$port = if ($env:FASTREAD_PORT) { [int]$env:FASTREAD_PORT } else { 3015 }
+if ($port -lt 1 -or $port -gt 65535) { throw 'Invalid FASTREAD_PORT' }
+$listenHost = if ($env:FASTREAD_HOST) { $env:FASTREAD_HOST } else { '127.0.0.1' }
+if (!$env:FASTREAD_WEB_ROOT) { $env:FASTREAD_WEB_ROOT = Join-Path $projectRoot '.runtime/web-data' }
+if (!$env:FASTREAD_COOKIE_SECURE) { $env:FASTREAD_COOKIE_SECURE = 'false' }
+if (!$env:FASTREAD_PUBLIC_ORIGIN) { $env:FASTREAD_PUBLIC_ORIGIN = "http://127.0.0.1:$port" }
+$url = $env:FASTREAD_PUBLIC_ORIGIN.TrimEnd('/')
+$lock = [IO.File]::Open((Join-Path $runtimeDirectory 'launcher.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
+function Get-OwnedProcess($entry) {
+    $process = Get-Process -Id $entry.id -ErrorAction SilentlyContinue
+    if ($process -and $process.StartTime.ToUniversalTime().ToString('O') -eq $entry.started -and $process.Path -eq $binary) { return $process }
 }
-Push-Location (Join-Path $projectRoot 'backend-go')
-try { & $go build -o (Join-Path $runtimeDirectory 'fastread.exe') ./cmd/fastread; if ($LASTEXITCODE) { throw 'Go build failed.' } } finally { Pop-Location }
-$env:FASTREAD_WEB_ROOT = Join-Path $projectRoot '.runtime/web-data'
-$env:FASTREAD_COOKIE_SECURE = 'false'
-$env:FASTREAD_PUBLIC_ORIGIN = 'http://127.0.0.1:3015'
-$env:BACKEND_PORT = '8483'
-$env:VITE_FRONTEND_PORT = '3015'
-$children = @()
-foreach ($service in @(@('api','serve --listen 127.0.0.1:8483'), @('worker','worker --concurrency 2'))) {
-    $process = Start-Process -FilePath (Join-Path $runtimeDirectory 'fastread.exe') -ArgumentList $service[1] -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $runtimeDirectory "$($service[0]).log") -RedirectStandardError (Join-Path $runtimeDirectory "$($service[0]).error.log") -PassThru
-    $children += @{ name=$service[0]; id=$process.Id; started=$process.StartTime.ToUniversalTime().ToString('O') }
+function Stop-Services {
+    if (!(Test-Path -LiteralPath $statePath)) { return }
+    foreach ($entry in @(Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json)) {
+        $process = Get-OwnedProcess $entry
+        if ($process) { & taskkill.exe /PID $process.Id /T /F | Out-Null; if ($LASTEXITCODE) { throw "Could not stop $($entry.name)" }; Write-Output "Stopped $($entry.name)" }
+    }
+    Remove-Item -LiteralPath $statePath
 }
-$frontendRunner = Join-Path $runtimeDirectory 'frontend.cmd'
-Set-Content -LiteralPath $frontendRunner -Value "@echo off`r`ncall `"$pnpm`" dev --host 127.0.0.1 --port 3015" -Encoding utf8
-$process = Start-Process -FilePath $env:ComSpec -ArgumentList @('/d','/c',"`"$frontendRunner`"") -WorkingDirectory (Join-Path $projectRoot 'fastread-frontend') -WindowStyle Hidden -RedirectStandardOutput (Join-Path $runtimeDirectory 'frontend.log') -RedirectStandardError (Join-Path $runtimeDirectory 'frontend.error.log') -PassThru
-$children += @{ name='frontend'; id=$process.Id; started=$process.StartTime.ToUniversalTime().ToString('O') }
-$children | ConvertTo-Json | Set-Content -LiteralPath $statePath -Encoding utf8
-Write-Output 'FastRead: http://127.0.0.1:3015/ | logs: .runtime/go-web'
-if (!$NoOpen) { Start-Process 'http://127.0.0.1:3015/' }
+try {
+    if ($Action -eq 'stop') { Stop-Services; exit 0 }
+    if ($Action -eq 'status') {
+        $running = 0
+        if (Test-Path -LiteralPath $statePath) {
+            foreach ($entry in @(Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json)) {
+                if (Get-OwnedProcess $entry) { Write-Output "$($entry.name): running"; $running++ } else { Write-Output "$($entry.name): stopped" }
+            }
+        } else { Write-Output 'FastRead is stopped.' }
+        if ($running -ne 2) { exit 1 }
+        Invoke-RestMethod "$url/api/health" -TimeoutSec 3 | ConvertTo-Json
+        Write-Output "$url/"; exit 0
+    }
+    $go = (Get-Command go -ErrorAction Stop).Source
+    $pnpm = (Get-Command pnpm.cmd -ErrorAction Stop).Source
+    Get-Command node,pdftotext,pdfinfo -ErrorAction Stop | Out-Null
+    if ($Action -eq 'check') { & $go version; & $pnpm --version; Write-Output 'Dependencies ready'; exit 0 }
+    if ($Action -eq 'restart') { Stop-Services }
+    if (Test-Path -LiteralPath $statePath) {
+        if (@(Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json) | Where-Object { Get-OwnedProcess $_ }) { Write-Output 'FastRead is already running. Use run.bat --restart or --status.'; exit 0 }
+    }
+    if (!$NoBuild -or !(Test-Path -LiteralPath $binary)) {
+        Push-Location (Join-Path $projectRoot 'backend-go')
+        try { & $go build -trimpath -o $binary ./cmd/fastread; if ($LASTEXITCODE) { throw 'Go build failed.' } } finally { Pop-Location }
+    }
+    if ($Action -eq 'init-admin') {
+        $email = if ($env:FASTREAD_ADMIN_EMAIL) { $env:FASTREAD_ADMIN_EMAIL } else { 'admin@fastread.local' }
+        try {
+            if (!$env:FASTREAD_INITIAL_PASSWORD) { $env:FASTREAD_INITIAL_PASSWORD = Read-Host 'Administrator password (at least 12 characters)' -MaskInput }
+            & $binary user-create --email $email --name '管理员' --admin
+            if ($LASTEXITCODE) { throw 'Administrator creation failed.' }
+        } finally { Remove-Item Env:FASTREAD_INITIAL_PASSWORD -ErrorAction SilentlyContinue }
+        exit 0
+    }
+    $frontend = Join-Path $projectRoot 'fastread-frontend'
+    if (!$NoBuild -or !(Test-Path (Join-Path $frontend 'dist/index.html'))) {
+        Push-Location $frontend
+        try {
+            if (!(Test-Path node_modules)) { & $pnpm install --frozen-lockfile; if ($LASTEXITCODE) { throw 'Dependency installation failed.' } }
+            & $pnpm build; if ($LASTEXITCODE) { throw 'Frontend build failed.' }
+        } finally { Pop-Location }
+    }
+    if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) { throw "Port $port is occupied. No process was stopped." }
+    $children = @()
+    try {
+        $concurrency = if ($env:FASTREAD_WORKER_CONCURRENCY) { $env:FASTREAD_WORKER_CONCURRENCY } else { '2' }
+        foreach ($service in @(@('server', "serve --listen ${listenHost}:$port --frontend `"$(Join-Path $frontend 'dist')`""), @('worker', "worker --concurrency $concurrency"))) {
+            $process = Start-Process -FilePath $binary -ArgumentList $service[1] -WorkingDirectory $projectRoot -WindowStyle Hidden -RedirectStandardOutput (Join-Path $runtimeDirectory "$($service[0]).log") -RedirectStandardError (Join-Path $runtimeDirectory "$($service[0]).error.log") -PassThru
+            $children += @{ name=$service[0]; id=$process.Id; started=$process.StartTime.ToUniversalTime().ToString('O') }
+            ConvertTo-Json -InputObject @($children) | Set-Content -LiteralPath $statePath -Encoding utf8
+        }
+        $ready = $false
+        for ($i=0; $i -lt 60; $i++) {
+            if (@($children | Where-Object { Get-OwnedProcess $_ }).Count -ne 2) { throw 'A service exited during startup.' }
+            try { $health = Invoke-RestMethod "$url/api/health" -TimeoutSec 1; if ($health.status -eq 'healthy') { $ready=$true; break } } catch { }
+            Start-Sleep -Milliseconds 500
+        }
+        if (!$ready) { throw 'Health check timed out.' }
+    } catch { Stop-Services; throw }
+    Write-Output "FastRead: $url/ | Data: $env:FASTREAD_WEB_ROOT | Logs: $runtimeDirectory"
+    if (!$NoOpen) { Start-Process "$url/" }
+} finally { $lock.Dispose() }

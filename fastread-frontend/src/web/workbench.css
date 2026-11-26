@@ -10,6 +10,7 @@
   --fastui-height-sm: 32px;
   --fastui-height-md: 36px;
   --read-content-width: 780px;
+  --read-sidebar-width: 232px;
   --read-accent-text: #08614d;
 }
 :root[data-fastui-theme='light'] {
@@ -228,7 +229,7 @@ textarea {
   background: var(--fastui-success);
 }
 .library-workbench {
-  grid-template-columns: 232px minmax(0, 1fr);
+  grid-template-columns: var(--read-sidebar-width) minmax(0, 1fr);
 }
 .workbench-sidebar {
   display: flex;
@@ -330,7 +331,6 @@ textarea {
 }
 .library-content {
   background: var(--fastui-surface);
-  padding: 38px 48px 70px;
 }
 .web-shell .knowledge-home {
   display: flex;
@@ -480,7 +480,7 @@ textarea {
 .web-shell .knowledge-home > .section-heading {
   background: transparent;
   border: 0;
-  padding: 0 0 18px;
+  padding: 0;
   display: flex;
   justify-content: space-between;
 }
@@ -502,7 +502,7 @@ textarea {
   font-size: 12px;
 }
 .library-filter-toolbar {
-  padding: 0 0 16px;
+  padding: 0;
   border: 0;
   background: transparent;
   gap: 10px;
@@ -725,7 +725,7 @@ textarea {
 }
 .notebook-desk {
   display: grid;
-  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-columns: var(--read-sidebar-width) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -1411,10 +1411,6 @@ textarea {
   background: var(--fastui-chrome);
   border-style: dashed;
 }
-.job-list {
-  display: grid;
-  gap: 12px;
-}
 .web-login {
   border-radius: 14px;
   padding: 32px;
@@ -1425,10 +1421,7 @@ textarea {
   color: var(--read-accent-text);
   margin-bottom: 14px;
 }
-.admin-page {
-  max-width: 1240px;
-  padding: 36px 48px;
-}
+
 .admin-page > header {
   padding-bottom: 23px;
   border-bottom: 1px solid var(--fastui-border);
@@ -1437,7 +1430,7 @@ textarea {
   font-size: 25px;
   font-weight: 600;
 }
-.admin-page .fastui-table th {
+.workbench-table th {
   background: var(--fastui-chrome);
 }
 :root[data-fastui-theme='dark'] .paper-format {
@@ -1454,16 +1447,13 @@ textarea {
   }
 }
 @media (max-width: 1279px) {
-  .library-content {
-    padding: 30px;
-  }
   .library-workbench {
-    grid-template-columns: 212px minmax(0, 1fr);
+    grid-template-columns: var(--read-sidebar-width) minmax(0, 1fr);
   }
   .notebook-desk {
     height: auto;
     min-height: 100%;
-    grid-template-columns: 204px minmax(0, 1fr);
+    grid-template-columns: var(--read-sidebar-width) minmax(0, 1fr);
   }
   .pdf-workspace:not(.notes-hidden) {
     grid-template-columns: minmax(0, 1fr);
@@ -1562,9 +1552,7 @@ textarea {
   .desk-reading {
     flex: 1;
   }
-  .library-content {
-    padding: 26px 22px 60px;
-  }
+
   .knowledge-hero {
     margin-bottom: 28px;
   }
@@ -1587,9 +1575,7 @@ textarea {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .library-content {
-    padding: 24px 18px 50px;
-  }
+
   .library-breadcrumb {
     display: none;
   }
@@ -1742,9 +1728,7 @@ textarea {
   .import-fields {
     grid-template-columns: minmax(0, 1fr);
   }
-  .admin-page {
-    padding: 24px 16px;
-  }
+
   .reading-route-progress {
     display: none;
   }
@@ -1894,7 +1878,7 @@ textarea {
 .web-shell .sidebar-navigation > .fastui-button[aria-pressed='true'],
 .web-shell .library-tags .fastui-button[aria-pressed='true'],
 .web-shell .reading-outline nav .fastui-button[aria-current='step'],
-.web-shell .admin-navigation .fastui-button[aria-selected='true'] {
+.web-shell .side-workspace-navigation .fastui-button[aria-selected='true'] {
   background: var(--fastui-primary);
   color: #fff;
   border: 0;
@@ -2011,11 +1995,7 @@ textarea {
   min-height: 20px;
   padding: 0;
 }
-.settings-page {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 32px;
-}
+
 .settings-page h1 {
   font-size: 24px;
   margin: 0 0 24px;
@@ -2030,66 +2010,982 @@ textarea {
   }
 }
 @media (max-width: 600px) {
-  .settings-page {
-    padding: 20px 16px;
-  }
 }
 
-.admin-workbench {
+.side-workspace {
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr);
+  grid-template-columns: var(--read-sidebar-width) minmax(0, 1fr);
   min-height: 100%;
 }
-.web-shell .admin-sidebar {
-  background: var(--fastui-chrome);
-  border-right: 1px solid var(--fastui-border);
-  padding: 24px 12px;
-}
-.admin-navigation {
-  position: sticky;
-  top: 24px;
-  width: 100%;
-  padding: 0;
-  gap: 6px;
-  border: 0;
-  background: transparent;
-}
-.admin-navigation > .fastui-button {
-  flex-direction: row;
-  justify-content: flex-start;
-  gap: 12px;
-  min-height: 44px;
-  padding: 10px 14px;
-  font-size: 14px;
-  white-space: nowrap;
-}
-.admin-content {
+.side-workspace-content {
   min-width: 0;
 }
-.admin-content > .admin-page {
-  max-width: 1280px;
-  margin: 0 auto;
-}
-@media (max-width: 760px) {
-  .admin-workbench {
+@media (max-width: 900px) {
+  .side-workspace {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto 1fr;
   }
-  .web-shell .admin-sidebar {
-    padding: 12px 16px;
-    border-right: 0;
-    border-bottom: 1px solid var(--fastui-border);
+}
+
+.web-shell .knowledge-home,
+.web-shell .settings-page,
+.web-shell .integration-status,
+.web-shell .integration-connection,
+.web-shell .app-flat-section {
+  border: 0;
+  outline: 0;
+  box-shadow: none;
+  border-radius: 0;
+}
+.side-workspace-panel[hidden] {
+  display: none;
+}
+.side-workspace-panel {
+  min-width: 0;
+}
+.settings-page {
+  width: 100%;
+}
+.integration-connection + .integration-connection {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: 0;
+}
+.app-flat-heading {
+  padding: 0 0 20px;
+  background: transparent;
+  border: 0;
+}
+.app-topbar {
+  position: relative;
+  z-index: 30;
+  overflow: visible;
+}
+.app-account-actions .rd-account-menu {
+  order: 2;
+}
+@media (max-width: 600px) {
+}
+
+/* All app sidebars share the same shell, navigation rhythm and selection. */
+.web-shell .sidebar-navigation {
+  display: grid;
+  position: static;
+  width: 100%;
+  gap: 4px;
+  padding: 0 0 24px;
+  border: 0;
+  background: transparent;
+}
+.web-shell .sidebar-navigation > .fastui-button {
+  width: 100%;
+  min-height: 44px;
+  height: 44px;
+  padding: 0 13px;
+  gap: 12px;
+  flex-direction: row;
+  justify-content: flex-start;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: var(--fastui-radius-button);
+}
+.web-shell .sidebar-navigation > .fastui-button[aria-selected='true'],
+.web-shell .sidebar-navigation > .fastui-button[aria-pressed='true'] {
+  background: var(--fastui-primary);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: none;
+}
+.side-workspace .workbench-sidebar {
+  min-height: 100%;
+}
+.sidebar-heading {
+  min-height: 20px;
+}
+@media (max-width: 900px) {
+  .web-shell .sidebar-navigation {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-top: 7px;
+    padding-bottom: 16px;
   }
-  .admin-navigation {
-    position: static;
-    flex-direction: row;
+  .side-workspace .workbench-sidebar {
+    min-height: 0;
   }
-  .admin-navigation > .fastui-button {
-    flex: 1;
-    width: auto;
-    justify-content: center;
-    gap: 6px;
-    padding-inline: 8px;
-    font-size: 12px;
+}
+
+.paper-search-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+}
+.paper-search-form .fastui-field {
+  flex: 1;
+  min-width: 0;
+}
+.paper-search-form > .fastui-button {
+  min-height: 36px;
+}
+.paper-search-target {
+  max-width: 360px;
+}
+.web-shell .paper-search-result {
+  padding: 24px 0;
+  border-bottom: 1px solid var(--fastui-border);
+}
+@media (max-width: 600px) {
+  .paper-search-form {
+    align-items: stretch;
+    flex-direction: column;
   }
+  .paper-search-target {
+    max-width: none;
+  }
+}
+
+/* One page inset and heading rhythm for every application destination. */
+.web-shell {
+  --app-page-padding: 32px;
+  --app-page-gap: 24px;
+}
+.web-shell .library-content {
+  padding: 0;
+}
+.web-shell .app-page {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  padding: var(--app-page-padding);
+  gap: var(--app-page-gap);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+}
+.web-shell .app-page > * {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.web-shell .app-page .app-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+}
+.web-shell .app-page-heading h1 {
+  box-sizing: border-box;
+  padding: 4px 0;
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  letter-spacing: -0.4px;
+}
+.web-shell .settings-page .integration-status {
+  margin-top: 0;
+}
+.web-shell .library-heading-actions {
+  align-self: center;
+}
+@media (max-width: 1279px) {
+  .web-shell {
+    --app-page-padding: 24px;
+  }
+}
+@media (max-width: 600px) {
+  .web-shell {
+    --app-page-padding: 16px;
+    --app-page-gap: 20px;
+  }
+}
+
+.web-shell .integration-status {
+  gap: var(--app-page-gap);
+}
+.web-shell .integration-connection > .section-heading {
+  padding: 0;
+  min-height: 40px;
+  border: 0;
+}
+
+/* Document actions share one toolbar; page navigation stays with the document. */
+.reading-view-toolbar {
+  display: flex;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  gap: 12px;
+  padding: 10px 20px;
+}
+.reading-view-toolbar > * {
+  flex-shrink: 0;
+}
+.document-version-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fastui-secondary);
+  margin-left: auto;
+}
+.document-version-select {
+  width: 150px;
+}
+.reading-view-toolbar .document-download {
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+}
+.research-panel-toggle {
+  margin-left: 4px;
+}
+.pdf-scroll {
+  padding: 16px;
+  overflow-anchor: none;
+  scroll-behavior: auto;
+}
+.pdf-sheet {
+  margin-bottom: 20px;
+  background: white;
+}
+.pdf-sheet:last-child {
+  margin-bottom: 0;
+}
+.pdf-page-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #737d89;
+  font-size: 13px;
+}
+.pdf-page-message {
+  position: absolute;
+  z-index: 3;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  background: var(--fastui-surface);
+  color: var(--fastui-text);
+  padding: 12px;
+}
+#desk-sources .sidebar-navigation {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+#desk-sources .desk-source .fastui-button {
+  gap: 0;
+  padding-inline: 8px;
+}
+/* Every research tab uses the same header, sections, fields and list items. */
+.reading-notes > .research-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 16px;
+}
+.research-tool,
+.research-section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 16px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+.research-panel .research-panel-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.research-panel-heading h2 {
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 600;
+  margin: 0;
+}
+.research-panel-heading span {
+  font-size: 12px;
+  color: var(--fastui-secondary);
+}
+.research-panel .section-heading {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.research-panel .chat-history {
+  gap: 16px;
+}
+.research-panel .chat-welcome {
+  padding: 0;
+  text-align: left;
+  justify-items: stretch;
+  gap: 16px;
+}
+.research-panel .suggested-questions {
+  margin: 0;
+  gap: 8px;
+}
+.research-panel .suggested-questions .fastui-button {
+  border-radius: var(--fastui-radius-button);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+.research-empty-copy {
+  margin: 0;
+  color: var(--fastui-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.research-panel .research-item {
+  margin: 0;
+  padding: 16px 0;
+  border: 0;
+  border-bottom: 1px solid var(--fastui-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  display: grid;
+  gap: 12px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.research-panel .desk-composer {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  gap: 12px;
+}
+.research-panel .desk-composer .fastui-textarea {
+  padding: 10px 12px;
+  border: 1px solid var(--fastui-border);
+  border-radius: var(--fastui-radius-control, 8px);
+  font-size: 13px;
+}
+.research-panel .neighbor-filters {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+}
+.research-panel .reading-history-label {
+  margin: 0;
+  justify-content: space-between;
+}
+.research-panel .reading-summary {
+  padding-top: 20px;
+  border-top: 1px solid var(--fastui-border);
+}
+.source-upload-section {
+  display: grid;
+  gap: 12px;
+  margin: 20px 0;
+  padding: 20px 0;
+  border: 0;
+  border-top: 1px solid var(--fastui-border);
+  border-bottom: 1px solid var(--fastui-border);
+  border-radius: 0;
+  box-shadow: none;
+}
+.source-upload-section p {
+  margin: 0;
+  color: var(--fastui-secondary);
+  font-size: 13px;
+}
+.source-upload-section > .fastui-button {
+  justify-self: start;
+}
+.source-file-input {
+  display: none;
+}
+@media (max-width: 600px) {
+  .reading-view-toolbar {
+    padding-inline: 16px;
+    gap: 8px;
+  }
+  .document-version-label > span {
+    display: none;
+  }
+  .reading-notes > .research-panel {
+    padding: 16px;
+  }
+}
+
+.reading-view-toolbar .document-download {
+  background: var(--fastui-chrome);
+}
+.research-panel blockquote.fastui-section {
+  padding: 12px;
+  margin: 0;
+  background: var(--fastui-chrome);
+  border: 0;
+  border-left: 2px solid var(--fastui-border-strong);
+  border-radius: 0;
+  box-shadow: none;
+}
+.research-panel .annotation-selection {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.research-panel .fastui-empty-state {
+  padding: 16px 0;
+  text-align: left;
+  align-items: flex-start;
+  border: 0;
+  background: transparent;
+}
+.research-panel .research-panel-heading > .fastui-button {
+  font-size: 12px;
+}
+
+/* Reader: the application owns the viewport; each document/tool owns its scroll. */
+.web-shell:has(.notebook-desk) {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+}
+.web-shell > main:has(.notebook-desk) {
+  overflow: hidden;
+  min-height: 0;
+}
+.notebook-desk {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.notebook-desk .desk-reading {
+  flex: 1;
+  overflow: hidden;
+}
+.desk-reading-heading {
+  min-height: 54px;
+  padding: 7px 20px;
+}
+.reading-view-toolbar {
+  min-height: 46px;
+  padding-block: 5px;
+}
+.pdf-workspace {
+  position: relative;
+  overflow: hidden;
+  grid-template-rows: minmax(0, 1fr);
+}
+.pdf-workspace:not(.notes-hidden) {
+  grid-template-columns: minmax(0, 1fr) 340px;
+}
+.pdf-column {
+  min-height: 0;
+}
+.pdf-column .pdf-scroll {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+.pdf-toolbar.fastui-toolbar {
+  box-sizing: border-box;
+  height: 36px;
+  min-height: 36px;
+  max-height: 36px;
+  padding: 3px 8px;
+  gap: 3px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-bottom: 1px solid var(--fastui-border);
+  background: var(--fastui-chrome);
+  scrollbar-width: none;
+}
+.pdf-toolbar > * {
+  flex-shrink: 0;
+}
+.pdf-toolbar .fastui-button {
+  height: 28px;
+  min-height: 28px;
+  min-width: 28px;
+  padding: 0 5px;
+}
+.pdf-toolbar .fastui-input {
+  height: 26px;
+  min-height: 0;
+  width: 42px;
+  font-size: 12px;
+}
+.pdf-toolbar .fastui-select {
+  height: 28px;
+  min-height: 0;
+  width: 98px;
+  padding: 2px 18px 2px 5px;
+}
+.pdf-tool-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--fastui-border);
+  margin: 0 4px;
+}
+.pdf-page-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--fastui-muted);
+}
+.pdf-findbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--fastui-border);
+}
+.pdf-findbar .fastui-input {
+  flex: 1;
+  min-width: 100px;
+  width: 100px;
+  height: 30px;
+}
+.pdf-findbar > span {
+  font-size: 11px;
+  color: var(--fastui-muted);
+}
+.pdf-findbar .fastui-button {
+  width: 28px;
+  min-height: 28px;
+  height: 28px;
+  padding: 0;
+}
+.pdf-outline {
+  flex-shrink: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 6px;
+  border-bottom: 1px solid var(--fastui-border);
+}
+.pdf-outline .fastui-button {
+  width: 100%;
+  justify-content: space-between;
+  text-align: left;
+  font-size: 12px;
+}
+.pdf-outline p {
+  margin: 8px;
+  font-size: 12px;
+  color: var(--fastui-muted);
+}
+.reading-notes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border-top: 0;
+  border-left: 1px solid var(--fastui-border);
+}
+.reading-notes > .fastui-tabs {
+  flex-shrink: 0;
+  position: static;
+}
+.reading-notes > .research-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  gap: 14px;
+}
+.reading-notes:has(.desk-chat) > .research-panel {
+  overflow: hidden;
+  padding-bottom: 12px;
+}
+.reader-feedback {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  max-width: calc(100% - 24px);
+  z-index: 4;
+  padding: 7px 12px;
+  font-size: 12px;
+  pointer-events: none;
+}
+.desk-reading > .reading-studio {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+/* assistant-ui handles the thread, messages, composer and keyboard interaction. */
+.research-panel .desk-chat {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  gap: 12px;
+}
+.desk-chat > .research-panel-heading {
+  flex-shrink: 0;
+}
+.desk-chat .chat-history {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  gap: 20px;
+  padding: 4px 2px 16px;
+}
+.desk-chat .chat-welcome {
+  margin: auto 0;
+  padding: 24px 0;
+  text-align: left;
+  justify-items: stretch;
+}
+.chat-welcome .research-empty-copy {
+  font-size: 14px;
+  line-height: 1.7;
+}
+.chat-welcome .suggested-questions .fastui-button {
+  justify-content: flex-start;
+  background: var(--fastui-chrome);
+  padding: 9px 12px;
+  font-size: 12px;
+}
+.desk-chat .desk-message {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  gap: 10px;
+  background: transparent;
+  box-shadow: none;
+  font-size: 13px;
+  line-height: 1.75;
+}
+.desk-chat .desk-message.user {
+  margin-left: 24px;
+  padding: 10px 12px;
+  border-radius: var(--fastui-radius-control, 8px);
+  background: var(--fastui-chrome);
+}
+.desk-message.user > b {
+  display: none;
+}
+.desk-message.assistant > b {
+  color: var(--fastui-text);
+  font-size: 12px;
+}
+.desk-message .citation-list:empty {
+  display: none;
+}
+.desk-chat .reading-answer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.desk-chat .reading-answer-actions .fastui-button {
+  padding: 4px 6px;
+  min-height: 26px;
+  font-size: 11px;
+}
+.desk-chat .desk-composer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--fastui-border-strong, var(--fastui-border));
+  border-radius: var(--fastui-radius-control, 8px);
+  background: var(--fastui-surface);
+}
+.desk-chat .desk-composer:focus-within {
+  border-color: var(--fastui-focus);
+}
+.desk-chat .desk-composer .fastui-textarea {
+  min-height: 64px;
+  max-height: 160px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  outline: none;
+  background: transparent;
+  resize: none;
+  font-size: 13px;
+}
+.desk-chat .composer-footer {
+  gap: 5px;
+}
+.desk-chat .composer-footer > span {
+  font-size: 10px;
+}
+.desk-chat .composer-footer .fastui-button {
+  min-height: 28px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
+.desk-chat .desk-composer blockquote {
+  max-height: 100px;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+/* Notes separate annotation capture, a writing surface, and saved research. */
+.note-sections {
+  width: 100%;
+  flex-shrink: 0;
+}
+.note-sections .fastui-segment {
+  flex: 1;
+  font-size: 12px;
+}
+.notes-annotations {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.annotation-composer {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--fastui-border);
+  border-radius: var(--fastui-radius-control, 8px);
+}
+.annotation-composer .fastui-field > span {
+  font-size: 11px;
+  color: var(--fastui-muted);
+}
+.annotation-composer .fastui-textarea {
+  border: 0;
+  padding: 0;
+  min-height: 66px;
+  box-shadow: none;
+  resize: vertical;
+  font-size: 13px;
+}
+.annotation-composer > .fastui-button {
+  justify-self: end;
+  min-height: 28px;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.notes-empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  color: var(--fastui-muted);
+  padding: 24px 0;
+}
+.notes-empty svg {
+  opacity: 0.6;
+}
+.notes-empty p {
+  margin: 0;
+  font-size: 12px;
+}
+.annotation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.research-panel .annotation-list > article {
+  padding: 12px;
+  border: 1px solid var(--fastui-border);
+  border-radius: var(--fastui-radius-control, 8px);
+  background: var(--fastui-surface);
+}
+.annotation-list > article.current-page-note {
+  border-color: var(--fastui-border-strong, var(--fastui-border));
+}
+.research-panel .annotation-list .page-link {
+  min-height: 24px;
+  padding: 0 0 6px;
+  font-size: 11px;
+  color: var(--fastui-muted);
+}
+.research-panel .annotation-list blockquote,
+.research-panel .annotation-selection blockquote {
+  margin: 4px 0 10px;
+  padding: 8px 10px;
+  border: 0;
+  border-left: 3px solid #d5aa50;
+  border-radius: 0;
+  background: var(--fastui-chrome);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.annotation-list article > .fastui-button:not(.page-link) {
+  min-height: 26px;
+  padding: 3px 6px;
+  margin-top: 8px;
+  font-size: 11px;
+}
+.annotation-composer .annotation-selection {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.annotation-selection-header {
+  font-size: 11px;
+}
+.notes-export {
+  align-self: flex-start;
+  font-size: 12px;
+}
+.reading-summary.note-document {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.note-document-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+.note-document-heading > span {
+  margin-left: auto;
+  color: var(--fastui-muted);
+  font-size: 10px;
+}
+.note-document .fastui-textarea {
+  padding: 14px;
+  min-height: 300px;
+  line-height: 1.9;
+  resize: vertical;
+  background: var(--fastui-surface);
+  font-size: 13px;
+}
+.note-document > .fastui-button {
+  align-self: flex-end;
+}
+.research-panel .desk-saved-notes .saved-note {
+  padding: 0;
+  border: 1px solid var(--fastui-border);
+  border-radius: var(--fastui-radius-control, 8px);
+}
+.desk-saved-notes .section-heading h2 {
+  font-size: 13px;
+}
+@media (min-width: 901px) and (max-width: 1150px) {
+  .pdf-workspace:not(.notes-hidden) {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+}
+@media (max-width: 900px) {
+  .notebook-desk > .workbench-sidebar {
+    max-height: 30dvh;
+    overflow: auto;
+  }
+  .pdf-workspace:not(.notes-hidden) {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(140px, 1fr) minmax(180px, 0.85fr);
+  }
+  .reading-notes {
+    border-left: 0;
+    border-top: 1px solid var(--fastui-border);
+  }
+  .desk-reading-heading {
+    min-height: 46px;
+    padding: 5px 12px;
+  }
+  .desk-reading-heading h2 {
+    white-space: nowrap;
+  }
+  .reading-view-toolbar {
+    padding-inline: 12px;
+  }
+  .reading-notes > .research-panel {
+    padding: 12px;
+  }
+  .reading-notes .research-panel-heading {
+    min-height: 24px;
+  }
+  .desk-chat .desk-composer .fastui-textarea {
+    min-height: 40px;
+    max-height: 80px;
+  }
+}
+
+.research-panel .annotation-list > article {
+  display: block;
+}
+.research-panel .annotation-list .page-link {
+  justify-content: flex-start;
+}
+.note-sections .fastui-segment[aria-pressed='true'] {
+  background: var(--fastui-chrome);
+  color: var(--read-accent-text);
+}
+.pdf-toolbar .fastui-button[aria-pressed='true'] {
+  background: var(--fastui-selected);
+  color: var(--read-accent-text);
+}
+.desk-message .inline-citation.fastui-button {
+  display: inline-flex;
+  min-height: 20px;
+  padding: 0 4px;
+  margin: 0 2px;
+  font-size: 11px;
+  vertical-align: baseline;
+  color: var(--read-accent-text);
+  background: var(--fastui-selected);
+}
+
+.jobs-scope,
+.jobs-muted,
+.job-time {
+  color: var(--fastui-secondary);
+  font-size: 13px;
+}
+.job-time {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.job-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+}
+.job-identity strong {
+  font-weight: 500;
+}
+.job-identity span {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fastui-muted);
+  font-size: 12px;
+}
+.job-error-details {
+  min-width: 100px;
+  max-width: 320px;
+  border: 0;
+  background: transparent;
+}
+.job-error-details > summary {
+  padding: 0;
+  color: var(--fastui-danger);
+  font-size: 13px;
+}
+.job-error-details p {
+  margin: 8px 0 0;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }

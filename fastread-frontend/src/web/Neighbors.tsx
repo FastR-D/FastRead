@@ -68,11 +68,10 @@ export default function Neighbors({
           : (b.relevance_score || 0) - (a.relevance_score || 0)
     )
   return (
-    <Section className="neighbors grid gap-4 p-3">
-      <PanelHeader className="section-heading">
+    <Section className="neighbors research-tool">
+      <PanelHeader className="research-panel-heading">
         <div>
           <h2 className="fastui-heading m-0 text-base">近邻论文</h2>
-          <p className="m-0 leading-relaxed break-words">发现相关研究。</p>
         </div>
         <Button
           disabled={pending}
@@ -198,10 +197,7 @@ export default function Neighbors({
         共 {filtered.length} 篇{tag ? ` · 标签：${tag}` : ''}· 外部相关度基于题名与摘要。
       </p>
       {filtered.slice((page - 1) * 10, page * 10).map((p: Row, i: number) => (
-        <article
-          key={p.local_id || p.id || i}
-          className="neighbor-card fastui-section grid min-w-0 gap-4 p-5"
-        >
+        <article key={p.local_id || p.id || i} className="neighbor-card research-item">
           <h3 className="fastui-heading m-0 text-sm">{p.title}</h3>
           <small className="text-xs">
             {p.year || '年份待核实'} · {(p.discovery_sources || []).join(' / ')}
