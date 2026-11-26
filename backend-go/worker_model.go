@@ -445,7 +445,28 @@ func generateReport(ctx context.Context, s *Store, job Row, owner string, payloa
 	if len(chunks) == 0 {
 		return nil, errors.New("no source text")
 	}
-	result, e := completeModel(ctx, s, job, owner, payload, `用中文撰写阅读报告，只依据给定原文。返回 {"title":"报告标题","executive_summary":"研究问题、方法主线与贡献总览","key_questions":[{"question":"研究问题","answer":"回答","why_it_matters":"为什么重要","evidence":[{"source_id":"S1","quote":"逐字原文"}]}],"process":[{"step":"方法步骤","description":"说明","evidence":[{"source_id":"S1","quote":"逐字原文"}]}],"contributions":[{"title":"贡献","description":"说明","evidence":[{"source_id":"S1","quote":"逐字原文"}]}],"limitations":["局限"],"terms":[{"term":"术语","explanation":"解释"}],"suggested_questions":["继续追问的问题"]}。关键问题 4–8 个，解释研究问题、方法、实验与局限；每项至少一条 12 字以上的逐字引文。`, Row{"title": paper["title"], "sources": chunks})
+	mode := Str(payload["reading_mode"])
+	if mode == "" {
+		mode = "deep"
+	}
+	focus := "完整精读：详细解释方法的输入输出、设计理由、公式、实验条件、消融与局限。"
+	if mode == "skim" {
+		focus = "快速泛读：总览不超过 200 字，4 个关键问题各用两三句回答，保留核心方法、贡献与局限；公式和实验仅提取最关键的一项。"
+	}
+	var repository Row
+	repositoryWarning := ""
+	if mode == "repository" {
+		repository, e = loadReadingRepository(ctx, payload["repository"])
+		if e != nil {
+			repositoryWarning = "仓库材料未完成：" + e.Error()
+		}
+	}
+	contextData := Row{"title": paper["title"], "sources": chunks}
+	if repository != nil {
+		contextData["repository"] = repository
+		focus += repositoryReadingPrompt
+	}
+	result, e := completeModel(ctx, s, job, owner, payload, focus+interactiveReadingPrompt+`用中文撰写阅读报告，只依据给定原文。返回 {"title":"报告标题","executive_summary":"研究问题、方法主线与贡献总览","key_questions":[{"question":"研究问题","answer":"回答","why_it_matters":"为什么重要","evidence":[{"source_id":"S1","quote":"逐字原文"}]}],"process":[{"step":"方法步骤","description":"说明","evidence":[{"source_id":"S1","quote":"逐字原文"}]}],"contributions":[{"title":"贡献","description":"说明","evidence":[{"source_id":"S1","quote":"逐字原文"}]}],"limitations":["局限"],"terms":[{"term":"术语","explanation":"解释"}],"suggested_questions":["继续追问的问题"]}。关键问题 4–8 个，解释研究问题、方法、实验与局限；每项至少一条 12 字以上的逐字引文。`, contextData)
 	if e != nil {
 		return nil, e
 	}
@@ -462,6 +483,8 @@ func generateReport(ctx context.Context, s *Store, job Row, owner string, payloa
 			if !ok {
 				return nil, errors.New("invalid report item")
 			}
+			normalizeReadingText(item, "question", "answer", "step", "title", "description", "why_it_matters", "input", "output", "purpose")
+			delete(item, "code_evidence")
 			sources, e := bindSources(item["evidence"], chunks)
 			if e != nil {
 				return nil, e
@@ -469,8 +492,26 @@ func generateReport(ctx context.Context, s *Store, job Row, owner string, payloa
 			item["evidence"] = sources
 		}
 	}
+	normalizeReadingText(result, "title", "executive_summary")
+	result["limitations"] = stringList(result["limitations"])
+	result["suggested_questions"] = stringList(result["suggested_questions"])
+	terms := snapshotRows(result["terms"])
+	for _, term := range terms {
+		normalizeReadingText(term, "term", "explanation")
+	}
+	result["terms"] = terms
+	bindReadingInteractions(result, chunks)
+	result["implementation_raw"] = result["implementation"]
+	bindRepositoryImplementation(result, repository, chunks)
+	if repositoryWarning != "" {
+		result["interaction_warnings"] = append(result["interaction_warnings"].([]string), repositoryWarning)
+	}
+	if mode == "repository" {
+		result["repository_request"] = payload["repository"]
+	}
+	result["reading_mode"] = mode
 	result["document_version_id"] = job["version_id"]
-	result["version"] = 1
+	result["version"] = 2
 	result["generated_at"] = time.Now().UTC().Format(time.RFC3339)
 	result["model"] = Row{"provider_id": payload["provider_id"], "model_name": payload["model"]}
 	result["context_policy"] = contextMetadata

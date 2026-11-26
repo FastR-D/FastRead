@@ -1,4 +1,5 @@
 import {
+  ActivityRail,
   Alert,
   Badge,
   Button,
@@ -16,6 +17,7 @@ import {
   ChevronLeft,
   ChevronRight,
   KeyRound,
+  LayoutDashboard,
   Pencil,
   Plus,
   Power,
@@ -476,12 +478,145 @@ function UserDialog({
   )
 }
 
-export function Administration({ api }: { api: Api }) {
+const adminTabs = [
+  { id: 'overview', label: '运行概览', icon: LayoutDashboard },
+  { id: 'users', label: '用户管理', icon: Users },
+  { id: 'models', label: '共享模型', icon: KeyRound },
+] as const
+
+export function Administration({ api, currentUser }: { api: Api; currentUser: Row }) {
+  const [tab, setTab] = useState<(typeof adminTabs)[number]['id']>('overview')
+  const [compact, setCompact] = useState(() => matchMedia('(max-width: 760px)').matches)
+  useEffect(() => {
+    const media = matchMedia('(max-width: 760px)')
+    const update = () => setCompact(media.matches)
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  return (
+    <Section className="admin-workbench app-flat-section">
+      <Section
+        role="complementary"
+        aria-label="管理导航"
+        className="admin-sidebar app-flat-section"
+      >
+        <ActivityRail
+          label="管理分类"
+          role="tablist"
+          aria-orientation={compact ? 'horizontal' : 'vertical'}
+          className="admin-navigation"
+        >
+          {adminTabs.map((item, index) => (
+            <Button
+              key={item.id}
+              id={`admin-tab-${item.id}`}
+              role="tab"
+              variant="navigation"
+              aria-selected={tab === item.id}
+              aria-controls={`admin-panel-${item.id}`}
+              tabIndex={tab === item.id ? 0 : -1}
+              onClick={() => setTab(item.id)}
+              onKeyDown={event => {
+                if (event.nativeEvent.isComposing) return
+                const previous = compact ? 'ArrowLeft' : 'ArrowUp'
+                const next = compact ? 'ArrowRight' : 'ArrowDown'
+                const target =
+                  event.key === 'Home'
+                    ? 0
+                    : event.key === 'End'
+                      ? adminTabs.length - 1
+                      : event.key === previous
+                        ? (index + adminTabs.length - 1) % adminTabs.length
+                        : event.key === next
+                          ? (index + 1) % adminTabs.length
+                          : -1
+                if (target < 0) return
+                event.preventDefault()
+                setTab(adminTabs[target].id)
+                document.getElementById(`admin-tab-${adminTabs[target].id}`)?.focus()
+              }}
+            >
+              <item.icon size={18} />
+              {item.label}
+            </Button>
+          ))}
+        </ActivityRail>
+      </Section>
+      <Section
+        className="admin-content app-flat-section"
+        role="tabpanel"
+        id={`admin-panel-${tab}`}
+        aria-labelledby={`admin-tab-${tab}`}
+      >
+        {tab === 'overview' ? (
+          <AdminOverview api={api} />
+        ) : tab === 'users' ? (
+          <UserManagement api={api} currentUser={currentUser} />
+        ) : (
+          <ModelManagement api={api} />
+        )}
+      </Section>
+    </Section>
+  )
+}
+
+function AdminOverview({ api }: { api: Api }) {
+  const [status, setStatus] = useState<Row | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      setStatus(await api('/admin/status'))
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [api])
+  useEffect(() => {
+    void load()
+  }, [load])
+  return (
+    <Section className="admin-page app-flat-section grid content-start gap-6 p-5 sm:p-8">
+      <PageHeading title="运行概览">
+        <Button variant="quiet" loading={loading} onClick={() => void load()}>
+          <RefreshCw size={15} />
+          刷新状态
+        </Button>
+      </PageHeading>
+      {error && <Alert tone="danger">{error}</Alert>}
+      {loading && !status && <Loading label="正在加载运行状态…" />}
+      {status && (
+        <>
+          <Section className="grid grid-cols-2 xl:grid-cols-4" aria-label="运行统计">
+            {[
+              ['用户', status.users],
+              ['论文', status.papers],
+              ['排队中', status.queued],
+              ['运行中', status.running],
+            ].map(([name, value]) => (
+              <div key={name} className="grid gap-2 p-5">
+                <span className={secondary}>{name}</span>
+                <strong className="text-2xl">{value ?? '—'}</strong>
+              </div>
+            ))}
+          </Section>
+          {status.version && (
+            <span className={`text-xs ${secondary}`}>FastRead {status.version}</span>
+          )}
+        </>
+      )}
+    </Section>
+  )
+}
+
+function ModelManagement({ api }: { api: Api }) {
   const [providers, setProviders] = useState<Provider[]>([]),
     [workspaces, setWorkspaces] = useState<Workspace[]>([]),
     [users, setUsers] = useState<User[]>([])
-  const [status, setStatus] = useState<Row | null>(null),
-    [loading, setLoading] = useState(true),
+  const [loading, setLoading] = useState(true),
     [busy, setBusy] = useState('')
   const [query, setQuery] = useState(''),
     [filter, setFilter] = useState(''),
@@ -493,11 +628,10 @@ export function Administration({ api }: { api: Api }) {
     setLoading(true)
     setError('')
     try {
-      const [models, spaces, accounts, health] = await Promise.all([
+      const [models, spaces, accounts] = await Promise.all([
         api('/admin/providers'),
         api('/admin/workspaces'),
         api('/admin/users'),
-        api('/admin/status'),
       ])
       setProviders(
         models.items.map((p: Provider) => ({
@@ -508,7 +642,6 @@ export function Administration({ api }: { api: Api }) {
       )
       setWorkspaces(spaces.items)
       setUsers(uniqueUsers(accounts.items))
-      setStatus(health)
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -543,31 +676,15 @@ export function Administration({ api }: { api: Api }) {
   return (
     <section
       className="admin-page mx-auto box-border grid w-full max-w-7xl content-start gap-6 p-5 sm:p-8"
-      aria-label="管理后台"
+      aria-label="共享模型"
     >
-      <PageHeading title="管理后台">
+      <PageHeading title="共享模型">
         <Button variant="primary" onClick={() => setDialog({})}>
           <Plus size={15} />
           添加公用模型
         </Button>
       </PageHeading>
-      {status && (
-        <Section className="grid grid-cols-2 sm:grid-cols-4">
-          {[
-            ['用户', status.users],
-            ['论文', status.papers],
-            ['排队中', status.queued],
-            ['运行中', status.running],
-          ].map(([name, value]) => (
-            <div key={name} className="grid gap-2 p-5">
-              <span className={secondary}>{name}</span>
-              <strong className="text-xl">{value ?? '—'}</strong>
-            </div>
-          ))}
-        </Section>
-      )}
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="fastui-heading m-0 mr-2 text-base">共享模型</h2>
         <TextField
           type="search"
           className="w-full sm:max-w-sm"
@@ -603,7 +720,7 @@ export function Administration({ api }: { api: Api }) {
       </div>
       {error && <Alert tone="danger">{error}</Alert>}
       {notice && <Alert tone="success">{notice}</Alert>}
-      {loading && !status ? (
+      {loading && !providers.length ? (
         <Loading label="正在加载模型…" />
       ) : (
         <>
@@ -682,7 +799,6 @@ export function Administration({ api }: { api: Api }) {
           <ListFooter count={visible.length} page={currentPage} onPage={setPage} unit="个供应商" />
         </>
       )}
-      {status?.version && <span className={`text-xs ${secondary}`}>FastRead {status.version}</span>}
       {dialog && (
         <ProviderDialog
           key={dialog.provider?.id || 'new'}

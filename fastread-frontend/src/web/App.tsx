@@ -1,9 +1,10 @@
+import { arrivalParameters, clearCASDestination } from './authReturn'
 import { APP_BASE, API_BASE } from './urls'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
+  ActivityRail,
   Alert,
   Button,
-  InspectorSection,
   Loading,
   PanelHeader,
   Section,
@@ -18,11 +19,21 @@ import Knowledge from './Knowledge'
 import { OrganizeProvider, type Job } from './Organize'
 import NotebookDesk from './NotebookDesk'
 import { AppDialog, AppHeader, WorkbenchSidebar, type MainSection } from './Chrome'
-import { Archive, Files, Search, Upload, ListTodo, FileText } from 'lucide-react'
-import { Administration, UserManagement } from './Admin'
+import {
+  Archive,
+  Files,
+  Search,
+  Upload,
+  ListTodo,
+  FileText,
+  FolderOpen,
+  ChevronRight,
+} from 'lucide-react'
+import { Administration } from './Admin'
 import { IntegrationStatus } from './Integrations'
 import { submitFastNews, type FastNewsHandoff } from './sso-bootstrap'
 import { colorMode } from './theme'
+import './workbench.css'
 
 type Row = Record<string, any>
 let csrf = ''
@@ -107,7 +118,7 @@ export default function WebApp({
 }) {
   const [handoff, setHandoff] = useState(initialHandoff)
   const handoffBody = handoff && 'body' in handoff ? handoff.body : null
-  const [arrival] = useState(() => new URLSearchParams(window.location.search))
+  const [arrival] = useState(arrivalParameters)
   const [deskTarget, setDeskTarget] = useState<Row | null>(
     arrival.get('book') ? { book_id: arrival.get('book') } : null
   )
@@ -135,16 +146,25 @@ export default function WebApp({
   const [metadataModel, setMetadataModel] = useState('')
   const [searchResults, setSearchResults] = useState<Row | null>(null)
   const [searching, setSearching] = useState(false)
-  const [settings, setSettings] = useState(false)
-  const [section, setSection] = useState<MainSection>('library')
+  const [section, setSection] = useState<MainSection>(
+    arrival.get('section') === 'settings' ? 'settings' : 'library'
+  )
+  const settings = section === 'settings'
+  const [libraryEpoch, setLibraryEpoch] = useState(0)
   const [themeMode, setThemeMode] = useState(colorMode.mode)
   const [accountSettings, setAccountSettings] = useState(false)
   const [books, setBooks] = useState<Row[]>([])
-  const importSection = useRef<HTMLDetailsElement>(null)
-  const jobSection = useRef<HTMLDetailsElement>(null)
+  const [libraryDialog, setLibraryDialog] = useState<'import' | 'search' | 'jobs' | null>(null)
   const [importBook, setImportBook] = useState('')
   const [importUrl, setImportUrl] = useState(handoffBody?.url || arrival.get('url') || '')
   useEffect(() => colorMode.subscribe(() => setThemeMode(colorMode.mode)), [])
+  useEffect(() => {
+    if (libraryDialog === 'search')
+      document.querySelector<HTMLInputElement>('#library-search input')?.focus()
+  }, [libraryDialog])
+  useEffect(() => {
+    if (handoff || arrival.has('url') || arrival.has('pending')) setLibraryDialog('import')
+  }, [arrival, handoff])
 
   const action = useCallback(async (fn: () => Promise<unknown>) => {
     setError('')
@@ -198,6 +218,9 @@ export default function WebApp({
     window.history.replaceState(null, '', APP_BASE + '?paper=' + encodeURIComponent(id))
   }, [])
   function home() {
+    setArchived(false)
+    setOffset(0)
+    setLibraryEpoch(n => n + 1)
     setDeskTarget(null)
     setSearchResults(null)
     window.history.replaceState(null, '', APP_BASE)
@@ -214,7 +237,10 @@ export default function WebApp({
         .finally(() => setLoading(false))
   }, [initialUser])
   useEffect(() => {
-    if (user) void action(loadLibrary)
+    if (user) {
+      clearCASDestination()
+      void action(loadLibrary)
+    }
   }, [user, action, loadLibrary])
   useEffect(() => {
     if (user) void action(loadProviders)
@@ -302,10 +328,7 @@ export default function WebApp({
           onSection={value => {
             setSection(value)
             if (value === 'library') home()
-          }}
-          onSettings={() => {
-            setSettings(true)
-            void action(() => loadProviders({ providerId, model }))
+            if (value === 'settings') void action(() => loadProviders({ providerId, model }))
           }}
           onAccount={() => setAccountSettings(true)}
           onLogout={() =>
@@ -342,99 +365,236 @@ export default function WebApp({
         >
           {accountSettings && <FastCASAccount api={api} />}
         </AppDialog>
-        <AppDialog open={settings} onClose={() => setSettings(false)} title="设置">
-          <section className="grid gap-4" aria-label="模型设置">
-            <h2 className="fastui-heading m-0 text-base">工作区模型</h2>
+
+        <AppDialog
+          open={libraryDialog === 'search'}
+          onClose={() => setLibraryDialog(null)}
+          title="搜索论文"
+        >
+          <form
+            id="library-search"
+            className="grid gap-4"
+            onSubmit={e => {
+              e.preventDefault()
+              const query = String(new FormData(e.currentTarget).get('query'))
+              setSearching(true)
+              void action(async () => {
+                setSearchResults(await api('/search', 'POST', { query }))
+                setLibraryDialog(null)
+              }).finally(() => setSearching(false))
+            }}
+          >
             <label className="fastui-field">
-              颜色模式
-              <Select
-                value={themeMode}
-                onChange={e => colorMode.setMode(e.target.value as 'light' | 'dark' | 'system')}
-              >
-                <option value="system">跟随系统</option>
-                <option value="light">浅色</option>
-                <option value="dark">深色</option>
-              </Select>
+              搜索公开论文
+              <TextField name="query" placeholder="论文标题、DOI 或关键词" required autoFocus />
             </label>
+            <Button type="submit" loading={searching}>
+              搜索
+            </Button>
+          </form>
+        </AppDialog>
+        <AppDialog
+          open={libraryDialog === 'import'}
+          onClose={() => setLibraryDialog(null)}
+          title="导入论文"
+        >
+          <div className="import-fields">
+            {' '}
             <label className="fastui-field">
-              当前使用的模型
+              标题与作者识别
               <Select
-                aria-label="当前使用的模型"
-                value={`${providerId}|${model}`}
-                onChange={e => {
-                  const [p, m] = e.target.value.split('|')
-                  setProviderId(p)
-                  setModel(m)
-                }}
+                aria-label="元数据模型"
+                value={metadataModel}
+                onChange={e => setMetadataModel(e.target.value)}
               >
-                <option value="|">请选择模型</option>
+                <option value="">版面识别与公开索引核验</option>
                 {modelOptions}
               </Select>
             </label>
-            <p className="m-0">密钥仅存服务器 · 每日上限 {user.workspace?.daily_limit}</p>
-            {error && <Alert tone="danger">{error}</Alert>}
-            {notice && <Alert tone="success">{notice}</Alert>}
-            {user.role === 'owner' && (
-              <form
-                className="grid gap-3"
-                onSubmit={e => {
-                  e.preventDefault()
-                  const f = e.currentTarget
-                  const data = Object.fromEntries(new FormData(f))
-                  void action(async () => {
-                    await api('/providers', 'POST', {
-                      ...data,
-                      models: String(data.models)
-                        .split(/[,，]/)
-                        .map(v => v.trim())
-                        .filter(Boolean),
-                    })
-                    f.reset()
-                    await loadProviders({ providerId, model })
-                    setNotice('供应商已保存')
-                  })
-                }}
+            {metadataModel && <small>发送首页文本，计入模型任务额度。</small>}
+            <label className="fastui-field">
+              目标知识库
+              <Select
+                aria-label="导入知识库"
+                value={importBook}
+                onChange={e => setImportBook(e.target.value)}
               >
-                <label className="fastui-field">
-                  名称
-                  <TextField name="name" required />
-                </label>
-                <label className="fastui-field">
-                  API 地址
-                  <TextField
-                    name="base_url"
-                    type="url"
-                    placeholder="https://api.example.com/v1"
-                    required
-                  />
-                </label>
-                <label className="fastui-field">
-                  API 密钥
-                  <TextField name="api_key" type="password" autoComplete="off" required />
-                </label>
-                <label className="fastui-field">
-                  模型 ID（逗号分隔）
-                  <TextField name="models" defaultValue="qwen3.8-27b,glm-5.2" required />
-                </label>
-                <Button type="submit" className="justify-self-start">
-                  保存供应商
-                </Button>
-              </form>
-            )}
-            {settings && <IntegrationStatus api={api} />}
-          </section>
+                <option value="">自动归类</option>
+                {books.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <form
+              className="grid gap-3"
+              onSubmit={e => {
+                e.preventDefault()
+                void action(() =>
+                  submitJob('/imports/url', {
+                    url: importUrl,
+                    source: handoffBody ? 'fastnews' : arrival.get('source') || '',
+                    external_id: handoffBody?.external_id || arrival.get('external_id') || '',
+                  })
+                )
+              }}
+            >
+              <label className="fastui-field">
+                论文链接
+                <TextField
+                  name="url"
+                  value={importUrl}
+                  onChange={e => setImportUrl(e.target.value)}
+                  type="url"
+                  placeholder="https://arxiv.org/pdf/…"
+                  required
+                />
+              </label>
+              <Button type="submit">导入链接</Button>
+            </form>
+            <label className="fastui-field">
+              上传 PDF
+              <TextField
+                aria-label="上传 PDF"
+                type="file"
+                accept="application/pdf"
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  const data = new FormData()
+                  data.set('file', file)
+                  const paperId =
+                    handoff?.status === 'received' ? handoff.receipt.id : arrival.get('pending')
+                  if (paperId) data.set('paper_id', paperId)
+                  void action(() => submitJob('/imports/pdf', data))
+                  e.target.value = ''
+                }}
+              />
+            </label>
+          </div>
+        </AppDialog>
+        <AppDialog
+          open={libraryDialog === 'jobs'}
+          onClose={() => setLibraryDialog(null)}
+          title="后台任务"
+        >
+          <div className="job-list">
+            {' '}
+            {!jobs.length && <span>暂无任务</span>}
+            {jobs.slice(0, 10).map(job => (
+              <StatusBar key={job.id}>
+                {job.kind} ·{' '}
+                {(
+                  {
+                    queued: '排队中',
+                    running: '处理中',
+                    succeeded: '已完成',
+                    failed: '失败',
+                    needs_attention: '需要处理',
+                    cancelled: '已取消',
+                  } as Record<string, string>
+                )[job.state] || job.state}
+              </StatusBar>
+            ))}
+          </div>
         </AppDialog>
         {section !== 'library' ? (
           <main
             className="min-h-0 flex-1 overflow-auto"
+            role="tabpanel"
             id={`main-${section}`}
             aria-labelledby={section}
           >
-            {section === 'users' ? (
-              <UserManagement api={api} currentUser={user} />
-            ) : (
-              <Administration api={api} />
-            )}
+            {section === 'settings' ? (
+              <Section className="settings-page app-flat-section">
+                <h1>设置</h1>
+                <Section className="app-flat-section grid gap-4" aria-label="模型设置">
+                  <h2 className="fastui-heading m-0 text-base">工作区模型</h2>
+                  <label className="fastui-field">
+                    颜色模式
+                    <Select
+                      value={themeMode}
+                      onChange={e =>
+                        colorMode.setMode(e.target.value as 'light' | 'dark' | 'system')
+                      }
+                    >
+                      <option value="system">跟随系统</option>
+                      <option value="light">浅色</option>
+                      <option value="dark">深色</option>
+                    </Select>
+                  </label>
+                  <label className="fastui-field">
+                    当前使用的模型
+                    <Select
+                      aria-label="当前使用的模型"
+                      value={`${providerId}|${model}`}
+                      onChange={e => {
+                        const [p, m] = e.target.value.split('|')
+                        setProviderId(p)
+                        setModel(m)
+                      }}
+                    >
+                      <option value="|">请选择模型</option>
+                      {modelOptions}
+                    </Select>
+                  </label>
+                  <p className="m-0">密钥仅存服务器 · 每日上限 {user.workspace?.daily_limit}</p>
+                  {error && <Alert tone="danger">{error}</Alert>}
+                  {notice && <Alert tone="success">{notice}</Alert>}
+                  {user.role === 'owner' && (
+                    <form
+                      className="grid gap-3"
+                      onSubmit={e => {
+                        e.preventDefault()
+                        const f = e.currentTarget
+                        const data = Object.fromEntries(new FormData(f))
+                        void action(async () => {
+                          await api('/providers', 'POST', {
+                            ...data,
+                            models: String(data.models)
+                              .split(/[,，]/)
+                              .map(v => v.trim())
+                              .filter(Boolean),
+                          })
+                          f.reset()
+                          await loadProviders({ providerId, model })
+                          setNotice('供应商已保存')
+                        })
+                      }}
+                    >
+                      <label className="fastui-field">
+                        名称
+                        <TextField name="name" required />
+                      </label>
+                      <label className="fastui-field">
+                        API 地址
+                        <TextField
+                          name="base_url"
+                          type="url"
+                          placeholder="https://api.example.com/v1"
+                          required
+                        />
+                      </label>
+                      <label className="fastui-field">
+                        API 密钥
+                        <TextField name="api_key" type="password" autoComplete="off" required />
+                      </label>
+                      <label className="fastui-field">
+                        模型 ID（逗号分隔）
+                        <TextField name="models" defaultValue="qwen3.8-27b,glm-5.2" required />
+                      </label>
+                      <Button type="submit" className="justify-self-start">
+                        保存供应商
+                      </Button>
+                    </form>
+                  )}
+                  {settings && <IntegrationStatus api={api} />}
+                </Section>
+              </Section>
+            ) : user.is_admin || user.role === 'admin' ? (
+              <Administration api={api} currentUser={user} />
+            ) : null}
           </main>
         ) : (
           <main
@@ -443,6 +603,7 @@ export default function WebApp({
                 ? 'min-h-0 flex-1 overflow-auto xl:overflow-hidden'
                 : 'min-h-0 flex-1 overflow-auto lg:overflow-hidden'
             }
+            role="tabpanel"
             id="main-library"
             aria-labelledby="library"
           >
@@ -459,37 +620,36 @@ export default function WebApp({
                 onExternal={(id: string) => void openPaper(id)}
               />
             ) : (
-              <div className="grid min-h-full grid-cols-1 lg:h-full lg:grid-cols-[21rem_minmax(0,1fr)]">
+              <div className="library-workbench grid min-h-full grid-cols-1 lg:h-full lg:grid-cols-[17rem_minmax(0,1fr)]">
                 <WorkbenchSidebar
                   id="library-sidebar"
                   label="资料库工具"
                   tools={[
                     {
                       label: '资料库概览',
-                      icon: <Files size={20} />,
-                      onClick: home,
+                      icon: <Files size={18} />,
+                      onClick: () => {
+                        setArchived(false)
+                        setOffset(0)
+                        home()
+                      },
                       active: !archived,
                     },
                     {
                       label: '搜索论文',
-                      icon: <Search size={20} />,
-                      onClick: () =>
-                        document.querySelector<HTMLInputElement>('#library-search input')?.focus(),
+                      icon: <Search size={18} />,
+                      onClick: () => setLibraryDialog('search'),
                     },
                     {
                       label: '导入论文',
-                      icon: <Upload size={20} />,
-                      onClick: () => {
-                        if (importSection.current) {
-                          importSection.current.open = true
-                          importSection.current.scrollIntoView({ block: 'nearest' })
-                        }
-                      },
+                      icon: <Upload size={18} />,
+                      onClick: () => setLibraryDialog('import'),
                     },
                     {
                       label: '归档论文',
-                      icon: <Archive size={20} />,
+                      icon: <Archive size={18} />,
                       onClick: () => {
+                        setSearchResults(null)
                         setArchived(!archived)
                         setOffset(0)
                       },
@@ -497,169 +657,65 @@ export default function WebApp({
                     },
                     {
                       label: '后台任务',
-                      icon: <ListTodo size={20} />,
-                      onClick: () => {
-                        if (jobSection.current) {
-                          jobSection.current.open = true
-                          jobSection.current.scrollIntoView({ block: 'nearest' })
-                        }
-                      },
+                      icon: <ListTodo size={18} />,
+                      onClick: () => setLibraryDialog('jobs'),
                     },
                   ]}
                 >
-                  <div className="grid content-start gap-5 p-4">
-                    <PanelHeader>
-                      <h2>{archived ? '已归档' : '资料库'}</h2>
-                      <span>{total} 篇</span>
-                      <Button
-                        variant="quiet"
-                        onClick={() => {
-                          setArchived(!archived)
-                          setOffset(0)
-                        }}
-                      >
-                        {archived ? '返回资料库' : '查看归档'}
-                      </Button>
-                    </PanelHeader>
-                    <form
-                      id="library-search"
-                      className="grid gap-4"
-                      onSubmit={e => {
-                        e.preventDefault()
-                        const query = String(new FormData(e.currentTarget).get('query'))
-                        setSearching(true)
-                        void action(async () =>
-                          setSearchResults(await api('/search', 'POST', { query }))
-                        ).finally(() => setSearching(false))
-                      }}
-                    >
-                      <label className="fastui-field">
-                        搜索公开论文
-                        <TextField name="query" placeholder="论文标题、DOI 或关键词" required />
-                      </label>
-                      <Button type="submit" loading={searching}>
-                        搜索
-                      </Button>
-                    </form>
-                    <Button variant="navigation" onClick={home}>
-                      知识库与关系矩阵
-                    </Button>
-                    <InspectorSection
-                      ref={importSection}
-                      label="导入论文"
-                      open={
-                        !!handoff ||
-                        arrival.has('url') ||
-                        arrival.get('source') === 'fastnews' ||
-                        arrival.has('pending') ||
-                        undefined
-                      }
-                    >
-                      <label className="fastui-field">
-                        标题与作者识别
-                        <Select
-                          aria-label="元数据模型"
-                          value={metadataModel}
-                          onChange={e => setMetadataModel(e.target.value)}
-                        >
-                          <option value="">版面识别与公开索引核验</option>
-                          {modelOptions}
-                        </Select>
-                      </label>
-                      {metadataModel && <small>发送首页文本，计入模型任务额度。</small>}
-                      <label className="fastui-field">
-                        目标知识库
-                        <Select
-                          aria-label="导入知识库"
-                          value={importBook}
-                          onChange={e => setImportBook(e.target.value)}
-                        >
-                          <option value="">自动归类</option>
-                          {books.map(b => (
-                            <option key={b.id} value={b.id}>
-                              {b.name}
-                            </option>
-                          ))}
-                        </Select>
-                      </label>
-                      <form
-                        className="grid gap-3"
-                        onSubmit={e => {
-                          e.preventDefault()
-                          void action(() =>
-                            submitJob('/imports/url', {
-                              url: importUrl,
-                              source: handoffBody ? 'fastnews' : arrival.get('source') || '',
-                              external_id:
-                                handoffBody?.external_id || arrival.get('external_id') || '',
-                            })
-                          )
-                        }}
-                      >
-                        <label className="fastui-field">
-                          论文链接
-                          <TextField
-                            name="url"
-                            value={importUrl}
-                            onChange={e => setImportUrl(e.target.value)}
-                            type="url"
-                            placeholder="https://arxiv.org/pdf/…"
-                            required
-                          />
-                        </label>
-                        <Button type="submit">导入链接</Button>
-                      </form>
-                      <label className="fastui-field">
-                        上传 PDF
-                        <TextField
-                          aria-label="上传 PDF"
-                          type="file"
-                          accept="application/pdf"
-                          onChange={e => {
-                            const file = e.target.files?.[0]
-                            if (!file) return
-                            const data = new FormData()
-                            data.set('file', file)
-                            const paperId =
-                              handoff?.status === 'received'
-                                ? handoff.receipt.id
-                                : arrival.get('pending')
-                            if (paperId) data.set('paper_id', paperId)
-                            void action(() => submitJob('/imports/pdf', data))
-                            e.target.value = ''
+                  <div className="library-tree">
+                    <div className="sidebar-group-heading">
+                      <span>知识库</span>
+                      <span>{books.length}</span>
+                    </div>
+                    <ActivityRail label="侧栏知识库" className="sidebar-directory">
+                      {books.map(b => (
+                        <Button
+                          key={b.id}
+                          variant="navigation"
+                          className="sidebar-book"
+                          onClick={() => {
+                            setDeskTarget({ book_id: b.id })
+                            window.history.replaceState(
+                              null,
+                              '',
+                              APP_BASE + '?book=' + encodeURIComponent(b.id)
+                            )
                           }}
-                        />
-                      </label>
-                    </InspectorSection>
-                    <InspectorSection label={archived ? '归档论文' : '最近论文'} open>
-                      <nav className="grid gap-2" aria-label="论文列表">
-                        {papers.map(p => (
-                          <Button
-                            variant="navigation"
-                            key={p.id}
-                            className="paper h-auto w-full !justify-start gap-3 text-left whitespace-normal"
-                            onClick={() =>
-                              void action(async () => {
-                                if (archived) {
-                                  await api(`/papers/${p.id}/restore`, 'POST')
-                                  await loadLibrary()
-                                  setNotice('论文已恢复到资料库')
-                                } else await openPaper(p.id)
-                              })
-                            }
-                          >
-                            <FileText size={16} className="shrink-0" />
-                            <span className="grid min-w-0 flex-1 gap-1">
-                              <strong>{p.title}</strong>
-                              <small>
-                                {archived
-                                  ? '点击恢复到资料库'
-                                  : `${p.year || '年份待核实'} · ${p.page_count || '?'} 页`}
-                              </small>
-                            </span>
-                          </Button>
-                        ))}
-                      </nav>
+                        >
+                          <FolderOpen size={17} />
+                          <span>{b.name}</span>
+                          <ChevronRight size={13} />
+                        </Button>
+                      ))}
+                    </ActivityRail>
+                    {!books.length && <p className="sidebar-empty">将相关论文放进同一个知识库</p>}
+                    <div className="sidebar-group-heading">
+                      <span>{archived ? '归档论文' : '最近收入'}</span>
+                      <span>{total}</span>
+                    </div>
+                    <ActivityRail label="论文列表" className="sidebar-directory">
+                      {papers.slice(0, archived ? 20 : 6).map(p => (
+                        <Button
+                          variant="navigation"
+                          key={p.id}
+                          className="sidebar-paper"
+                          title={p.title}
+                          onClick={() =>
+                            void action(async () => {
+                              if (archived) {
+                                await api(`/papers/${p.id}/restore`, 'POST')
+                                await loadLibrary()
+                                setNotice('论文已恢复到资料库')
+                              } else await openPaper(p.id)
+                            })
+                          }
+                        >
+                          <FileText size={16} />
+                          <span>{p.title}</span>
+                        </Button>
+                      ))}
+                    </ActivityRail>
+                    {archived && (
                       <Toolbar label="论文分页">
                         <Button
                           variant="quiet"
@@ -679,30 +735,12 @@ export default function WebApp({
                           下一页
                         </Button>
                       </Toolbar>
-                    </InspectorSection>
-                    <InspectorSection ref={jobSection} label="后台任务">
-                      {!jobs.length && <span>暂无任务</span>}
-                      {jobs.slice(0, 10).map(job => (
-                        <StatusBar key={job.id}>
-                          {job.kind} ·{' '}
-                          {(
-                            {
-                              queued: '排队中',
-                              running: '处理中',
-                              succeeded: '已完成',
-                              failed: '失败',
-                              needs_attention: '需要处理',
-                              cancelled: '已取消',
-                            } as Record<string, string>
-                          )[job.state] || job.state}
-                        </StatusBar>
-                      ))}
-                    </InspectorSection>
+                    )}
                   </div>
                 </WorkbenchSidebar>
-                <div className="min-w-0 p-5 sm:p-8 lg:overflow-auto">
+                <div className="library-content min-w-0 p-5 sm:p-8 lg:overflow-auto">
                   {searchResults ? (
-                    <section className="grid gap-4">
+                    <Section className="app-flat-section grid gap-4">
                       <PanelHeader>
                         <h1 className="fastui-heading m-0 text-xl">搜索结果</h1>
                         <Button variant="quiet" onClick={() => setSearchResults(null)}>
@@ -759,9 +797,63 @@ export default function WebApp({
                           </Toolbar>
                         </Section>
                       ))}
-                    </section>
+                    </Section>
+                  ) : archived ? (
+                    <Section className="knowledge-home archive-view">
+                      <div className="knowledge-hero">
+                        <div>
+                          <span className="library-breadcrumb">我的空间 / 归档</span>
+                          <h1>归档论文</h1>
+                          <p>暂时收起的论文，随时可以恢复到资料库。</p>
+                        </div>
+                      </div>
+                      {!papers.length && <p className="reading-muted">暂无归档论文。</p>}
+                      {papers.map(p => (
+                        <div className="archive-row" key={p.id}>
+                          <FileText size={20} />
+                          <div>
+                            <strong>{p.title}</strong>
+                            <small>
+                              {p.year || '年份待核实'} · {p.page_count || '—'} 页
+                            </small>
+                          </div>
+                          <Button
+                            onClick={() =>
+                              void action(async () => {
+                                await api(`/papers/${p.id}/restore`, 'POST')
+                                await loadLibrary()
+                                setNotice('论文已恢复到资料库')
+                              })
+                            }
+                          >
+                            恢复到资料库
+                          </Button>
+                        </div>
+                      ))}
+                      <Toolbar label="归档分页">
+                        <Button
+                          variant="quiet"
+                          disabled={!offset}
+                          onClick={() => setOffset(Math.max(0, offset - 20))}
+                        >
+                          上一页
+                        </Button>
+                        <span>
+                          {total ? offset + 1 : 0}–{Math.min(offset + 20, total)} / {total}
+                        </span>
+                        <Button
+                          variant="quiet"
+                          disabled={offset + 20 >= total}
+                          onClick={() => setOffset(offset + 20)}
+                        >
+                          下一页
+                        </Button>
+                      </Toolbar>
+                    </Section>
                   ) : (
                     <Knowledge
+                      key={libraryEpoch}
+                      onImport={() => setLibraryDialog('import')}
                       onOpenBook={(id: string) => {
                         setDeskTarget({ book_id: id })
                         window.history.replaceState(
@@ -783,6 +875,11 @@ export default function WebApp({
               </div>
             )}
           </main>
+        )}
+        {jobs.some(j => ['queued', 'running'].includes(j.state)) && (
+          <StatusBar className="app-statusbar">
+            {jobs.filter(j => ['queued', 'running'].includes(j.state)).length} 个进行中的任务
+          </StatusBar>
         )}
       </div>
     </OrganizeProvider>

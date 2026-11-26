@@ -1,4 +1,6 @@
 import {
+  ActivityRail,
+  Card,
   Button,
   Checkbox,
   InspectorSection,
@@ -10,6 +12,7 @@ import {
   Toolbar,
   ListRow,
   StatusBar,
+  SegmentedControl,
 } from '@fastrd/ui-react'
 import { API_BASE } from './urls'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -24,8 +27,12 @@ import {
   Network,
   BookOpen,
   Files,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react'
 import PdfReader from './PdfReader'
+import ReadingStudio from './ReadingStudio'
+import type { Evidence, ReadingMode, RepositoryRequest } from './readingModel'
 import Neighbors from './Neighbors'
 import { PaperTools } from './Knowledge'
 import { AppDialog, WorkbenchSidebar, WorkspaceTabs } from './Chrome'
@@ -43,6 +50,14 @@ export default function NotebookDesk({
   const scope = target.book_id ? 'book' : 'paper',
     scopeId = target.book_id || target.paper_id
   const { paper_id: targetPaperId, page: targetPage, version: targetVersion } = target
+  const [sourcesOpen, setSourcesOpen] = useState(true)
+  const [readingView, setReadingView] = useState('source')
+  const [reportHistory, setReportHistory] = useState<Row[]>([])
+  const [selectedReportId, setSelectedReportId] = useState('')
+  const [reportJob, setReportJob] = useState<Row | null>(null)
+  const [excerpt, setExcerpt] = useState<string | null>(null)
+  const [savingExcerpt, setSavingExcerpt] = useState(false)
+  const mainNoteSaving = useRef(false)
   const [book, setBook] = useState<Row | null>(null),
     [sources, setSources] = useState<Row[]>([])
   const [checked, setChecked] = useState<string[]>([]),
@@ -103,7 +118,11 @@ export default function NotebookDesk({
       const request = ++generation.current
       const p = await api(`/papers/${id}`)
       if (request !== generation.current) return
-      if (activePaper.current !== id) setReport(null)
+      if (activePaper.current !== id) {
+        setReport(null)
+        setReportJob(null)
+        setSelectedReportId('')
+      }
       activePaper.current = id
       setPaper(p)
       setSummary(localStorage.getItem(`notes:${id}`) ?? p.summary)
@@ -184,20 +203,24 @@ export default function NotebookDesk({
     }
   }, [action, api, messagePath, revision])
   const paperId = paper?.id
-  const activeVersion = paper?.active_version
+  const activeVersion = version || paper?.active_version
   useEffect(() => {
     if (!paperId) return
     let dead = false
     void action(async () => {
       const list = await api(`/papers/${paperId}/reports`)
-      const r = list.items.find((r: Row) => r.version_id === activeVersion)
+      const history = list.items.filter((r: Row) => r.version_id === activeVersion)
+      const r = history.find((r: Row) => r.id === selectedReportId) || history[0]
       const value = r ? await api(`/papers/${paperId}/reports/${r.id}`) : null
-      if (!dead) setReport(value)
+      if (!dead) {
+        setReport(value)
+        setReportHistory(history)
+      }
     })
     return () => {
       dead = true
     }
-  }, [action, api, revision, paperId, activeVersion])
+  }, [action, api, revision, paperId, activeVersion, selectedReportId])
   useEffect(() => {
     localStorage.setItem(draftKey, question)
   }, [question, draftKey])
@@ -214,6 +237,7 @@ export default function NotebookDesk({
     return job
   }
   async function locate(ev: Row) {
+    setReadingView('source')
     await open(ev.paper_id || paper?.id, ev)
   }
   function references(evidence: Row = {}) {
@@ -279,6 +303,7 @@ export default function NotebookDesk({
     setNotice('已保存笔记')
   }
   function capture(value: Row) {
+    setReadingView('source')
     setQuote({ ...value, title: paper?.title })
     setPane('chat')
     setChecked(ids => (ids.includes(value.paper_id) ? ids : [...ids, value.paper_id]))
@@ -289,6 +314,10 @@ export default function NotebookDesk({
   }
   async function send() {
     if (!messagePath || busy || pending || !checked.length) return
+    if (version !== paper?.active_version) {
+      setNotice('历史版本可阅读与摘录；请切换到当前文档版本后继续模型对话。')
+      return
+    }
     setBusy(true)
     const content = quote
       ? `${question || '请解释这段内容。'}\n\n选中的原文（${String(quote.title || paper?.title).slice(0, 160)}，第 ${quote.page} 页）：\n${String(quote.quote).slice(0, 1500)}`
@@ -306,6 +335,56 @@ export default function NotebookDesk({
     } finally {
       setBusy(false)
     }
+  }
+  const latestReportJob = jobs.find((j: Row) => j.kind === 'report' && j.resource_id === paperId)
+  const currentReportJob =
+    (reportJob && jobs.find((j: Row) => j.id === reportJob.id)) || reportJob || latestReportJob
+  const reportPending = currentReportJob && ['queued', 'running'].includes(currentReportJob.state)
+  async function generateReading(readingMode: ReadingMode, repository?: RepositoryRequest) {
+    await action(async () => {
+      const job = await submit(`/papers/${paperId}/reports`, {
+        provider_id: providerId,
+        model,
+        reading_mode: readingMode,
+        ...(repository ? { repository } : {}),
+      })
+      setReportJob(job)
+      setSelectedReportId('')
+    })
+  }
+  async function appendMainNote(content: string) {
+    if (!paper) throw new Error('请先打开论文')
+    if (mainNoteSaving.current) throw new Error('上一段笔记正在保存，请稍后追加。')
+    const next = [summary.trim(), content.trim()].filter(Boolean).join('\n\n---\n\n')
+    if (Array.from(next).length > 10000) throw new Error('主笔记已超过 10000 字，请先整理后保存。')
+    mainNoteSaving.current = true
+    try {
+      await api(`/papers/${paper.id}/summary`, 'PUT', { content: next })
+      localStorage.setItem(`notes:${paper.id}`, next)
+      if (activePaper.current === paper.id) {
+        setSummary(next)
+        setPaper(p => (p?.id === paper.id ? { ...p, summary: next } : p))
+      }
+      setNotice('已追加到主笔记')
+    } finally {
+      mainNoteSaving.current = false
+    }
+  }
+  function askFromReading(content: string, ev?: Evidence) {
+    setReadingView('source')
+    setPane('chat')
+    setQuestion(content.slice(0, ev ? 3000 : 5000))
+    setQuote(
+      ev
+        ? {
+            ...ev,
+            quote: ev.exact_quote || ev.quote,
+            page: ev.page_start || ev.page,
+            title: paper?.title,
+          }
+        : null
+    )
+    if (paperId) setChecked(ids => (ids.includes(paperId) ? ids : [...ids, paperId]))
   }
   const notebookNotes = (
     <Section className="desk-saved-notes grid gap-3">
@@ -447,32 +526,53 @@ export default function NotebookDesk({
           </div>
         )}
         {messages.map(m => (
-          <article
-            className={`desk-message fastui-section grid min-w-0 gap-3 p-4 break-words ${m.role}`}
+          <Card
+            role="article"
+            className={`desk-message grid min-w-0 gap-3 p-4 break-words ${m.role}`}
             key={m.id}
           >
             <b>{m.role === 'user' ? '你' : 'FastRead'}</b>
             {markdown(m.content, m.evidence)}
             <div className="citation-list flex flex-wrap gap-2">{references(m.evidence)}</div>
             {m.role === 'assistant' && (
-              <Button
-                className="save-answer quiet"
-                onClick={() => void action(() => saveAnswer(m))}
-                type="button"
-                variant="quiet"
-              >
-                {notes.some(n => n.source_message_id === m.id) ? (
-                  <>
-                    <Check size={14} /> 已存入笔记
-                  </>
-                ) : (
-                  <>
-                    <StickyNote size={14} /> 保存为笔记
-                  </>
-                )}
-              </Button>
+              <div className="reading-answer-actions">
+                <Button
+                  variant="quiet"
+                  onClick={event => {
+                    const selection = window.getSelection()
+                    const article = event.currentTarget.closest('[role="article"]')
+                    const selected = selection?.toString().trim()
+                    setExcerpt(
+                      selected &&
+                        article?.contains(selection?.anchorNode || null) &&
+                        article?.contains(selection?.focusNode || null)
+                        ? selected
+                        : m.content
+                    )
+                  }}
+                >
+                  <StickyNote size={14} />
+                  摘录到主笔记
+                </Button>
+                <Button
+                  className="save-answer quiet"
+                  onClick={() => void action(() => saveAnswer(m))}
+                  type="button"
+                  variant="quiet"
+                >
+                  {notes.some(n => n.source_message_id === m.id) ? (
+                    <>
+                      <Check size={14} /> 已存入笔记
+                    </>
+                  ) : (
+                    <>
+                      <StickyNote size={14} /> 保存为笔记
+                    </>
+                  )}
+                </Button>
+              </div>
             )}
-          </article>
+          </Card>
         ))}
         {(busy || pending) && <StatusBar>正在结合所选资料回答…</StatusBar>}
         {lastFailure && !pending && (
@@ -518,10 +618,19 @@ export default function NotebookDesk({
           className="w-full"
         />
         <div className="composer-footer flex flex-wrap items-center justify-between gap-2">
-          <span>参考 {checked.length} 篇资料</span>
+          <span>
+            {version !== paper?.active_version
+              ? '历史版本 · 切换当前版本后可提问'
+              : `参考 ${checked.length} 篇资料`}
+          </span>
           <Button
             disabled={
-              !providerId || !checked.length || busy || !!pending || (!question.trim() && !quote)
+              !providerId ||
+              !checked.length ||
+              busy ||
+              !!pending ||
+              version !== paper?.active_version ||
+              (!question.trim() && !quote)
             }
             type="submit"
             variant="primary"
@@ -576,6 +685,9 @@ export default function NotebookDesk({
           </Button>
         </Toolbar>
       )}
+      <Button onClick={() => setReadingView('reading')} variant="primary">
+        <BookOpen size={16} /> 打开阅读导览
+      </Button>
       <h2 className="fastui-heading m-0 text-base">阅读报告</h2>
 
       <Button
@@ -589,11 +701,7 @@ export default function NotebookDesk({
               ['queued', 'running'].includes(j.state)
           )
         }
-        onClick={() =>
-          void action(() =>
-            submit(`/papers/${paper?.id}/reports`, { provider_id: providerId, model })
-          )
-        }
+        onClick={() => void action(() => generateReading('deep'))}
         type="button"
         variant="primary"
       >
@@ -607,7 +715,7 @@ export default function NotebookDesk({
                 {{ key_questions: '关键问题', process: '方法过程', contributions: '主要贡献' }[k]}
               </h3>
               {report.content[k]?.map((r: Row, i: number) => (
-                <article key={i} className="fastui-section min-w-0 p-5">
+                <Card role="article" key={i} className="fastui-section min-w-0 p-5">
                   <b>{r.question || r.step || r.title}</b>
                   <ReactMarkdown>{r.answer || r.description || ''}</ReactMarkdown>
                   {r.evidence?.map((ev: Row, j: number) => (
@@ -624,7 +732,7 @@ export default function NotebookDesk({
                       第 {ev.page_start || ev.page} 页 · 查看依据
                     </Button>
                   ))}
-                </article>
+                </Card>
               ))}
             </div>
           ))}
@@ -685,7 +793,7 @@ export default function NotebookDesk({
       />
     ) : null
   return (
-    <Section className="notebook-desk grid min-h-full min-w-0 grid-cols-1 xl:h-full xl:min-h-0 lg:grid-cols-[19rem_minmax(0,1fr)] xl:grid-rows-[minmax(0,1fr)]">
+    <Section className={`notebook-desk ${sourcesOpen ? '' : 'sources-collapsed'}`}>
       <WorkbenchSidebar
         id="desk-sources"
         label="阅读工作区工具"
@@ -745,7 +853,7 @@ export default function NotebookDesk({
               {checked.length} / {sources.length}
             </span>
           </label>
-          <nav aria-label="知识库资料" className="max-h-64 overflow-auto lg:max-h-none">
+          <ActivityRail label="知识库资料" className="max-h-64 overflow-auto lg:max-h-none">
             {sources
               .filter(p => p.title.toLowerCase().includes(filter.toLowerCase()))
               .map(p => (
@@ -775,13 +883,24 @@ export default function NotebookDesk({
                   </Button>
                 </ListRow>
               ))}
-          </nav>
+          </ActivityRail>
         </div>
       </WorkbenchSidebar>
       <div className="desk-reading flex min-h-0 min-w-0 flex-col gap-5 p-4 xl:p-5">
-        <div className="desk-reading-heading flex shrink-0 flex-wrap items-center justify-between gap-3">
+        <div className="desk-reading-heading">
+          <Button
+            variant="icon"
+            className="reader-sources-toggle"
+            aria-label={sourcesOpen ? '收起资料列表' : '展开资料列表'}
+            aria-expanded={sourcesOpen}
+            onClick={() => setSourcesOpen(!sourcesOpen)}
+          >
+            {sourcesOpen ? <PanelLeftClose size={19} /> : <PanelLeftOpen size={19} />}
+          </Button>
           <div>
-            <span>{book ? book.name : '论文阅读'}</span>
+            <span className="reader-breadcrumb">
+              论文库 <span>/</span> {book ? book.name : '论文阅读'}
+            </span>
             <h2 className="fastui-heading m-0 text-base">{paper?.title || '添加资料，开始阅读'}</h2>
           </div>
           {paper && (
@@ -791,6 +910,9 @@ export default function NotebookDesk({
                 value={version}
                 onChange={e => {
                   setVersion(e.target.value)
+                  setReport(null)
+                  setReportHistory([])
+                  setSelectedReportId('')
                   setPage(1)
                   setCitation(null)
                 }}
@@ -806,7 +928,57 @@ export default function NotebookDesk({
             </InspectorSection>
           )}
         </div>
-        {paper ? (
+        {paper && (
+          <Toolbar label="阅读工作区视图" className="reading-view-toolbar">
+            <SegmentedControl
+              label="阅读视图"
+              value={readingView}
+              onChange={setReadingView}
+              options={[
+                { value: 'reading', label: '阅读导览' },
+                { value: 'source', label: '原文阅读' },
+              ]}
+            />
+
+            {!!reportHistory.length && (
+              <label className="reading-history-label">
+                阅读记录
+                <Select
+                  aria-label="阅读记录"
+                  value={report?.id || ''}
+                  onChange={e => setSelectedReportId(e.target.value)}
+                >
+                  {reportHistory.map((r, i) => (
+                    <option key={r.id} value={r.id}>
+                      {i === 0 ? '最新 · ' : ''}
+                      {r.created
+                        ? new Date(r.created * 1000).toLocaleString()
+                        : `记录 ${reportHistory.length - i}`}
+                    </option>
+                  ))}
+                </Select>
+              </label>
+            )}
+          </Toolbar>
+        )}
+        {paper && readingView === 'reading' ? (
+          <ReadingStudio
+            key={`${paper.id}:${report?.id || 'new'}`}
+            paper={paper as { id: string; title: string; active_version?: string }}
+            report={report as Parameters<typeof ReadingStudio>[0]['report']}
+            pending={!!reportPending}
+            failure={
+              currentReportJob && ['failed', 'needs_attention'].includes(currentReportJob.state)
+                ? currentReportJob.error || '阅读生成未完成'
+                : undefined
+            }
+            canGenerate={!!providerId && !!paper.active_version && version === paper.active_version}
+            onGenerate={generateReading}
+            onLocate={ev => void action(() => locate(ev))}
+            onAsk={askFromReading}
+            onSave={appendMainNote}
+          />
+        ) : paper ? (
           <PdfReader
             key={paper.id}
             paper={paper}
@@ -857,6 +1029,34 @@ export default function NotebookDesk({
           </StatusBar>
         )}
       </div>
+      <AppDialog open={excerpt !== null} onClose={() => setExcerpt(null)} title="摘录到主笔记">
+        <p>保留选中的回答片段，或编辑后追加到当前论文的主笔记。</p>
+        <TextArea
+          aria-label="回答摘录"
+          rows={8}
+          value={excerpt || ''}
+          maxLength={30000}
+          onChange={e => setExcerpt(e.target.value)}
+        />
+        <Button
+          variant="primary"
+          loading={savingExcerpt}
+          disabled={!excerpt?.trim() || savingExcerpt}
+          onClick={() =>
+            void action(async () => {
+              setSavingExcerpt(true)
+              try {
+                await appendMainNote(excerpt || '')
+                setExcerpt(null)
+              } finally {
+                setSavingExcerpt(false)
+              }
+            })
+          }
+        >
+          追加到主笔记
+        </Button>
+      </AppDialog>
       <AppDialog open={matrix} onClose={() => setMatrix(false)} title="关系矩阵">
         <p className="desk-muted m-0 text-sm leading-relaxed break-words">
           选择标签以限定问答范围。

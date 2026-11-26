@@ -1,24 +1,31 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { ActivityRail, Button, Dialog, Toolbar } from '@fastrd/ui-react'
-import { BookOpen, LogOut, Moon, Settings, ShieldCheck, Sun, X } from 'lucide-react'
-import { tabNavigationIndex } from '@fastrd/ui-foundation'
+import {
+  ActivityRail,
+  Avatar,
+  Button,
+  CardBody,
+  Dialog,
+  PanelHeader,
+  Section,
+  TabBar,
+  Toolbar,
+} from '@fastrd/ui-react'
+import { BookOpen, LogOut, Moon, ShieldCheck, Sun, X, PanelLeft } from 'lucide-react'
 import { colorMode } from './theme'
 import { safeIdentityLabel } from './identity'
 
-export type MainSection = 'library' | 'users' | 'admin'
+export type MainSection = 'library' | 'admin' | 'settings'
 
 export function AppHeader({
   user,
   section,
   onSection,
-  onSettings,
   onAccount,
   onLogout,
 }: {
   user: Record<string, any>
   section: MainSection
   onSection: (section: MainSection) => void
-  onSettings: () => void
   onAccount: () => void
   onLogout: () => void
 }) {
@@ -28,52 +35,39 @@ export function AppHeader({
   const admin = user.is_admin || user.role === 'admin'
   const tabs = [
     { id: 'library', label: '论文库', controls: 'main-library' },
-    ...(admin
-      ? [
-          { id: 'users', label: '用户管理', controls: 'main-users' },
-          { id: 'admin', label: '管理后台', controls: 'main-admin' },
-        ]
-      : []),
+    ...(admin ? [{ id: 'admin', label: '管理', controls: 'main-admin' }] : []),
+    { id: 'settings', label: '设置', controls: 'main-settings' },
   ]
   return (
-    <header className="min-w-0 shrink-0">
-      <Toolbar label="应用导航">
+    <Section role="banner" className="app-topbar min-w-0 shrink-0">
+      <Toolbar label="应用导航" className="app-topbar-inner">
         <Button variant="quiet" onClick={() => onSection('library')} aria-label="FastRead 论文库">
-          <BookOpen size={20} />
-          <strong>FastRead</strong>
+          <span className="app-brand-icon">
+            <BookOpen size={18} />
+          </span>
+          <strong className="app-wordmark">FastRead</strong>
         </Button>
-        <nav
-          className="order-last flex w-full flex-wrap items-center gap-2 sm:order-none sm:w-auto"
-          aria-label="主导航"
-        >
-          {tabs.map(tab => (
-            <Button
-              key={tab.id}
-              id={tab.id}
-              variant={section === tab.id ? 'primary' : 'quiet'}
-              aria-current={section === tab.id ? 'page' : undefined}
-              onClick={() => onSection(tab.id as MainSection)}
-            >
-              {tab.label}
-            </Button>
-          ))}
-        </nav>
-        <div className="flex min-w-0 flex-wrap items-center gap-1 sm:ml-auto">
+        <TabBar
+          className="app-main-navigation"
+          label="主导航"
+          tabs={tabs}
+          activeId={section}
+          onSelect={id => onSection(id as MainSection)}
+        />
+        <Toolbar label="账号操作" className="app-account-actions">
           <Button variant="quiet" onClick={onAccount} title={label} aria-label="账号设置">
-            <span className="max-w-24 truncate">{label}</span>
+            <Avatar name={label} size="sm" />
+            <span className="app-account-name">{label}</span>
           </Button>
           {!user.public && (
             <Button variant="icon" onClick={onLogout} aria-label="退出登录" title="退出登录">
               <LogOut size={17} />
             </Button>
           )}
-          <Button variant="quiet" onClick={onSettings} aria-label="设置">
-            <Settings size={17} />
-            <span className="hidden md:inline">设置</span>
-          </Button>
+
           <Button variant="quiet" onClick={onAccount} aria-label="CAS 认证">
             <ShieldCheck size={17} />
-            <span className="hidden md:inline">CAS 认证</span>
+            <span className="sr-only">CAS 认证</span>
           </Button>
           <Button
             variant="icon"
@@ -83,9 +77,9 @@ export function AppHeader({
           >
             {dark ? <Sun size={18} /> : <Moon size={18} />}
           </Button>
-        </div>
+        </Toolbar>
       </Toolbar>
-    </header>
+    </Section>
   )
 }
 
@@ -102,18 +96,18 @@ export function AppDialog({
 }) {
   return (
     <Dialog open={open} onClose={onClose} label={title} size="lg">
-      <header className="flex items-center justify-between gap-3">
+      <PanelHeader className="app-dialog-heading flex items-center justify-between gap-3">
         <h2 className="fastui-heading m-0 text-base">{title}</h2>
         <Button variant="icon" onClick={onClose} aria-label={`关闭${title}`}>
           <X size={18} />
         </Button>
-      </header>
-      <div className="fastui-modal-body min-w-0">{children}</div>
+      </PanelHeader>
+      <CardBody className="fastui-modal-body min-w-0">{children}</CardBody>
     </Dialog>
   )
 }
 
-// Compose native FastUI tabs with icon labels and evenly spaced tool slots.
+// Delegate keyboard navigation, focus and selection to FastUI.
 export function WorkspaceTabs({
   label,
   tabs,
@@ -127,50 +121,14 @@ export function WorkspaceTabs({
   onSelect: (id: string) => void
   equal?: boolean
 }) {
-  const focusId =
-    tabs.find(tab => tab.id === activeId && !tab.disabled)?.id ??
-    tabs.find(tab => !tab.disabled)?.id
   return (
-    <div
-      className="fastui-tabs min-w-0 [--fastui-tab-height:42px]"
-      role="tablist"
-      aria-label={label}
-    >
-      {tabs.map((tab, index) => (
-        <div key={tab.id} className={`fastui-tab-item ${equal ? '!flex-1' : ''}`}>
-          <button
-            className="fastui-tab w-full"
-            type="button"
-            role="tab"
-            id={tab.id}
-            aria-controls={tab.controls}
-            aria-selected={activeId === tab.id}
-            disabled={tab.disabled}
-            tabIndex={focusId === tab.id ? 0 : -1}
-            onClick={() => onSelect(tab.id)}
-            onKeyDown={event => {
-              if (event.nativeEvent.isComposing) return
-              const next = tabNavigationIndex(
-                event.key,
-                index,
-                tabs,
-                getComputedStyle(event.currentTarget).direction === 'rtl'
-              )
-              if (next < 0) return
-              event.preventDefault()
-              onSelect(tabs[next].id)
-              const buttons = event.currentTarget
-                .closest('[role="tablist"]')
-                ?.querySelectorAll<HTMLButtonElement>('[role="tab"]')
-              buttons?.[next]?.focus()
-            }}
-          >
-            {tab.icon}
-            <span className="fastui-tab-label">{tab.label}</span>
-          </button>
-        </div>
-      ))}
-    </div>
+    <TabBar
+      className={`workspace-tabs min-w-0 ${equal ? 'workspace-tabs-equal' : ''}`}
+      label={label}
+      tabs={tabs}
+      activeId={activeId}
+      onSelect={onSelect}
+    />
   )
 }
 
@@ -185,26 +143,43 @@ export function WorkbenchSidebar({
   tools: { label: string; icon: ReactNode; onClick: () => void; active?: boolean }[]
   children: ReactNode
 }) {
+  const [expanded, setExpanded] = useState(false)
   return (
-    <aside
+    <Section
+      role="complementary"
       id={id}
-      className="flex min-h-0 min-w-0 border-r border-[var(--fastui-border)] bg-[var(--fastui-chrome)]"
+      className={`workbench-sidebar ${expanded ? 'sidebar-expanded' : ''}`}
     >
-      <ActivityRail label={label} className="shrink-0">
-        {tools.map(tool => (
-          <Button
-            key={tool.label}
-            variant="navigation"
-            aria-label={tool.label}
-            title={tool.label}
-            aria-pressed={tool.active}
-            onClick={tool.onClick}
-          >
-            {tool.icon}
-          </Button>
-        ))}
-      </ActivityRail>
-      <div className="min-w-0 flex-1 lg:overflow-auto">{children}</div>
-    </aside>
+      <PanelHeader className="sidebar-heading">
+        <Button
+          className="sidebar-mobile-toggle"
+          variant="icon"
+          aria-label={expanded ? '收起导航' : '展开导航'}
+          aria-expanded={expanded}
+          aria-controls={`${id}-body`}
+          onClick={() => setExpanded(!expanded)}
+        >
+          <PanelLeft size={18} />
+        </Button>
+      </PanelHeader>
+      <div id={`${id}-body`} className="sidebar-body">
+        <ActivityRail label={label} className="sidebar-navigation">
+          {tools.map(tool => (
+            <Button
+              key={tool.label}
+              variant="navigation"
+              aria-label={tool.label}
+              title={tool.label}
+              aria-pressed={tool.active}
+              onClick={tool.onClick}
+            >
+              {tool.icon}
+              <span>{tool.label === '资料库概览' ? '全部论文' : tool.label}</span>
+            </Button>
+          ))}
+        </ActivityRail>
+        <CardBody className="sidebar-content">{children}</CardBody>
+      </div>
+    </Section>
   )
 }

@@ -156,18 +156,24 @@ await context.route('**/api/**', async route => {
 })
 try {
   await page.goto(base)
-  await expect(page.getByRole('button', { name: 'Research library' })).toBeVisible()
+  await expect(
+    page
+      .getByRole('navigation', { name: '知识库目录' })
+      .getByRole('button', { name: 'Research library' })
+  ).toBeVisible()
   await page.getByRole('button', { name: '后台任务', exact: true }).click()
   await expect(page.getByText('暂无任务', { exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
   await page.getByRole('button', { name: '搜索论文', exact: true }).click()
   await expect(page.locator('#library-search input')).toBeFocused()
-  await page.getByRole('button', { name: '导入论文', exact: true }).click()
-  await expect(page.getByLabel('上传 PDF', { exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
   await page
-    .locator('details')
-    .filter({ has: page.getByLabel('上传 PDF', { exact: true }) })
-    .locator('summary')
+    .getByRole('navigation', { name: '资料库工具' })
+    .getByRole('button', { name: '导入论文', exact: true })
     .click()
+  await expect(page.getByLabel('上传 PDF', { exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.getByRole('checkbox', { name: '选择论文 Research Paper 1', exact: true }).check()
 
   const alignment = await page
     .getByRole('group', { name: '论文批量操作', exact: true })
@@ -182,11 +188,22 @@ try {
     Math.max(...alignment) - Math.min(...alignment) <= 1,
     'batch toolbar controls are misaligned'
   )
+  await page.getByRole('checkbox', { name: '选择论文 Research Paper 1', exact: true }).uncheck()
+  const moreActions = page.getByRole('button', { name: 'Research Paper 1 的更多操作', exact: true })
+  await moreActions.click()
+  await expect(page.getByRole('dialog', { name: '论文操作', exact: true })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog', { name: '论文操作', exact: true })).not.toBeVisible()
+  await expect(moreActions).toBeFocused()
+
   await page.getByRole('button', { name: '关系矩阵', exact: true }).click()
   await expect(page.getByRole('region', { name: '论文关系矩阵' })).toBeVisible()
   await page.getByRole('button', { name: '卡片视图' }).click()
   await page.screenshot({ path: `${artifacts}/library-desktop.png` })
-  await page.getByRole('button', { name: 'Research library' }).click()
+  await page
+    .getByRole('navigation', { name: '知识库目录' })
+    .getByRole('button', { name: 'Research library' })
+    .click()
   await expect(page.locator('.pdf-sheet canvas')).toBeVisible()
   await expect(page.locator('.textLayer')).toContainText('FastRead Browser Validation')
   assert.equal(
@@ -302,7 +319,7 @@ try {
         .locator('button,input,select,textarea')
         .evaluateAll(elements =>
           elements
-            .filter(el => !/fastui-(button|input|select|textarea|tab)/.test(el.className))
+            .filter(el => !/fastui-(button|input|select|textarea|tab|segment)/.test(el.className))
             .map(el => el.outerHTML)
         )
       assert.deepEqual(unstyled, [], 'application controls must use FastUI')

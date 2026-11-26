@@ -24,13 +24,13 @@ export function IntegrationStatus({ api }: { api: Api }) {
       .then(setStatus)
       .catch(e => setError(e.message))
   }, [api])
-  async function connect(service: string, token?: string) {
+  async function connect(service: string, token?: string, cas = false) {
     setBusy(service)
     setError('')
     try {
       await api(
-        `/integrations/connections/${service}`,
-        token ? 'POST' : 'DELETE',
+        `/integrations/connections/${service}${cas ? '/cas' : ''}`,
+        token || cas ? 'POST' : 'DELETE',
         token ? { token } : undefined
       )
       setStatus(await api('/integrations/status'))
@@ -50,7 +50,11 @@ export function IntegrationStatus({ api }: { api: Api }) {
               <PanelHeader className="section-heading">
                 <strong>{key === 'fastwrite' ? 'FastWrite 写作' : 'FastNews 科研动态'}</strong>
                 <Badge tone={status[key]?.connected ? 'success' : 'warning'}>
-                  {status[key]?.connected ? '已连接' : '待连接'}
+                  {status[key]?.connected
+                    ? status[key]?.mode === 'cas'
+                      ? 'CAS 已连接'
+                      : '已连接'
+                    : '待连接'}
                 </Badge>
               </PanelHeader>
               {status[key]?.connected ? (
@@ -67,8 +71,19 @@ export function IntegrationStatus({ api }: { api: Api }) {
                   }}
                   className="grid min-w-0 gap-4"
                 >
+                  {status[key]?.cas_available && (
+                    <Button
+                      type="button"
+                      variant="primary"
+                      loading={busy === key}
+                      disabled={!!busy}
+                      onClick={() => void connect(key, undefined, true)}
+                    >
+                      通过 CAS 连接 {key === 'fastwrite' ? 'FastWrite' : 'FastNews'}
+                    </Button>
+                  )}
                   <p className="m-0 leading-relaxed break-words">
-                    在 {key === 'fastwrite' ? 'FastWrite 研究面板' : 'FastNews 账户页'} 生成
+                    也可在 {key === 'fastwrite' ? 'FastWrite 研究面板' : 'FastNews 账户页'} 生成
                     FastRead 连接码，然后粘贴到这里。
                     {status[key]?.url && (
                       <a
@@ -97,7 +112,6 @@ export function IntegrationStatus({ api }: { api: Api }) {
               正在读取联动状态…
             </p>
           )}
-      <p className="m-0 leading-relaxed break-words">选中论文后可交接写作素材与研究方向。</p>
     </Section>
   )
 }

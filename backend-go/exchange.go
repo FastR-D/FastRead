@@ -2,7 +2,9 @@ package fastread
 
 import (
 	"bytes"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -44,7 +46,13 @@ func (a *App) RegisterExchange() error {
 		result := Row{}
 		for _, service := range []string{"fastnews", "fastwrite"} {
 			_, e := a.Store.One("SELECT workspace_id FROM integration_connections WHERE workspace_id=? AND service=?", p.WorkspaceID, service)
-			result[service] = Row{"connected": e == nil, "url": exchangePublicURL(service)}
+			meta, _ := a.Store.One("SELECT user_id FROM integration_cas_links WHERE workspace_id=? AND service=?", p.WorkspaceID, service)
+			mode := "manual"
+			if meta != nil {
+				mode = "cas"
+			}
+			local, _ := a.Store.One("SELECT state FROM fastcas_links WHERE issuer=? AND client_id=? AND user_id=? ORDER BY version DESC LIMIT 1", a.workspaceIssuer, a.workspaceClient, p.UserID)
+			result[service] = Row{"connected": e == nil && (meta == nil || Str(meta["user_id"]) == p.UserID), "mode": mode, "cas_available": a.exchangeCAS != nil && a.workspaceCAS != nil && Str(local["state"]) == "active" && p.Role == "owner", "url": exchangePublicURL(service)}
 		}
 		JSON(w, 200, result)
 		return nil
@@ -72,7 +80,13 @@ func (a *App) RegisterExchange() error {
 		if e != nil {
 			return e
 		}
-		_, e = a.Store.DB.Exec("INSERT INTO integration_connections VALUES(?,?,?,?) ON CONFLICT(workspace_id,service) DO UPDATE SET secret=excluded.secret,created=excluded.created", p.WorkspaceID, service, secret, Now())
+		e = a.Store.Transaction(func(tx *sql.Tx) error {
+			if _, err := tx.Exec("DELETE FROM integration_cas_links WHERE workspace_id=? AND service=?", p.WorkspaceID, service); err != nil {
+				return err
+			}
+			_, err := tx.Exec("INSERT INTO integration_connections VALUES(?,?,?,?) ON CONFLICT(workspace_id,service) DO UPDATE SET secret=excluded.secret,created=excluded.created", p.WorkspaceID, service, secret, Now())
+			return err
+		})
 		if e != nil {
 			return e
 		}
@@ -86,7 +100,13 @@ func (a *App) RegisterExchange() error {
 		if !validService(r.PathValue("service")) {
 			return Error(404, "联动服务不存在")
 		}
-		_, e := a.Store.DB.Exec("DELETE FROM integration_connections WHERE workspace_id=? AND service=?", p.WorkspaceID, r.PathValue("service"))
+		e := a.Store.Transaction(func(tx *sql.Tx) error {
+			if _, err := tx.Exec("DELETE FROM integration_cas_links WHERE workspace_id=? AND service=?", p.WorkspaceID, r.PathValue("service")); err != nil {
+				return err
+			}
+			_, err := tx.Exec("DELETE FROM integration_connections WHERE workspace_id=? AND service=?", p.WorkspaceID, r.PathValue("service"))
+			return err
+		})
 		if e == nil {
 			JSON(w, 200, Row{"ok": true})
 		}
@@ -130,7 +150,7 @@ func (a *App) RegisterExchange() error {
 		if e != nil {
 			return e
 		}
-		token, e := a.exchangeToken(p, "fastwrite")
+		token, e := a.exchangeToken(r, p, "fastwrite")
 		if e != nil {
 			return e
 		}
@@ -142,6 +162,7 @@ func (a *App) RegisterExchange() error {
 		if e != nil {
 			return e
 		}
+		response["url"] = exchangePublicURL("fastwrite") + "/projects/" + url.PathEscape(body.ProjectID)
 		JSON(w, 200, response)
 		return nil
 	})
@@ -149,7 +170,7 @@ func (a *App) RegisterExchange() error {
 		return a.forwardExchange(w, r, p, "fastwrite", "GET", "/api/integrations/fastread/projects/"+url.PathEscape(r.PathValue("project"))+"/feedback", nil)
 	})
 	a.Handle("POST /api/integrations/fastwrite/projects/{project}/feedback", func(w http.ResponseWriter, r *http.Request, p Principal) error {
-		token, e := a.exchangeToken(p, "fastwrite")
+		token, e := a.exchangeToken(r, p, "fastwrite")
 		if e != nil {
 			return e
 		}
@@ -175,9 +196,29 @@ func (a *App) RegisterExchange() error {
 		JSON(w, 200, Row{"ok": true, "saved": saved})
 		return nil
 	})
-	return nil
+	return a.registerCASExchange()
 }
-func (a *App) exchangeToken(p Principal, service string) (string, error) {
+func (a *App) exchangeToken(r *http.Request, p Principal, service string) (string, error) {
+	metadata, err := a.Store.One("SELECT * FROM integration_cas_links WHERE workspace_id=? AND service=?", p.WorkspaceID, service)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if metadata != nil {
+		if Str(metadata["user_id"]) != p.UserID || Str(metadata["issuer"]) != a.workspaceIssuer {
+			return "", Error(403, "请使用建立此 CAS 连接的账号")
+		}
+		local, err := a.Store.One("SELECT id,version FROM fastcas_links WHERE issuer=? AND client_id=? AND user_id=? ORDER BY version DESC LIMIT 1", a.workspaceIssuer, a.workspaceClient, p.UserID)
+		if err != nil || Str(local["id"]) != Str(metadata["link_id"]) || Num(local["version"]) != Num(metadata["version"]) {
+			return "", Error(403, "CAS 绑定已更改，请重新连接")
+		}
+		subject, err := a.exchangeIdentity(r, p)
+		if err != nil {
+			return "", err
+		}
+		if subject != Str(metadata["subject"]) {
+			return "", Error(403, "CAS 身份已更改，请重新连接")
+		}
+	}
 	row, e := a.Store.One("SELECT secret FROM integration_connections WHERE workspace_id=? AND service=?", p.WorkspaceID, service)
 	if e != nil {
 		return "", Error(409, "请先在设置中连接 "+service)
@@ -185,7 +226,7 @@ func (a *App) exchangeToken(p Principal, service string) (string, error) {
 	return a.Store.UnprotectSecret(Str(row["secret"]))
 }
 func (a *App) forwardExchange(w http.ResponseWriter, r *http.Request, p Principal, service, method, path string, body any) error {
-	token, e := a.exchangeToken(p, service)
+	token, e := a.exchangeToken(r, p, service)
 	if e != nil {
 		return e
 	}
@@ -223,7 +264,7 @@ func exchangeRequest(r *http.Request, service, token, method, path string, body 
 	defer response.Body.Close()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		if response.StatusCode == 401 || response.StatusCode == 403 {
-			return nil, Error(response.StatusCode, "连接码已失效或没有项目权限，请在设置中重新连接")
+			return nil, Error(response.StatusCode, "连接已失效、账号未认证或没有项目权限，请检查两端 CAS 认证与项目权限")
 		}
 		return nil, Error(502, fmt.Sprintf("%s 未完成操作（%d）", service, response.StatusCode))
 	}

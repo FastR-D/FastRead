@@ -10,7 +10,7 @@ CI 在每个 Pull Request 和 `main` / `master` 推送时自动运行，也可�
 
 ## 当前主线：FastRead Web
 
-当前版本为 **4.0.0**：Go API 与独立 Go worker 保存论文、版本化证据、报告、聊天和总结，React 19 + FastUI 0.3.0 提供阅读工作台。API 与 worker 共享 `FASTREAD_WEB_ROOT`。生产环境使用 HTTPS 与 Secure cookie。原生部署、账户和迁移说明见 [Go / React 部署指南](docs/GO_REACT_RELEASE.md)。
+当前版本为 **4.0.0**：Go API 与独立 Go worker 保存论文、版本化证据、报告、聊天和总结，React 19 + FastUI 0.4.0 提供阅读工作台。API 与 worker 共享 `FASTREAD_WEB_ROOT`。生产环境使用 HTTPS 与 Secure cookie。原生部署、账户和迁移说明见 [Go / React 部署指南](docs/GO_REACT_RELEASE.md)。
 
 后文保留早期桌面、容器和模型说明作为历史参考；正式 Web 部署以以上指南为准。
 
@@ -28,6 +28,10 @@ CI 在每个 Pull Request 和 `main` / `master` 推送时自动运行，也可�
   <img src="https://img.shields.io/badge/backend-Go-00ADD8" alt="Go" />
   <img src="https://img.shields.io/badge/citations-page--aware-7c3aed" alt="Page-aware citations" />
 </p>
+
+## 交互阅读工作区
+
+生产 Web 界面现采用基于 FastUI 的文档式布局：单侧导航、知识库卡片与论文列表，阅读导览使用宽正文与右侧目录，支持收起资料列表的专注模式。打开论文后可在「原文阅读」与「阅读导览」间切换：快速泛读／完整精读、方法步进、公式教学试算、同条件实验比较、固定 commit 的 GitHub 源码联读、理解自测与主笔记摘录共用版本化原文证据。历史报告保留，缺失交互材料可重新生成。使用方法、数据边界与验证命令见 [阅读工作区说明](docs/READING_STUDIO.md)。News / Read / Write 同一 CAS 身份的一键连接、证据交接和写作反馈见 [CAS 互通说明](docs/CAS_INTEROP.md)。
 
 ## 一条主链读完一篇论文
 

@@ -1,3 +1,4 @@
+import { rememberCASDestination } from './authReturn'
 import { Alert, Button, TextField } from '@fastrd/ui-react'
 import { API_BASE } from './urls'
 import { useEffect, useState, type FormEvent } from 'react'
@@ -41,8 +42,14 @@ export default function LocalLogin() {
         const enabled = v?.enabled === true && v.login_enabled !== false
         setFastcas(enabled)
         const query = new URLSearchParams(window.location.search)
-        if (enabled && query.get('auth') === 'register' && query.get('fastcas') !== 'register')
+        if (
+          enabled &&
+          ['register', 'cas'].includes(query.get('auth') || '') &&
+          !query.has('fastcas')
+        ) {
+          rememberCASDestination()
           window.location.replace(`${API_BASE}/auth/fastcas/login`)
+        }
       })
       .catch(() => {})
   }, [])
@@ -153,7 +160,11 @@ export default function LocalLogin() {
       </form>
       {message && <Alert>{message}</Alert>}
       {fastcas && mode === 'login' && (
-        <a href={`${API_BASE}/auth/fastcas/login`} className="fastui-link break-words">
+        <a
+          href={`${API_BASE}/auth/fastcas/login`}
+          onClick={rememberCASDestination}
+          className="fastui-link break-words"
+        >
           使用 FastCAS 登录
         </a>
       )}

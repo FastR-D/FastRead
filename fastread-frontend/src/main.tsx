@@ -1,6 +1,7 @@
 import { start } from './web/sso-bootstrap'
 import './web/theme'
 import 'virtual:uno.css'
+import './web/fonts'
 
 // Fetch the UI in parallel with authentication, without making authentication
 // wait for React/Markdown to download and execute first.

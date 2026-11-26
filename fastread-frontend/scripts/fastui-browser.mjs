@@ -9,8 +9,13 @@ const server = await preview({ configFile: false, preview: { host: '127.0.0.1', 
 const base = `http://127.0.0.1:${server.httpServer.address().port}`
 const browser = await chromium.launch({ channel: 'msedge', headless: true })
 const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block', colorScheme: 'light' })
+// Font CDN loading and fallback are covered by design-preview.mjs. Keep account
+// and integration regressions independent of external network latency.
+await context.route('https://cdn.jsdelivr.net/**', route => route.abort())
+context.setDefaultTimeout(15000)
 const writes = [], errors = [], scenarios = []
 let providers = [{ id: 'provider-1', name: 'Workspace model', models: ['model-a', 'model-b'] }]
+let connectionMode = 'manual'
 let signedIn = true, isAdmin = true, newsText = 'Existing research direction', connected = false
 let availability = { enabled: true, login_enabled: true, link_enabled: true }
 let accountStatus = { enabled: true, link_enabled: true, link: { id: 'link', state: 'prepared', subject: 'reader', version: 1 } }
@@ -35,7 +40,8 @@ await context.route('**/api/**', async route => {
   else if (path === '/api/admin/providers') { if (body) shared.push({ id: 'new-provider', enabled: true, ...body }); value = { items: shared } }
   else if (path === '/api/admin/providers/shared') { Object.assign(shared[0], body); value = { ok: true } }
   else if (path === '/api/admin/status') value = { version: '2.0.0', users: new Set(users.map(user => user.id)).size, papers: 1, queued: 0, running: 0 }
-  else if (path === '/api/integrations/status') value = { fastnews: { connected, url: 'https://news.example.test' }, fastwrite: { connected: true, url: 'https://write.example.test' } }
+  else if (path === '/api/integrations/status') value = { fastnews: { connected, mode: connectionMode, cas_available: true, url: 'https://news.example.test' }, fastwrite: { connected: true, url: 'https://write.example.test' } }
+  else if (path === '/api/integrations/connections/fastnews/cas') { connected = true; connectionMode = 'cas'; value = { ok: true } }
   else if (path === '/api/integrations/connections/fastnews') { connected = request.method() === 'POST'; value = { ok: true } }
   else if (path === '/api/integrations/fastwrite/projects') value = { items: [{ id: 'project-1', name: 'My manuscript' }] }
   else if (path === '/api/integrations/fastwrite/sync') value = { ok: true, url: 'https://write.example.test/project-1' }
@@ -50,11 +56,11 @@ try {
   const page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(base)
-  for (const name of ['论文库', '用户管理', '管理后台']) await expect(page.getByRole('button', { name, exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '论文库', exact: true })).toHaveAttribute('aria-current', 'page')
+  for (const name of ['论文库', '管理', '设置']) await expect(page.getByRole('tab', { name, exact: true })).toBeVisible()
+  await expect(page.getByRole('tab', { name: '论文库', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', { name: /展开左边栏|收起左边栏/ })).toHaveCount(0)
-  await page.getByRole('button', { name: '设置', exact: true }).click()
-  const settings = page.getByRole('dialog', { name: '设置', exact: true }), name = settings.getByLabel('名称', { exact: true })
+  await page.getByRole('tab', { name: '设置', exact: true }).click()
+  const settings = page.getByRole('tabpanel', { name: '设置', exact: true }), name = settings.getByLabel('名称', { exact: true })
   await name.fill('Research endpoint'); await name.focus()
   const peer = await context.newPage(); await peer.goto(base)
   await peer.evaluate(() => localStorage.setItem('fastread.theme', 'dark'))
@@ -71,17 +77,20 @@ try {
   await settings.getByRole('button', { name: '保存供应商' }).click(); await expect(name).toHaveValue('')
   await expect(settings.getByLabel('当前使用的模型')).toHaveValue('provider-1|model-b')
   assert.deepEqual(writes[0], { path: '/api/providers', body: { name: 'Research endpoint', base_url: 'https://model.example.test/v1', api_key: 'fixture-key', models: ['qwen3.8-27b', 'glm-5.2'] } })
+  await settings.getByRole('button', { name: '通过 CAS 连接 FastNews' }).click()
+  await expect(settings.getByText('CAS 已连接', { exact: true })).toBeVisible()
+  await settings.locator('.integration-connection').filter({ hasText: 'FastNews 科研动态' }).getByRole('button', { name: '断开连接' }).click()
   await settings.getByLabel('连接码').fill('fixture-pairing-code')
   await settings.getByRole('button', { name: '保存连接' }).click()
   await expect(settings.getByRole('button', { name: '断开连接' })).toHaveCount(2)
-  scenarios.push('native modal, model save, pairing connection, cross-tab and system theme')
+  scenarios.push('settings tab, model save, CAS and manual connection, cross-tab and system theme')
   for (const width of [1440, 1024, 390]) for (const mode of ['light', 'dark']) {
     await page.setViewportSize({ width, height: 1000 }); await settings.getByLabel('颜色模式').selectOption(mode)
     assert.ok(await settings.evaluate(el => el.scrollWidth <= el.clientWidth), 'settings modal overflows')
     await page.screenshot({ path: `${artifacts}/settings-${mode}-${width}.png`, fullPage: true, animations: 'disabled' })
   }
-  await page.keyboard.press('Escape'); await expect(settings).not.toBeVisible()
-  await expect(page.getByRole('button', { name: '设置', exact: true })).toBeFocused()
+  await page.getByRole('tab', { name: '论文库', exact: true }).click(); await expect(settings).not.toBeVisible()
+  await expect(page.getByRole('tab', { name: '论文库', exact: true })).toHaveAttribute('aria-selected', 'true')
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.getByRole('button', { name: 'CAS 认证', exact: true }).click()
   const account = page.getByRole('dialog', { name: 'CAS 认证', exact: true })
@@ -100,7 +109,16 @@ try {
     await page.keyboard.press('Escape')
   }
   scenarios.push('CAS modal credential cleanup and independent linking modes')
-  await page.getByRole('button', { name: '用户管理' }).click()
+  await expect(page.getByRole('tab', { name: '用户管理' })).toHaveCount(0)
+  await page.getByRole('tab', { name: '管理', exact: true }).click()
+  const adminTabs = page.getByRole('tablist', { name: '管理分类' })
+  await expect(adminTabs).toHaveAttribute('aria-orientation', 'vertical')
+  await expect(page.getByRole('tabpanel', { name: '运行概览', exact: true })).toBeVisible()
+  await expect(page.getByRole('region', { name: '共享模型列表', exact: true })).toHaveCount(0)
+  await adminTabs.getByRole('tab', { name: '运行概览' }).focus()
+  await page.keyboard.press('ArrowDown')
+  await expect(adminTabs.getByRole('tab', { name: '用户管理' })).toBeFocused()
+  await expect(page.getByRole('tabpanel', { name: '用户管理', exact: true })).toBeVisible()
   const userList = page.getByRole('region', { name: '用户列表', exact: true })
   await expect(userList.getByRole('button', { name: '编辑', exact: true }).first()).toBeDisabled()
   await expect(userList.getByRole('row')).toHaveCount(2)
@@ -151,7 +169,7 @@ try {
     await page.screenshot({ path: `${artifacts}/users-${mode}-${width}.png`, fullPage: true, animations: 'disabled' })
   }
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.getByRole('button', { name: '管理后台', exact: true }).click()
+  await adminTabs.getByRole('tab', { name: '共享模型' }).click()
   const modelList = page.getByRole('region', { name: '共享模型列表', exact: true })
   const sharedRow = modelList.getByRole('row').filter({ hasText: 'Shared model' })
   await expect(sharedRow).toBeVisible()
@@ -230,7 +248,7 @@ try {
   await expect(page.getByRole('heading', { name: '没有匹配的模型', exact: true })).toBeVisible()
   await page.getByLabel('搜索模型', { exact: true }).fill('')
   scenarios.push('FastWrite-style searchable user/model lists, user editing, staged workspace/user grants, creation and enable/disable')
-  await page.getByRole('button', { name: '论文库', exact: true }).click(); await page.getByRole('checkbox', { name: '选择论文 A Research Paper' }).check()
+  await page.getByRole('tab', { name: '论文库', exact: true }).click(); await page.getByRole('checkbox', { name: '选择论文 A Research Paper' }).check()
   await page.getByRole('button', { name: '提炼研究方向', exact: true }).click()
   const research = page.getByRole('dialog', { name: '提炼研究方向' })
   await research.getByRole('button', { name: '从所选论文提炼方向' }).click()
@@ -246,8 +264,8 @@ try {
   await writing.getByLabel('下载格式').selectOption('bibtex'); const download = page.waitForEvent('download')
   await writing.getByRole('button', { name: '下载资料' }).click(); assert.equal((await download).suggestedFilename(), 'fastread-papers.bib')
   scenarios.push('selected papers to editable News directions and FastWrite sync/export')
-  isAdmin = false; await page.reload(); await expect(page.getByRole('button', { name: '论文库', exact: true })).toBeVisible()
-  await expect(page.getByRole('button', { name: '用户管理' })).toHaveCount(0); await expect(page.getByRole('button', { name: '管理后台' })).toHaveCount(0)
+  isAdmin = false; await page.reload(); await expect(page.getByRole('tab', { name: '论文库', exact: true })).toBeVisible()
+  await expect(page.getByRole('tab', { name: '用户管理' })).toHaveCount(0); await expect(page.getByRole('tab', { name: '管理' })).toHaveCount(0)
   signedIn = false
   for (const flags of [{ enabled: true, login_enabled: true, link_enabled: false }, { enabled: true, login_enabled: false, link_enabled: true }, { enabled: false, login_enabled: false, link_enabled: false }]) {
     availability = flags; await page.reload(); await expect(page.getByRole('heading', { name: '登录资料库' })).toBeVisible()

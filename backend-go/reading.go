@@ -189,6 +189,14 @@ func (a *App) RegisterReading() {
 		if e != nil {
 			return e
 		}
+		if rid := r.URL.Query().Get("report"); rid != "" {
+			report, err := s.One("SELECT id,version_id FROM report_versions WHERE id=? AND paper_id=?", rid, paper["id"])
+			if err != nil {
+				return err
+			}
+			paper["export_report_id"] = report["id"]
+			paper["active_version"] = report["version_id"]
+		}
 		text := RenderPaperMarkdown(s, p.WorkspaceID, paper)
 		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="reading-report.md"`)
@@ -423,9 +431,26 @@ func (a *App) enqueuePaper(w http.ResponseWriter, r *http.Request, p Principal, 
 		if e != nil {
 			return e
 		}
+		mode := Str(body["reading_mode"])
+		if kind == "report" && mode != "" && mode != "skim" && mode != "deep" && mode != "repository" {
+			return Error(422, "阅读模式必须为 skim、deep 或 repository")
+		}
+		var repository Row
+		if kind == "report" && mode == "repository" {
+			repository, e = validateReadingRepository(body["repository"])
+			if e != nil {
+				return e
+			}
+		}
 		body, e = bodyModel(a, p, body)
 		if e != nil {
 			return e
+		}
+		if kind == "report" {
+			body["reading_mode"] = mode
+			if repository != nil {
+				body["repository"] = repository
+			}
 		}
 	}
 	job, e := a.Store.Enqueue(p, kind, body, r.Header.Get("Idempotency-Key"), Str(paper["id"]), Str(paper["active_version"]), billable)
@@ -577,7 +602,7 @@ func RenderPaperMarkdown(s *Store, workspace string, paper Row) string {
 	if Str(paper["summary"]) != "" {
 		fmt.Fprintf(&out, "## 个人总结\n\n%s\n\n", Str(paper["summary"]))
 	}
-	report, e := s.One("SELECT content FROM report_versions WHERE paper_id=? AND version_id=? ORDER BY created DESC LIMIT 1", paper["id"], paper["active_version"])
+	report, e := s.One("SELECT content FROM report_versions WHERE paper_id=? AND version_id=? AND (?='' OR id=?) ORDER BY created DESC LIMIT 1", paper["id"], paper["active_version"], Str(paper["export_report_id"]), Str(paper["export_report_id"]))
 	if e == nil {
 		value := Object(report["content"])
 		if generated := Str(value["generated_at"]); generated != "" {
@@ -622,6 +647,7 @@ func RenderPaperMarkdown(s *Store, workspace string, paper Row) string {
 				}
 			}
 		}
+		renderReadingInteractions(&out, value)
 		if limits := stringList(value["limitations"]); len(limits) > 0 {
 			out.WriteString("## 局限与证据边界\n\n")
 			for _, limit := range limits {

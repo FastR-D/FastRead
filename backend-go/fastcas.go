@@ -83,6 +83,19 @@ func (a *App) RegisterFastCAS() error {
 	if c.sdk != nil {
 		a.workspaceCAS = c.sdk
 	}
+	if secret := os.Getenv("FASTREAD_SYNC_CLIENT_SECRET"); secret != "" {
+		if c.sdk == nil {
+			return errors.New("FASTREAD_SYNC_CLIENT_SECRET requires FastCAS configuration")
+		}
+		serviceConfig := c.config
+		serviceConfig.ClientID = "fastread-sync"
+		serviceConfig.ClientSecret = secret
+		serviceSDK, err := fastcas.New(serviceConfig, casTransactions{a.Store})
+		if err != nil {
+			return err
+		}
+		a.exchangeCAS = serviceSDK
+	}
 	a.workspaceIssuer = c.config.Issuer
 	a.workspaceClient = c.config.ClientID
 	a.Public("GET /api/auth/fastcas/available", func(w http.ResponseWriter, r *http.Request) error {

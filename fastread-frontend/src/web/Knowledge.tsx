@@ -1,5 +1,11 @@
 import {
+  ActivityRail,
   AssetCard,
+  Card,
+  CardBody,
+  CardHeader,
+  CardFooter,
+  SegmentedControl,
   EmptyState,
   Button,
   Checkbox,
@@ -11,10 +17,21 @@ import {
   TextField,
   Toolbar,
 } from '@fastrd/ui-react'
+import {
+  BookOpen,
+  FileText,
+  FolderOpen,
+  Plus,
+  Upload,
+  ArrowUpRight,
+  MoreHorizontal,
+  Search,
+} from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from './Markdown'
 import { OrganizeButton } from './Organize'
 import IntegrationActions from './Integrations'
+import { AppDialog } from './Chrome'
 type Row = Record<string, any>
 type Props = {
   api: (path: string, method?: string, body?: unknown, key?: string) => Promise<any>
@@ -159,6 +176,7 @@ export default function Knowledge(
   props: Props & {
     initialTag?: string
     onOpenBook?: (id: string) => void
+    onImport?: () => void
   }
 ) {
   const { api, action, openPaper, submitJob, providerId, model, revision } = props
@@ -173,6 +191,10 @@ export default function Knowledge(
   const [selected, setSelected] = useState<string[]>([])
   const [target, setTarget] = useState('')
   const [messages, setMessages] = useState<Row[]>([])
+  const [actionPaper, setActionPaper] = useState<Row | null>(null)
+  const [layout, setLayout] = useState('list')
+  const [paperFilter, setPaperFilter] = useState('')
+  const [sort, setSort] = useState('recent')
   const [matrix, setMatrix] = useState(false)
   const [question, setQuestion] = useState('')
   const [busy, setBusy] = useState(false)
@@ -238,18 +260,35 @@ export default function Knowledge(
       setBusy(false)
     }
   }
+  const visiblePapers = papers
+    .filter(p =>
+      `${p.title} ${(p.metadata?.authors || p.authors || []).join(' ')}`
+        .toLowerCase()
+        .includes(paperFilter.toLowerCase())
+    )
+    .sort((a, b) =>
+      sort === 'title'
+        ? a.title.localeCompare(b.title)
+        : sort === 'year'
+          ? (b.metadata?.year || b.year || 0) - (a.metadata?.year || a.year || 0)
+          : 0
+    )
   const columns = [...new Set(papers.flatMap(p => p.tags || []))].slice(0, 16) as string[]
   return (
     <Section className="knowledge-home grid gap-6 p-5 sm:p-6">
-      <div className="knowledge-hero flex flex-wrap items-center justify-between gap-4">
+      <PanelHeader className="knowledge-hero flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="fastui-heading m-0 text-xl">论文库</h1>
-          <p className="m-0 leading-relaxed break-words">阅读、归类、追问。</p>
         </div>
-        <Button onClick={() => setCreating(!creating)} type="button" variant="primary">
-          新建知识库
-        </Button>
-      </div>
+        <Toolbar label="论文库操作" className="library-heading-actions">
+          <Button onClick={() => setCreating(!creating)} type="button" variant="secondary">
+            <Plus size={16} /> 新建知识库
+          </Button>
+          <Button onClick={props.onImport} variant="primary">
+            <Upload size={16} /> 导入论文
+          </Button>
+        </Toolbar>
+      </PanelHeader>
       {creating && (
         <form
           onSubmit={e => {
@@ -293,26 +332,36 @@ export default function Knowledge(
           </Button>
         </form>
       )}
-      <nav
-        className="book-grid grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
-        aria-label="知识库目录"
-      >
-        <AssetCard
-          label="全部论文"
-          description={`${total} 篇`}
-          className="!p-3"
-          selected={!bookId && !tag}
+      <PanelHeader className="library-section-label">
+        <FolderOpen size={15} />
+        <span>我的知识库</span>
+        <small>{books.length} 个知识库</small>
+        <Button
+          variant="quiet"
+          size="xs"
           onClick={() => {
             setBookId('')
             setTag('')
             setOffset(0)
           }}
-        />
+        >
+          查看全部论文
+        </Button>
+      </PanelHeader>
+      <ActivityRail
+        className="book-grid grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
+        label="知识库目录"
+      >
         {books.map(b => (
           <AssetCard
             key={b.id}
-            className="!p-3"
+            className="library-book-card"
             label={b.name}
+            preview={
+              <span className="book-cover">
+                <BookOpen size={24} />
+              </span>
+            }
             description={`${b.paper_count} 篇${b.description ? ` · ${b.description.slice(0, 80)}` : ['queued', 'running'].includes(b.questions_status) ? ' · 生成研究问题中…' : ''}`}
             selected={bookId === b.id}
             onClick={() => {
@@ -325,11 +374,23 @@ export default function Knowledge(
             }}
           />
         ))}
-      </nav>
+      </ActivityRail>
+      {!books.length && (
+        <div className="library-no-books">
+          <FolderOpen size={23} />
+          <div>
+            <strong>暂无知识库</strong>
+            <p></p>
+          </div>
+          <Button onClick={() => setCreating(true)} variant="quiet">
+            创建知识库
+          </Button>
+        </div>
+      )}
       <PanelHeader className="section-heading">
         <div>
           <h2 className="fastui-heading m-0 text-base">
-            {book?.name || (tag ? `标签：${tag}` : '我的论文')}
+            {book?.name || (tag ? `标签：${tag}` : '全部论文')}
           </h2>
           <p className="m-0 leading-relaxed break-words">{book?.description || `${total} 篇`}</p>
         </div>
@@ -359,8 +420,76 @@ export default function Knowledge(
           </Button>
         </p>
       )}
+
+      {selected.length > 0 && (
+        <Toolbar label="论文批量操作" className="selection-bar">
+          <span className="inline-flex h-7 shrink-0 items-center">已选 {selected.length} 篇</span>
+          <Select
+            aria-label="所选论文加入知识库"
+            value={target}
+            onChange={e => setTarget(e.target.value)}
+            className="w-auto"
+          >
+            <option value="">选择知识库</option>
+            {books.map(b => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+              </option>
+            ))}
+          </Select>
+          <Button
+            className="quiet"
+            disabled={!selected.length || !target}
+            onClick={() =>
+              void action(async () => {
+                await api(`/knowledge-bases/${target}/papers`, 'POST', { paper_ids: selected })
+                setSelected([])
+                await reload()
+              })
+            }
+            type="button"
+            variant="quiet"
+          >
+            加入知识库
+          </Button>
+          <OrganizeButton
+            ids={selected}
+            disabled={
+              !providerId || selected.some(id => !papers.find(p => p.id === id)?.active_version)
+            }
+            body={{ provider_id: providerId, model, knowledge_id: target }}
+            label="AI 整理"
+          />
+          <IntegrationActions api={api} paperIds={selected} providerId={providerId} model={model} />
+        </Toolbar>
+      )}
+      <Toolbar label="论文视图与筛选" className="library-filter-toolbar">
+        <span className="library-search-field">
+          <Search size={16} />
+          <TextField
+            aria-label="筛选本页论文"
+            placeholder="筛选本页标题、作者…"
+            value={paperFilter}
+            onChange={e => setPaperFilter(e.target.value)}
+          />
+        </span>
+        <Select aria-label="论文排序" value={sort} onChange={e => setSort(e.target.value)}>
+          <option value="recent">最近收入</option>
+          <option value="title">标题顺序</option>
+          <option value="year">发表年份</option>
+        </Select>
+        <SegmentedControl
+          label="论文布局"
+          value={layout}
+          onChange={setLayout}
+          options={[
+            { value: 'cards', label: '卡片' },
+            { value: 'list', label: '列表' },
+          ]}
+        />
+      </Toolbar>
       {!!tags.length && (
-        <div className="tag-row flex flex-wrap gap-2">
+        <div className="library-tags tag-row flex flex-wrap gap-2">
           <Button
             className="tag"
             aria-pressed={!tag}
@@ -384,46 +513,11 @@ export default function Knowledge(
           ))}
         </div>
       )}
-      <Toolbar label="论文批量操作" className="selection-bar">
-        <span className="inline-flex h-7 shrink-0 items-center">已选 {selected.length} 篇</span>
-        <Select
-          aria-label="所选论文加入知识库"
-          value={target}
-          onChange={e => setTarget(e.target.value)}
-          className="w-auto"
-        >
-          <option value="">选择知识库</option>
-          {books.map(b => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </Select>
-        <Button
-          className="quiet"
-          disabled={!selected.length || !target}
-          onClick={() =>
-            void action(async () => {
-              await api(`/knowledge-bases/${target}/papers`, 'POST', { paper_ids: selected })
-              setSelected([])
-              await reload()
-            })
-          }
-          type="button"
-          variant="quiet"
-        >
-          加入知识库
-        </Button>
-        <OrganizeButton
-          ids={selected}
-          disabled={
-            !providerId || selected.some(id => !papers.find(p => p.id === id)?.active_version)
-          }
-          body={{ provider_id: providerId, model, knowledge_id: target }}
-          label="AI 整理"
-        />
-        <IntegrationActions api={api} paperIds={selected} providerId={providerId} model={model} />
-      </Toolbar>
+      {paperFilter && (
+        <p className="reading-muted">
+          本页匹配 {visiblePapers.length} / {papers.length} 篇。跨来源检索请使用左侧搜索。
+        </p>
+      )}
       {matrix ? (
         <div
           className="matrix-scroll fastui-table-scroll"
@@ -481,85 +575,76 @@ export default function Knowledge(
           )}
         </div>
       ) : (
-        <div className="knowledge-papers grid grid-cols-1 gap-4 xl:grid-cols-2">
-          {papers.map(p => (
-            <article
+        <div
+          className={`knowledge-papers grid grid-cols-1 gap-4 ${layout === 'list' ? 'paper-list-layout' : 'xl:grid-cols-2'}`}
+        >
+          {visiblePapers.map(p => (
+            <Card
+              role="article"
               key={p.id}
-              className="knowledge-paper fastui-section grid min-w-0 content-start gap-4 p-5"
+              className="knowledge-paper grid min-w-0 content-start gap-4 p-5"
             >
-              <div className="card-top flex flex-wrap items-center justify-between gap-2">
-                <label className="selection-label fastui-field">
-                  <Checkbox
-                    aria-label={`选择论文 ${p.title}`}
-                    checked={selected.includes(p.id)}
-                    onChange={e =>
-                      setSelected(current =>
-                        e.target.checked ? [...current, p.id] : current.filter(id => id !== p.id)
-                      )
-                    }
-                  />
-                </label>
-                <small className="text-xs">
-                  {p.metadata?.year || p.year || '年份待核实'} ·{' '}
-                  {p.metadata?.page_count || p.page_count || '?'} 页
-                </small>
-              </div>
-              <h3 className="fastui-heading m-0 text-sm">
-                <Button
-                  className="paper-title h-auto text-left whitespace-normal"
-                  onClick={() => void action(() => openPaper(p.id))}
-                  type="button"
-                  variant="quiet"
-                >
-                  {p.title}
-                </Button>
-              </h3>
-              <div className="principle grid gap-2">
-                <p className="m-0 leading-relaxed break-words">{p.principle || '尚未整理'}</p>
-              </div>
-              <div className="tag-row flex flex-wrap gap-2">
-                {p.tags?.map((t: string) => (
-                  <Button
-                    key={t}
-                    className="tag"
-                    onClick={() => chooseTag(t)}
-                    type="button"
-                    variant="quiet"
-                  >
-                    # {t}
-                  </Button>
-                ))}
-              </div>
-              <Toolbar className="toolbar" label="操作">
-                <Button
-                  className="quiet"
-                  onClick={() => void action(() => openPaper(p.id))}
-                  type="button"
-                  variant="quiet"
-                >
-                  阅读原文
-                </Button>
-                <OrganizeButton
-                  ids={[p.id]}
-                  disabled={!providerId || !p.active_version}
-                  body={{ provider_id: providerId, model, knowledge_id: bookId }}
+              <CardHeader className="card-top">
+                <Checkbox
+                  aria-label={`选择论文 ${p.title}`}
+                  checked={selected.includes(p.id)}
+                  onChange={e =>
+                    setSelected(current =>
+                      e.target.checked ? [...current, p.id] : current.filter(id => id !== p.id)
+                    )
+                  }
                 />
-                {bookId && (
+                <span className="paper-format">
+                  <FileText size={21} />
+                  <small>PDF</small>
+                </span>
+              </CardHeader>
+              <CardBody className="paper-content">
+                <h3>
                   <Button
-                    className="quiet"
-                    onClick={() =>
-                      void action(async () => {
-                        await api(`/knowledge-bases/${bookId}/papers/${p.id}`, 'DELETE')
-                        await reload()
-                      })
-                    }
-                    type="button"
+                    className="paper-title"
                     variant="quiet"
+                    onClick={() => void action(() => openPaper(p.id))}
                   >
-                    移出
+                    {p.title}
                   </Button>
-                )}
-              </Toolbar>
+                </h3>
+                <p className="paper-authors">
+                  {(p.metadata?.authors || p.authors || []).join(' · ') || '作者信息待补充'}
+                </p>
+                <p className="paper-description">{p.principle}</p>
+                <div className="paper-tags">
+                  {!p.active_version && <span className="paper-pending">待上传 PDF</span>}
+                  {p.tags?.slice(0, 3).map((t: string) => (
+                    <Button key={t} variant="quiet" onClick={() => chooseTag(t)}>
+                      {t}
+                    </Button>
+                  ))}
+                </div>
+              </CardBody>
+              <div className="paper-metadata">
+                <span>{p.metadata?.year || p.year || '年份待核实'}</span>
+                <small>{p.metadata?.page_count || p.page_count || '—'} 页</small>
+              </div>
+              <CardFooter className="paper-actions">
+                <Button
+                  className="paper-open"
+                  variant="quiet"
+                  aria-label="阅读原文"
+                  onClick={() => void action(() => openPaper(p.id))}
+                >
+                  <ArrowUpRight size={17} />
+                  <span>阅读</span>
+                </Button>
+                <Button
+                  variant="icon"
+                  aria-label={`${p.title} 的更多操作`}
+                  title="更多操作"
+                  onClick={() => setActionPaper(p)}
+                >
+                  <MoreHorizontal size={19} />
+                </Button>
+              </CardFooter>
               {!!p.principle_evidence?.length && (
                 <InspectorSection label="原理的原文依据">
                   {p.principle_evidence.map((s: Row, i: number) => (
@@ -582,10 +667,38 @@ export default function Knowledge(
                   ))}
                 </InspectorSection>
               )}
-            </article>
+            </Card>
           ))}
         </div>
       )}
+      <AppDialog open={Boolean(actionPaper)} onClose={() => setActionPaper(null)} title="论文操作">
+        {actionPaper && (
+          <>
+            <h3 className="m-0">{actionPaper.title}</h3>
+            <Toolbar label="论文操作" className="paper-dialog-actions">
+              <OrganizeButton
+                ids={[actionPaper.id]}
+                disabled={!providerId || !actionPaper.active_version}
+                body={{ provider_id: providerId, model, knowledge_id: bookId }}
+              />
+              {bookId && (
+                <Button
+                  variant="quiet"
+                  onClick={() =>
+                    void action(async () => {
+                      await api(`/knowledge-bases/${bookId}/papers/${actionPaper.id}`, 'DELETE')
+                      setActionPaper(null)
+                      await reload()
+                    })
+                  }
+                >
+                  移出知识库
+                </Button>
+              )}
+            </Toolbar>
+          </>
+        )}
+      </AppDialog>
       {!papers.length && (
         <EmptyState title={book ? '把论文放进来，开始建立联系' : '从第一篇论文开始'}>
           <p className="m-0 leading-relaxed break-words">
@@ -628,7 +741,7 @@ export default function Knowledge(
           </PanelHeader>
           <div className="messages grid gap-3">
             {messages.map(m => (
-              <article className={`message fastui-section min-w-0 p-4 ${m.role}`} key={m.id}>
+              <Card role="article" className={`message min-w-0 p-4 ${m.role}`} key={m.id}>
                 <b>{m.role === 'user' ? '你' : 'FastRead'}</b>
                 <ReactMarkdown>{m.content}</ReactMarkdown>
                 {m.evidence?.sources?.map((s: Row, i: number) => (
@@ -647,7 +760,7 @@ export default function Knowledge(
                     <p className="m-0 leading-relaxed break-words">{s.quote}</p>
                   </blockquote>
                 ))}
-              </article>
+              </Card>
             ))}
           </div>
           <form

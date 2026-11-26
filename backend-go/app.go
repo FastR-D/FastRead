@@ -69,6 +69,7 @@ type App struct {
 	Mux                              *http.ServeMux
 	ValidateCASSession               func(Row) error
 	workspaceCAS                     workspaceProvider
+	exchangeCAS                      connectionIssuer
 	workspaceIssuer, workspaceClient string
 }
 
